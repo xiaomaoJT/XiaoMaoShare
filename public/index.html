@@ -575,6 +575,7 @@
   .card > .text-body + .text-body{margin-top:10px}
   .card > .shots + .text-body,.card > .shots + .file{margin-top:10px}
   .card > .file{margin-top:10px}
+  .img-broken{font-size:12px;color:var(--faint);padding:10px 2px}
 </style>
 </head>
 <body>
@@ -1216,7 +1217,16 @@
         img.alt = p.name || '图片';
         img.title = (p.name || '图片') + ' · ' + fmtSize(p.size);
         img.onclick = function () { openLb('/f/' + p.fid); };
-        img.onerror = function () { img.remove(); };
+        img.onerror = function () {
+          img.remove();
+          if (!grid.querySelector('img')) {
+            grid.className = 'shots n1';
+            var note = document.createElement('div');
+            note.className = 'img-broken';
+            note.textContent = '图片无法显示（文件可能已损坏或不完整）';
+            grid.appendChild(note);
+          }
+        };
         grid.appendChild(img);
       });
       el.appendChild(grid);

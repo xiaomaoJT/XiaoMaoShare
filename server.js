@@ -749,7 +749,7 @@ const server = http.createServer((req, res) => {
     const port = server.address().port;
     const st = authState(req);
     json(res, 200, {
-      host: os.hostname(),
+      host: os.hostname().replace(/\.local$/i, ''),
       port,
       urls: lanAddresses().map((n) => `http://${n.address}:${port}`),
       authorized: st.authorized,
