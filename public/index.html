@@ -5,7 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#f2f4f7">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<title>局域网互传</title>
+<link rel="icon" type="image/png" href="/icon.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<title>XiaoMao 互传</title>
 <style>
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   :root{
@@ -33,7 +35,8 @@
   }
   html,body{margin:0;padding:0}
   body{
-    min-height:100vh; color:var(--text); background:var(--bg);
+    min-height:100vh; display:flex; flex-direction:column;
+    color:var(--text); background:var(--bg);
     font:15px/1.55 -apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;
     -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
   }
@@ -50,12 +53,13 @@
   }
   .top-in{max-width:760px;margin:0 auto;padding:10px 16px;display:flex;align-items:center;gap:12px}
   .mark{
-    width:34px;height:34px;border-radius:11px;flex:none;
-    display:grid;place-items:center;color:#fff;font-size:17px;font-weight:600;
-    background:linear-gradient(135deg,#5b7cfa,#8b5cf6);
-    box-shadow:0 4px 14px -4px rgba(92,110,245,.6);
+    width:38px;height:38px;border-radius:12px;flex:none;overflow:hidden;
+    background:#fff;border:1px solid var(--line);
+    box-shadow:0 3px 10px -4px rgba(16,24,40,.28);
   }
+  .mark img{width:100%;height:100%;object-fit:cover;display:block;-webkit-user-drag:none}
   .title{font-size:15px;font-weight:650;letter-spacing:.2px;line-height:1.2}
+  .title .brand{color:#e8562f;font-weight:750;letter-spacing:.1px}
   .addr{font-size:11.5px;color:var(--sub);margin-top:2px;font-variant-numeric:tabular-nums;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:46vw}
   .spacer{flex:1}
@@ -70,7 +74,7 @@
   .dot{width:6px;height:6px;border-radius:50%;background:var(--ok);flex:none;box-shadow:0 0 0 3px rgba(18,184,134,.16)}
 
   /* ---------- 布局 ---------- */
-  .wrap{max-width:760px;margin:0 auto;padding:16px 16px 96px}
+  .wrap{max-width:760px;width:100%;margin:0 auto;padding:16px 16px 40px;flex:1 0 auto}
 
   /* ---------- 输入区 ---------- */
   .composer{
@@ -160,9 +164,23 @@
   .dl:hover{background:var(--accent);border-color:var(--accent);color:#fff}
 
   /* 空态 */
-  .empty{text-align:center;padding:56px 20px;color:var(--faint)}
+  .empty{text-align:center;padding:52px 20px;color:var(--faint)}
   .empty .ico{font-size:34px;opacity:.5;margin-bottom:10px}
+  .empty .logo{
+    width:56px;height:56px;border-radius:17px;margin:0 auto 14px;overflow:hidden;
+    background:#fff;border:1px solid var(--line);box-shadow:0 6px 18px -8px rgba(16,24,40,.3);
+  }
+  .empty .logo img{width:100%;height:100%;object-fit:cover;display:block}
   .empty p{margin:0;font-size:13.5px;line-height:1.7}
+
+  /* 页脚 */
+  .foot{
+    max-width:760px;width:100%;margin:0 auto;padding:20px 16px calc(22px + env(safe-area-inset-bottom));
+    display:flex;align-items:center;justify-content:center;gap:6px;
+    font-size:11.5px;color:var(--faint);letter-spacing:.2px;
+  }
+  .foot b{color:#e8562f;font-weight:700;letter-spacing:.3px}
+  .foot .sep{opacity:.5}
 
   /* 上传中 */
   .up .progress{height:4px;border-radius:99px;background:var(--line-soft);overflow:hidden;margin-top:9px}
@@ -211,9 +229,9 @@
 
 <header class="top">
   <div class="top-in">
-    <div class="mark">⇄</div>
+    <div class="mark"><img src="/icon.png" alt="XiaoMao"></div>
     <div>
-      <div class="title">局域网互传</div>
+      <div class="title"><span class="brand">XiaoMao</span> 互传</div>
       <div class="addr" id="addr">连接中…</div>
     </div>
     <div class="spacer"></div>
@@ -245,6 +263,10 @@
 
   <section class="feed" id="feed"></section>
 </main>
+
+<footer class="foot">
+  <b>XiaoMao</b><span class="sep">·</span><span>局域网互传</span>
+</footer>
 
 <div class="drop" id="drop"><div class="drop-in">松开即可发送</div></div>
 <div class="lightbox" id="lb">
@@ -494,7 +516,8 @@
     if (!items.length && !empty) {
       var e = document.createElement('div');
       e.className = 'empty';
-      e.innerHTML = '<div class="ico">📥</div><p>把文件、图片拖进来，或直接粘贴截图<br>发送后，同一 Wi-Fi 下的设备都能看到</p>';
+      e.innerHTML = '<div class="logo"><img src="/icon.png" alt="XiaoMao"></div>'
+        + '<p>把文件、图片拖进来，或直接粘贴截图<br>发送后，同一 Wi-Fi 下的设备都能看到</p>';
       feed.appendChild(e);
     } else if (items.length && empty) {
       empty.remove();

@@ -142,6 +142,25 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // 静态资源（图标 / 品牌图）
+  if (method === 'GET' && /^\/[\w.-]+\.(png|jpe?g|svg|ico|webp)$/i.test(pathname)) {
+    const filePath = path.join(PUBLIC_DIR, path.basename(pathname));
+    fs.readFile(filePath, (err, buf) => {
+      if (err) {
+        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('Not Found');
+        return;
+      }
+      res.writeHead(200, {
+        'Content-Type': mimeOf(pathname),
+        'Content-Length': buf.length,
+        'Cache-Control': 'public, max-age=86400',
+      });
+      res.end(buf);
+    });
+    return;
+  }
+
   // 服务信息
   if (method === 'GET' && pathname === '/api/info') {
     const port = server.address().port;
