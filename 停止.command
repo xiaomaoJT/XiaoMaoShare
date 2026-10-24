@@ -1,6 +1,6 @@
 #!/bin/zsh
-# 双击停止「局域网互传」
-PIDS=$(lsof -ti tcp:8788 2>/dev/null)
+# 双击停止「XiaoMao 互传」
+PIDS=$(lsof -ti tcp:6767 2>/dev/null)
 if [ -z "$PIDS" ]; then
   echo "服务没有在运行。"
 else

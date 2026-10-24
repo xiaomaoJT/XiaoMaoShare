@@ -2,7 +2,7 @@
 /**
  * 局域网互传 —— 零依赖单文件服务
  *
- * 同一个 Wi-Fi 下，任意手机 / 电脑打开 http://<本机IP>:8788 即可互传
+ * 同一个 Wi-Fi 下，任意手机 / 电脑打开 http://<本机IP>:6767 即可互传
  * 文字、图片、任意文件。所有内容只存在本机 ./data 目录，不出局域网。
  */
 
@@ -22,7 +22,7 @@ const PUBLIC_DIR = path.join(ROOT, 'public');
 const ARGS = process.argv.slice(2);
 const OPEN_ON_START = ARGS.includes('--open') || ARGS.includes('-o');
 
-const BASE_PORT = Number(process.env.PORT || 8788);
+const BASE_PORT = Number(process.env.PORT || 6767);
 const MAX_FILE = 4 * 1024 * 1024 * 1024; // 4GB 单文件上限
 const MAX_TEXT = 50 * 1024;              // 文字消息 50KB 上限
 const IS_WIN = process.platform === 'win32';
