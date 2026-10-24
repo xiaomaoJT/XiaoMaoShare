@@ -1444,7 +1444,6 @@
     ta.addEventListener('keydown', function (e) {
       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); sendAll(); }
     });
-    ta.addEventListener('paste', onPaste);
     autoGrowEl(ta);
     return b;
   }
@@ -1648,7 +1647,7 @@
     });
     compose = [];
     blocksEl.innerHTML = '';
-    addTextBlock(true);
+    addTextBlock(false);
     syncSend();
   }
 
