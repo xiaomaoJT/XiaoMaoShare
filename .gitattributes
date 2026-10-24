@@ -1,0 +1,10 @@
+* text=auto
+
+# Windows 批处理必须是 CRLF，否则可能解析异常
+*.bat text eol=crlf
+# macOS / Linux 启动脚本必须是 LF
+*.command text eol=lf
+*.sh text eol=lf
+
+# 二进制资源不做换行转换
+*.png binary

@@ -11,6 +11,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
+const { exec } = require('child_process');
 
 const ROOT = __dirname;
 const DATA_DIR = path.join(ROOT, 'data');
@@ -18,9 +19,13 @@ const FILES_DIR = path.join(DATA_DIR, 'files');
 const INDEX_FILE = path.join(DATA_DIR, 'index.json');
 const PUBLIC_DIR = path.join(ROOT, 'public');
 
+const ARGS = process.argv.slice(2);
+const OPEN_ON_START = ARGS.includes('--open') || ARGS.includes('-o');
+
 const BASE_PORT = Number(process.env.PORT || 8788);
 const MAX_FILE = 4 * 1024 * 1024 * 1024; // 4GB 单文件上限
 const MAX_TEXT = 50 * 1024;              // 文字消息 50KB 上限
+const IS_WIN = process.platform === 'win32';
 
 fs.mkdirSync(FILES_DIR, { recursive: true });
 
@@ -98,14 +103,21 @@ function readBody(req, limit) {
   });
 }
 
+/**
+ * 局域网 IPv4 地址。跳过虚拟网卡：macOS 的 utun/awdl/bridge、
+ * Windows 的 Hyper-V「vEthernet」/VMware/VirtualBox、以及 Tailscale 之类的隧道，
+ * 这些地址同网段的手机是访问不到的。
+ */
 function lanAddresses() {
   const out = [];
   const nets = os.networkInterfaces();
-  const skipIf = /^(utun|awdl|llw|bridge|gif|stf|anpi|ap\d|vmenet|vmnet|docker|tap|tun)/i;
+  const VIRTUAL = /(utun|awdl|llw|bridge|gif\d|stf|anpi|vmenet|vmnet|docker|tap|tun|vethernet|hyper-?v|vmware|virtualbox|loopback|tailscale|zerotier|wsl|虚拟|蓝牙)/i;
+
   for (const name of Object.keys(nets)) {
-    if (skipIf.test(name)) continue; // 虚拟网卡 / 隧道，同网段设备访问不到
+    if (VIRTUAL.test(name)) continue;
     for (const net of nets[name] || []) {
-      if (net.family !== 'IPv4' || net.internal) continue;
+      if (net.family !== 'IPv4' && net.family !== 4) continue;
+      if (net.internal) continue;
       if (net.address.startsWith('169.254.')) continue; // 链路本地地址
       out.push({ name, address: net.address });
     }
@@ -114,6 +126,20 @@ function lanAddresses() {
   const rank = (ip) =>
     ip.startsWith('192.168.') ? 0 : ip.startsWith('10.') ? 1 : ip.startsWith('172.') ? 2 : 3;
   return out.sort((a, b) => rank(a.address) - rank(b.address));
+}
+
+/** 启动后自动打开浏览器（macOS / Windows / Linux 通用） */
+function openBrowser(url) {
+  const cmd = IS_WIN
+    ? `start "" "${url}"`
+    : process.platform === 'darwin'
+      ? `open "${url}"`
+      : `xdg-open "${url}"`;
+  try {
+    exec(cmd, () => {});
+  } catch {
+    /* 打不开就算了，控制台里有地址 */
+  }
 }
 
 /* ------------------------------------------------------------------ 路由 */
@@ -342,16 +368,23 @@ function listen(port, attempt = 0) {
     const actual = server.address().port;
     const nets = lanAddresses();
     const line = '─'.repeat(46);
-    console.log('\n  局域网互传已启动\n' + line);
+    console.log('\n  XiaoMao 互传已启动\n' + line);
     console.log(`  本机     http://localhost:${actual}`);
     if (nets.length) {
       for (const n of nets) console.log(`  局域网   http://${n.address}:${actual}   (${n.name})`);
+      console.log('\n  手机连同一个 Wi-Fi，在浏览器里打开上面「局域网」地址');
     } else {
-      console.log('  未检测到局域网地址，请确认已连接 Wi-Fi');
+      console.log('  未检测到局域网地址，请确认已连上 Wi-Fi / 网线');
     }
     console.log(line);
     console.log(`  数据目录 ${DATA_DIR}`);
-    console.log(`  已有内容 ${items.length} 条    Ctrl+C 停止\n`);
+    console.log(`  已有内容 ${items.length} 条`);
+    console.log(`  停止服务 ${IS_WIN ? '按 Ctrl+C，或双击「停止.bat」' : '按 Ctrl+C'}\n`);
+
+    if (IS_WIN && nets.length) {
+      console.log('  首次运行如果 Windows 弹出防火墙提示，请勾选「专用网络」并允许。\n');
+    }
+    if (OPEN_ON_START) openBrowser(`http://localhost:${actual}`);
   });
 }
 

@@ -1,0 +1,14 @@
+{
+  "name": "xiaomao-share",
+  "version": "1.0.0",
+  "private": true,
+  "description": "XiaoMao 互传 —— 局域网内文字 / 图片 / 文件互传，零依赖",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js --open",
+    "serve": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
