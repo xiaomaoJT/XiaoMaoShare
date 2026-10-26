@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <link rel="icon" type="image/png" href="/icon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
-<title>XiaoMao 互传</title>
+<title>XM 互传</title>
 <style>
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   [hidden]{display:none!important}
@@ -296,6 +296,25 @@
   .count{font-size:12.5px;color:var(--sub);font-weight:500}
   .link{font-size:12.5px;color:var(--sub);background:none;border:0;cursor:pointer;padding:4px 6px;border-radius:8px;font-family:inherit}
   .link:hover{color:var(--danger);background:var(--card-2)}
+
+  /* 清空全部：低调的小药丸，悬停才露出危险色 */
+  .clear-btn{
+    display:inline-flex;align-items:center;gap:5px;height:29px;padding:0 11px 0 9px;
+    border-radius:999px;background:var(--card);border:1px solid var(--line);
+    color:var(--sub);font-family:inherit;font-size:12px;font-weight:550;letter-spacing:.1px;
+    cursor:pointer;box-shadow:var(--shadow-sm);
+    transition:color .16s ease,border-color .16s ease,background .16s ease,box-shadow .16s ease,transform .12s ease;
+  }
+  .clear-btn svg{width:13px;height:13px;flex:none;opacity:.9;transition:transform .18s ease}
+  /* display:inline-flex 会盖掉 hidden 属性的 UA 样式，必须显式关掉 */
+  .clear-btn[hidden]{display:none}
+  .clear-btn:hover{
+    color:var(--danger);border-color:rgba(229,72,77,.38);
+    background:rgba(229,72,77,.07);box-shadow:0 2px 10px -4px rgba(229,72,77,.45);
+  }
+  .clear-btn:hover svg{transform:translateY(-1px) rotate(-6deg)}
+  .clear-btn:active{transform:scale(.96)}
+  .clear-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
   .feed{display:flex;flex-direction:column;gap:10px}
   .card{
@@ -815,9 +834,9 @@
 
 <header class="top">
   <div class="top-in">
-    <div class="mark"><img src="/logo.gif" alt="XiaoMao"></div>
+    <div class="mark"><img src="/logo.gif" alt="XM"></div>
     <div class="headtext">
-      <div class="title"><span class="brand">XiaoMao</span> 互传</div>
+      <div class="title"><span class="brand">XM</span> 互传</div>
       <div class="addr" id="addr">连接中…</div>
     </div>
     <div class="spacer"></div>
@@ -888,14 +907,21 @@
   <div class="toolbar">
     <span class="count" id="count">载入中…</span>
     <div class="spacer"></div>
-    <button class="link" id="clear" hidden>清空全部</button>
+    <button class="clear-btn" id="clear" hidden title="删除全部内容">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+        <path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"/>
+        <path d="M10 11v6M14 11v6"/>
+      </svg>
+      <span>清空全部</span>
+    </button>
   </div>
 
   <section class="feed" id="feed"></section>
 </main>
 
 <footer class="foot">
-  <b>XiaoMao</b><span class="sep">·</span><span>局域网互传</span>
+  <b>XM</b><span class="sep">·</span><span>局域网互传</span>
 </footer>
 
 <div class="drop" id="drop"><div class="drop-in">松开即可发送</div></div>
@@ -915,7 +941,7 @@
 
 <div class="gate" id="gate">
   <div class="gate-card">
-    <div class="gate-logo"><img src="/logo.gif" alt="XiaoMao"></div>
+    <div class="gate-logo"><img src="/logo.gif" alt="XM"></div>
     <h2 id="gateTitle">需要接入许可</h2>
     <p id="gateDesc"></p>
     <div id="gateBody"></div>
@@ -1306,7 +1332,33 @@
   var pollTimer = null;
   var tickTimer = null;
 
+  /** 设备指纹：授权要靠它认设备（只看 IP 会让换了设备的同一个 IP 白嫖授权） */
+  function setCid(cid) {
+    cid = String(cid || '');
+    if (!cid) return;
+    state.cid = cid;
+    try { localStorage.setItem('xm.cid', cid); } catch (e) {}
+  }
+  function newCid() {
+    var s = '', abc = 'abcdefghijklmnopqrstuvwxyz0123456789';
+    try {
+      var a = new Uint8Array(12);
+      (window.crypto || window.msCrypto).getRandomValues(a);
+      for (var i = 0; i < a.length; i++) s += abc[a[i] % abc.length];
+    } catch (e) {
+      for (var j = 0; j < 12; j++) s += abc[Math.floor(Math.random() * abc.length)];
+    }
+    return s;
+  }
+
+  /** 所有请求都带上本机指纹：服务端的授权是「IP + 指纹」双绑，光有 IP 不放行 */
   function api(path, opt) {
+    opt = opt || {};
+    var headers = {};
+    var k;
+    for (k in (opt.headers || {})) headers[k] = opt.headers[k];
+    if (state.cid) headers['x-xm-cid'] = state.cid;
+    opt.headers = headers;
     return fetch(path, opt).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (d) {
         if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
@@ -1386,6 +1438,7 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ password: v, cid: state.cid, ua: navigator.userAgent })
         }).then(function (d) {
+          if (d.cid && d.cid !== state.cid) { setCid(d.cid); }
           if (d.authorized) return pass(d);
           waiting();
         }).catch(function (e) {
@@ -2017,7 +2070,7 @@
     if (!items.length && !empty) {
       var e = document.createElement('div');
       e.className = 'empty';
-      e.innerHTML = '<div class="logo"><img src="/logo.gif" alt="XiaoMao"></div>'
+      e.innerHTML = '<div class="logo"><img src="/logo.gif" alt="XM"></div>'
         + '<p>把文件、图片拖进来，或直接粘贴截图<br>发送后，同一 Wi-Fi 下的设备都能看到</p>';
       feed.appendChild(e);
     } else if (items.length && empty) {
@@ -2062,9 +2115,8 @@
   function applyHello(d) {
     if (!d) return;
     if (d.me) {
-      state.cid = d.me.cid;
+      setCid(d.me.cid);
       state.me = d.me;
-      localStorage.setItem('xm.cid', d.me.cid);
     }
     if (typeof d.admin === 'boolean') state.admin = d.admin;
     if (typeof d.pending === 'number') state.pending = d.pending;
@@ -2497,7 +2549,7 @@
 
     if (!stem) {
       var d = new Date(), p = function (n) { return (n < 10 ? '0' : '') + n; };
-      stem = 'XiaoMao-笔记-' + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) +
+      stem = 'XM-笔记-' + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) +
         '-' + p(d.getHours()) + p(d.getMinutes());
     }
     return stem + '.md';
@@ -2982,8 +3034,14 @@
     var tag = document.createElement('span');
     tag.className = 'tag';
     tag.hidden = true;
+    var wipe = document.createElement('button');
+    wipe.className = 'mini bad';
+    wipe.textContent = '全部撤销';
+    wipe.hidden = true;
+    wipe.style.marginLeft = 'auto';
     head.appendChild(htxt);
     head.appendChild(tag);
+    head.appendChild(wipe);
     box.appendChild(head);
 
     var listEl = document.createElement('div');
@@ -2991,7 +3049,7 @@
 
     var hint = document.createElement('div');
     hint.className = 'dev-hint';
-    hint.textContent = '同意后长期有效，不用每次重新验证；移除授权后，那台设备要重新输密码并由你再确认一次。';
+    hint.textContent = '授权同时绑定 IP 和设备指纹：同一个 IP 换了设备不会自动放行。移除后那台设备要重新输密码并由你再同意一次。';
     box.appendChild(hint);
 
     function row(name, sub, actions) {
@@ -3050,11 +3108,25 @@
       });
     }
 
+    wipe.onclick = function () {
+      Dialog.confirm({
+        title: '撤销全部设备授权？',
+        desc: '现在所有已授权的设备都会被挡回去，下次访问要重新输入密码、再由你同意。',
+        ok: '全部撤销', danger: true
+      }).then(function (ok) {
+        if (!ok) return;
+        api('/api/devices?all=1', { method: 'DELETE' })
+          .then(function (d) { toast(d.removed ? '已撤销 ' + d.removed + ' 台设备的授权' : '已撤销'); load(); })
+          .catch(function (e) { toast(e.message || '撤销失败'); });
+      });
+    };
+
     function paint(d) {
       var pend = d.pending || [];
       var devs = d.devices || [];
       tag.hidden = !pend.length;
       tag.textContent = pend.length ? pend.length + ' 台待确认' : '';
+      wipe.hidden = !devs.length;
 
       listEl.innerHTML = '';
       pend.forEach(function (p) {
@@ -3065,7 +3137,10 @@
       });
       if (devs.length) {
         devs.forEach(function (v) {
-          listEl.appendChild(row(v.name || v.ip, (v.ip || '') + ' · 已授权', [
+          var sub = (v.ip || '') + ' · 已授权';
+          // 授权绑定了设备指纹：显示后 4 位，方便确认到底放行了哪台
+          if (v.cid) sub += ' · 指纹 ' + String(v.cid).slice(-4);
+          listEl.appendChild(row(v.name || v.ip, sub, [
             { label: '移除', cls: 'bad', fn: function () { removeDevice(v); } }
           ]));
         });
@@ -3078,7 +3153,18 @@
     }
 
     function load() {
-      api('/api/devices').then(paint).catch(function () {});
+      api('/api/devices').then(paint).catch(function (e) {
+        // 别再静默吞掉：看不到列表时必须说明原因，否则很像「列表里根本没有这台设备」
+        wipe.hidden = true;
+        listEl.innerHTML = '';
+        var e2 = document.createElement('div');
+        e2.className = 'dev-empty';
+        var msg = String(e.message || '');
+        if (/HTTP 403/.test(msg)) e2.textContent = '这台浏览器不是主设备，看不到授权列表。请用控制台打印的「本机」地址（带 ?host=）打开。';
+        else if (/HTTP 401/.test(msg)) e2.textContent = '当前设备还没通过接入校验，看不到授权列表。';
+        else e2.textContent = '授权列表读取失败：' + (msg || '未知错误');
+        listEl.appendChild(e2);
+      });
     }
 
     load();
@@ -3535,6 +3621,9 @@
   (async function boot() {
     var addr = $('addr');
     addr.textContent = location.host;
+
+    // 第一次打开就先生成设备指纹，服务端才能把授权绑到这台设备上
+    if (!state.cid) setCid(newCid());
 
     // 主设备令牌：服务端已经种下 cookie，地址栏里的 ?host= 立刻抹掉
     var asHost = /[?&]host=/.test(location.search);

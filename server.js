@@ -831,7 +831,7 @@ const QR = (() => {
 const DEVICES_FILE = path.join(DATA_DIR, 'devices.json');
 const GATE_PASSWORD = String(process.env.SHARE_PASSWORD || 'XM');
 
-// 已授权设备：以 IP 为标识，永久生效，除非主设备移除
+// 已授权设备：IP + 设备指纹（cid）双重绑定，永久生效，除非主设备移除
 let devices = {};
 try {
   const saved = JSON.parse(fs.readFileSync(DEVICES_FILE, 'utf8'));
@@ -840,9 +840,23 @@ try {
   /* 首次运行 */
 }
 
+/**
+ * 一次性迁移：旧版授权只记了 IP，没绑设备指纹。
+ * 后果是一台新设备拿到同一个 IP 就能直接「继承」授权（DHCP 重新分配就会发生）。
+ * 这里把没有 cid 的凭证整条作废，让它重新走「密码 + 主设备同意」。
+ */
+const legacyDeviceIps = [];
+for (const [ip, v] of Object.entries(devices)) {
+  if (!v || typeof v !== 'object' || !v.cid) {
+    delete devices[ip];
+    legacyDeviceIps.push(ip);
+  }
+}
+
 function saveDevices() {
   fs.writeFile(DEVICES_FILE, JSON.stringify(devices, null, 2), () => {});
 }
+if (legacyDeviceIps.length) saveDevices();
 
 /**
  * 主设备身份不能只看 IP：
@@ -891,14 +905,46 @@ function isLoopbackHostHeader(req) {
 
 // 待审批 / 被拒的申请（临时，不落盘）
 const pending = new Map(); // ip -> { ip, cid, name, model, at, status }
+const lastCidWarn = new Map(); // ip -> 上次提示时间（防止刷屏）
 
-function authState(req) {
+/** 取请求里的设备指纹：显式传参 > 请求头 > URL 查询串 */
+function cidOf(req, given) {
+  const c = given != null ? given : (req.headers['x-xm-cid'] || '');
+  return String(c || '').slice(0, 64);
+}
+
+/**
+ * 这个 IP 上的已授权记录，能不能算到当前这台设备头上。
+ * 只认 IP 是不够的：同一 IP 换台设备（DHCP 重新分配、手动改 IP）会白嫖授权。
+ * 所以授权必须同时满足「同 IP」+「同设备指纹」。
+ * 但 /f/ 下载、二维码这类由 <img>/<a> 直接发起的请求带不了自定义头，
+ * 那种情况（strict=false）没有指纹可用，退化为按 IP 放行，否则图片全裂。
+ */
+function deviceFor(req, given, strict) {
+  const entry = devices[clientIp(req)];
+  if (!entry) return null;
+  if (!entry.cid) return entry; // 理论上迁移后不会有，兜底
+  const cid = cidOf(req, given);
+  if (!cid) return strict ? null : entry;
+  return entry.cid === cid ? entry : null;
+}
+
+function authState(req, given, strict) {
   if (isHostRequest(req)) return { authorized: true, status: 'host' };
   const ip = clientIp(req);
-  if (devices[ip]) return { authorized: true, status: 'approved' };
+  if (deviceFor(req, given, strict)) return { authorized: true, status: 'approved' };
   const p = pending.get(ip);
   if (p && p.status === 'rejected') return { authorized: false, status: 'rejected' };
   if (p) return { authorized: false, status: 'pending' };
+  if (devices[ip]) {
+    // 这个 IP 有授权，但不属于当前这台设备（换设备 / 清了浏览器存储）
+    const now = Date.now();
+    if ((lastCidWarn.get(ip) || 0) + 10000 < now) {
+      lastCidWarn.set(ip, now);
+      console.log(`  ${ip} 的授权属于另一台设备（${devices[ip].name || '未知'}），本次按未授权处理`);
+    }
+    return { authorized: false, status: 'none' };
+  }
   return { authorized: false, status: 'none' };
 }
 
@@ -1079,7 +1125,7 @@ const server = http.createServer((req, res) => {
       .then((raw) => {
         let body = {};
         try { body = JSON.parse(raw || '{}'); } catch {}
-        const st = authState(req);
+        const st = authState(req, body.cid);
         if (st.authorized) return json(res, 200, { authorized: true, status: st.status });
 
         if (String(body.password || '').trim() !== GATE_PASSWORD) {
@@ -1090,16 +1136,18 @@ const server = http.createServer((req, res) => {
         const ua = String(body.ua || req.headers['user-agent'] || '').slice(0, 300);
         const model = modelFromUA(ua);
         const prev = pending.get(ip);
+        // 没有设备指纹就现生成一个，回给前端存起来（否则授权没法绑到这台设备上）
+        const cid = cidOf(req, body.cid) || crypto.randomBytes(9).toString('base64url');
         pending.set(ip, {
           ip,
-          cid: String(body.cid || '').slice(0, 64),
+          cid,
           model,
           name: prev && prev.name ? prev.name : `${model} (${ip})`,
           at: prev && prev.at ? prev.at : Date.now(),
           status: 'pending',
         });
         console.log(`  新设备申请接入：${model} (${ip}) —— 等待主设备确认`);
-        json(res, 200, { authorized: false, status: 'pending', ip });
+        json(res, 200, { authorized: false, status: 'pending', ip, cid });
       })
       .catch(() => json(res, 400, { error: 'bad request' }));
     return;
@@ -1111,7 +1159,7 @@ const server = http.createServer((req, res) => {
       .then((raw) => {
         let body = {};
         try { body = JSON.parse(raw || '{}'); } catch { /* 空 body 也算 */ }
-        const st = authState(req);
+        const st = authState(req, body.cid, true);
 
         if (!st.authorized) {
           return json(res, 200, {
@@ -1143,7 +1191,9 @@ const server = http.createServer((req, res) => {
   }
 
   /* ---------------- 准入闸门：以下接口都要求已授权 ---------------- */
-  const auth = authState(req);
+  // /f/ 下载和二维码是 <img>/<a> 直接发起的，带不了设备指纹，只能按 IP 认
+  const lenient = pathname.startsWith('/f/') || pathname === '/api/qr' || pathname === '/api/info';
+  const auth = authState(req, url.searchParams.get('cid') || undefined, !lenient);
   if (!auth.authorized) {
     return json(res, 401, {
       error: auth.status === 'pending' ? '等待主设备确认' : '设备未授权',
@@ -1164,6 +1214,15 @@ const server = http.createServer((req, res) => {
       });
     }
     if (method === 'DELETE') {
+      // ?all=1 一键撤销全部授权，强迫所有设备重新验证
+      if (url.searchParams.get('all') === '1') {
+        const n = Object.keys(devices).length;
+        devices = {};
+        saveDevices();
+        for (const [k, p] of pending) if (p.status !== 'rejected') pending.delete(k);
+        console.log(`  主设备撤销了全部设备授权（${n} 台）`);
+        return json(res, 200, { ok: true, removed: n });
+      }
       const ip = String(url.searchParams.get('ip') || '').slice(0, 64);
       if (devices[ip]) {
         delete devices[ip];
@@ -1188,6 +1247,7 @@ const server = http.createServer((req, res) => {
           if (!p) return json(res, 404, { error: '申请已失效' });
           devices[ip] = {
             ip,
+            cid: p.cid || '',
             name: p.name || ip,
             model: p.model || '',
             firstSeen: p.at || Date.now(),
@@ -1515,7 +1575,7 @@ const server = http.createServer((req, res) => {
     if (!tgReady()) return json(res, 400, { error: '还没配置好 Token 或接收人' });
     tgCall('sendMessage', {
       chat_id: tg.chatId,
-      text: '🤖 XiaoMao 互传 · 测试消息\n\n配置已生效。之后在任意设备输入密码解锁，就能把消息同步到这里。',
+      text: '🤖 XM 互传 · 测试消息\n\n配置已生效。之后在任意设备输入密码解锁，就能把消息同步到这里。',
       disable_web_page_preview: true,
     })
       .then(() => json(res, 200, { ok: true }))
@@ -1687,7 +1747,7 @@ function listen(port, attempt = 0) {
     const nets = lanAddresses();
     const line = '─'.repeat(46);
     const hostUrl = `http://localhost:${actual}/?host=${hostToken}`;
-    console.log('\n  XiaoMao 互传已启动\n' + line);
+    console.log('\n  XM 互传已启动\n' + line);
     console.log(`  本机     ${hostUrl}`);
     if (nets.length) {
       for (const n of nets) console.log(`  局域网   http://${n.address}:${actual}   (${n.name})`);
@@ -1698,6 +1758,20 @@ function listen(port, attempt = 0) {
     console.log(line);
     console.log(`  数据目录 ${DATA_DIR}`);
     console.log(`  已有内容 ${items.length} 条`);
+
+    // 把已授权设备打到控制台，省得「到底谁被放行了」全靠猜
+    const approved = deviceList();
+    if (legacyDeviceIps.length) {
+      console.log(`  授权重置 旧版按 IP 记录的授权已作废 ${legacyDeviceIps.length} 条（${legacyDeviceIps.join('、')}）`);
+      console.log('            这些设备下次访问要重新输入密码并重新同意');
+    }
+    if (approved.length) {
+      console.log(`  已授权   ${approved.length} 台`);
+      for (const d of approved) console.log(`           ${d.name || d.ip}   ${d.ip}`);
+    } else {
+      console.log('  已授权   暂无（除主设备外，谁都要先过密码这一关）');
+    }
+
     console.log('  主设备   用上面的「本机」地址打开一次（带 ?host= 会自动记住），即拥有删除 / 权限设置');
     console.log(`  其他设备 用「局域网」地址打开，需输入密码 ${GATE_PASSWORD}，再由主设备同意`);
     console.log(`  停止服务 ${IS_WIN ? '按 Ctrl+C，或双击「停止.bat」' : '按 Ctrl+C'}\n`);
