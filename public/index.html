@@ -101,7 +101,7 @@
   .chip{
     display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 10px;border-radius:999px;
     background:var(--card); border:1px solid var(--line); color:var(--sub);
-    font-size:12.5px;cursor:pointer;white-space:nowrap;max-width:150px;
+    font-size:12.5px;cursor:pointer;white-space:nowrap;max-width:250px;
     box-shadow:var(--shadow-sm); transition:.15s; font-family:inherit;
   }
   .chip:hover{border-color:var(--accent);color:var(--text)}
@@ -153,12 +153,6 @@
     box-shadow:var(--shadow); transition:border-color .18s;
   }
   .composer:focus-within{border-color:var(--accent)}
-  .composer textarea{
-    width:100%;min-height:62px;max-height:40vh;resize:none;border:0;outline:0;
-    background:transparent;color:var(--text);font:inherit;padding:4px 6px;display:block;
-  }
-  .composer textarea::placeholder{color:var(--faint)}
-  .composer textarea:disabled{cursor:not-allowed;opacity:.75}
   .bar{display:flex;align-items:center;gap:8px;margin-top:8px}
   .btn{
     appearance:none;border:0;cursor:pointer;font:inherit;font-size:13.5px;font-weight:600;
@@ -225,7 +219,7 @@
   .peer-row{display:flex;gap:8px;overflow-x:auto;padding:2px 2px 5px;scrollbar-width:none}
   .peer-row::-webkit-scrollbar{display:none}
   .peer{
-    display:flex;align-items:center;gap:8px;flex:none;max-width:250px;height:38px;
+    display:flex;align-items:center;gap:8px;flex:none;max-width:320px;height:38px;
     background:var(--card);border:1px solid var(--line);border-radius:12px;padding:0 11px 0 9px;
     box-shadow:var(--shadow-sm);
   }
@@ -272,9 +266,9 @@
 
   .text-body{font-size:14.5px;line-height:1.62;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere}
   .text-body.clamp{
-    max-height:7.4em;overflow:hidden;
-    -webkit-mask-image:linear-gradient(to bottom,#000 56%,transparent);
-    mask-image:linear-gradient(to bottom,#000 56%,transparent);
+    max-height:10.6em;overflow:hidden;
+    -webkit-mask-image:linear-gradient(to bottom,#000 68%,transparent);
+    mask-image:linear-gradient(to bottom,#000 68%,transparent);
   }
   .more{
     display:inline-flex;align-items:center;gap:4px;margin-top:2px;padding:3px 0;
@@ -284,6 +278,50 @@
   .more:hover{text-decoration:underline}
   .text-body a{color:var(--accent);text-decoration:none;border-bottom:1px solid rgba(76,110,245,.35)}
   .text-body a:hover{border-bottom-color:var(--accent)}
+
+  /* ---- Markdown 渲染（消息卡片 / 输入预览共用） ---- */
+  .md{white-space:normal;font-size:14.5px;line-height:1.66;word-break:break-word;overflow-wrap:anywhere}
+  .md>*:first-child{margin-top:0}
+  .md>*:last-child{margin-bottom:0}
+  .md p{margin:0 0 .6em}
+  .md h1,.md h2,.md h3,.md h4,.md h5,.md h6{margin:.9em 0 .38em;line-height:1.3;font-weight:750;letter-spacing:-.012em}
+  .md h1{font-size:1.44em}
+  .md h2{font-size:1.26em}
+  .md h3{font-size:1.12em}
+  .md h4{font-size:1.02em}
+  .md h5,.md h6{font-size:.94em;color:var(--sub)}
+  .md ul,.md ol{margin:.22em 0 .7em;padding-left:1.32em}
+  .md li{margin:.18em 0}
+  .md ul{list-style:disc}
+  .md ol{list-style:decimal}
+  .md li::marker{color:var(--faint)}
+  .md blockquote{margin:.55em 0;padding:.1em 0 .1em .82em;border-left:3px solid var(--line);color:var(--sub)}
+  .md blockquote p:last-child{margin-bottom:0}
+  .md hr{border:0;border-top:1px solid var(--line);margin:1.05em 0}
+  .md a{color:var(--accent);text-decoration:none;border-bottom:1px solid rgba(76,110,245,.35)}
+  .md a:hover{border-bottom-color:var(--accent)}
+  .md code{
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.9em;
+    background:var(--line-soft);border-radius:5px;padding:1.5px 4px;
+  }
+  .md .code{margin:.66em 0;border:1px solid var(--line);border-radius:11px;overflow:hidden;background:var(--card-2)}
+  .md .code-hd{display:flex;align-items:center;gap:8px;padding:5px 8px 5px 11px;border-bottom:1px solid var(--line-soft)}
+  .md .code-lang{
+    font-size:10.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--faint);
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  .md .code-copy{
+    margin-left:auto;height:23px;padding:0 8px;border:0;border-radius:6px;background:transparent;
+    color:var(--faint);font:inherit;font-size:11.5px;cursor:pointer;
+  }
+  .md .code-copy:hover{background:var(--line);color:var(--text)}
+  .md .code pre{margin:0;padding:10px 12px;overflow:auto;max-height:380px}
+  .md .code code{background:none;padding:0;border-radius:0;font-size:12.5px;line-height:1.62;white-space:pre;display:block}
+  .md table{border-collapse:collapse;margin:.6em 0;font-size:.94em;display:block;overflow-x:auto}
+  .md th,.md td{border:1px solid var(--line);padding:5px 9px;text-align:left}
+  .md th{background:var(--card-2);font-weight:650}
+  .md del{opacity:.65}
+  .md .task{margin-right:4px}
 
   .thumb{
     display:block;max-width:100%;max-height:340px;border-radius:11px;cursor:zoom-in;
@@ -534,7 +572,7 @@
   .qr-tip{font-size:11.5px;color:var(--faint);text-align:center;line-height:1.65;max-width:280px}
 
   /* ---- 输入区：文字块 / 附件块，可任意交替 ---- */
-  .blocks{display:flex;flex-direction:column;gap:1px;min-height:58px}
+  .blocks{display:flex;flex-direction:column;gap:1px;min-height:38px}
   .blk-tx{
     width:100%;min-height:26px;max-height:40vh;resize:none;border:0;outline:0;overflow-y:auto;
     background:transparent;color:var(--text);font:inherit;line-height:1.62;padding:5px 6px;display:block;
@@ -557,12 +595,76 @@
   .blk-pg{height:3px;border-radius:99px;background:var(--line-soft);overflow:hidden;margin-top:5px}
   .blk-pg i{display:block;height:100%;width:0;background:var(--accent);transition:width .18s}
   .blk-x{
-    width:24px;height:24px;flex:none;padding:0;border:0;border-radius:7px;background:transparent;
+    width:28px;height:28px;flex:none;padding:0;border:0;border-radius:8px;background:transparent;
     color:var(--faint);cursor:pointer;display:grid;place-items:center;font-size:15px;line-height:1;
   }
   .blk-x:hover{background:var(--line);color:var(--danger)}
   .blk-md.bad{border-color:var(--danger)}
   .blk-md.bad .blk-sz{color:var(--danger)}
+
+  /* ---- 输入区工具条：表情 / 分隔符 / Markdown 快捷 ---- */
+  .mtools-wrap{display:flex;align-items:center;gap:4px;margin-top:6px}
+  .mtools{flex:1;min-width:0;display:flex;align-items:center;gap:3px;overflow-x:auto;scrollbar-width:none}
+  .mtools::-webkit-scrollbar{display:none}
+  .composer.prev-on .mtools{display:none}
+  .pvbtn{flex:none;margin-left:auto}
+  .tool{
+    flex:none;height:27px;padding:0 8px;border:1px solid transparent;border-radius:8px;background:transparent;
+    color:var(--sub);font:inherit;font-size:12.2px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;
+    white-space:nowrap;transition:.14s;
+  }
+  .tool:hover{background:var(--card-2);color:var(--text)}
+  .tool.on{background:var(--accent-soft);color:var(--accent);border-color:rgba(76,110,245,.3)}
+  .tool i{font-style:normal;font-weight:800;font-size:11.5px;letter-spacing:.2px}
+  .tool.mono i{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:10.5px}
+  .tool.emoji span{font-size:15px;line-height:1}
+
+  .emoji-pop{
+    position:fixed;z-index:160;width:min(330px,92vw);background:var(--card);border:1px solid var(--line);
+    border-radius:14px;box-shadow:0 20px 48px -14px rgba(16,24,40,.42);padding:8px;display:none;
+  }
+  .emoji-pop.on{display:block;animation:tin .16s ease}
+  .emoji-tabs{display:flex;gap:2px;margin-bottom:6px}
+  .emoji-tab{
+    height:24px;padding:0 8px;border:0;border-radius:7px;background:transparent;color:var(--faint);
+    font:inherit;font-size:11.5px;cursor:pointer;
+  }
+  .emoji-tab.on{background:var(--accent-soft);color:var(--accent);font-weight:650}
+  .emoji-grid{display:grid;grid-template-columns:repeat(8,1fr);gap:1px;max-height:176px;overflow-y:auto}
+  .emoji-grid button{
+    height:31px;border:0;border-radius:7px;background:transparent;cursor:pointer;font-size:19px;
+    line-height:1;display:grid;place-items:center;padding:0;
+  }
+  .emoji-grid button:hover{background:var(--card-2)}
+  @media (max-width:520px){
+    /* 手机上表情面板改成底部抽屉，别盖住输入框 */
+    .emoji-pop{
+      left:0!important;right:0;top:auto!important;bottom:0;width:auto;border-radius:16px 16px 0 0;
+      padding:10px 10px calc(10px + env(safe-area-inset-bottom));
+      box-shadow:0 -12px 40px -12px rgba(16,24,40,.45);
+    }
+    .emoji-pop.on{animation:sheetUp .22s cubic-bezier(.2,.8,.3,1)}
+    .emoji-grid{grid-template-columns:repeat(8,1fr);max-height:36vh}
+    .mtools{
+      -webkit-mask-image:linear-gradient(to right,#000 90%,rgba(0,0,0,.2));
+      mask-image:linear-gradient(to right,#000 90%,rgba(0,0,0,.2));
+    }
+  }
+  @keyframes sheetUp{from{transform:translateY(14px);opacity:.6}to{transform:none;opacity:1}}
+
+  /* ---- 输入区预览模式 ---- */
+  .mdp{display:none;padding:2px 4px 0;min-height:44px}
+  .composer.prev-on .blocks{display:none}
+  .composer.prev-on .mdp{display:block}
+  .mdp-empty{color:var(--faint);font-size:13px;padding:8px 2px}
+  .mdp-atts{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
+  .mdp-att{
+    display:inline-flex;align-items:center;gap:6px;max-width:100%;height:26px;padding:0 9px;
+    border-radius:8px;background:var(--card-2);border:1px solid var(--line);font-size:12px;color:var(--sub);
+  }
+  .mdp-att b{font-weight:650;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:190px}
+  .mdp-att i{font-style:normal;font-size:11px;color:var(--faint)}
+  .tool:disabled{opacity:.38;cursor:not-allowed}
 
   /* ---- 卡片里的图文混排 ---- */
   .shots{display:grid;gap:6px;margin-top:9px}
@@ -599,8 +701,24 @@
 
 <div class="composer-bar" id="composerBar">
   <div class="composer-wrap">
-    <section class="composer">
+    <section class="composer" id="composer">
       <div class="blocks" id="blocks"></div>
+      <div class="mdp" id="mdp"></div>
+      <div class="mtools-wrap" id="mtoolsWrap">
+        <div class="mtools" id="mtools">
+          <button type="button" class="tool emoji" data-tool="emoji" title="插入表情"><span>😊</span></button>
+          <button type="button" class="tool" data-tool="hr" title="插入分隔符">— 分隔</button>
+          <button type="button" class="tool" data-tool="h" title="标题"><i>H</i></button>
+          <button type="button" class="tool" data-tool="bold" title="加粗"><i>B</i></button>
+          <button type="button" class="tool" data-tool="italic" title="斜体"><i style="font-style:italic">I</i></button>
+          <button type="button" class="tool mono" data-tool="code" title="行内代码"><i>&lt;/&gt;</i></button>
+          <button type="button" class="tool mono" data-tool="block" title="代码块"><i>{ }</i></button>
+          <button type="button" class="tool" data-tool="quote" title="引用">❝</button>
+          <button type="button" class="tool" data-tool="list" title="列表">• 列表</button>
+          <button type="button" class="tool" data-tool="link" title="链接">🔗 链接</button>
+        </div>
+        <button type="button" class="tool pvbtn" data-tool="preview" id="previewBtn" title="预览 Markdown 效果">预览</button>
+      </div>
       <div class="bar">
         <button class="to-chip" id="toBtn" title="选择发送对象">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s7-4.5 7-10V6l-7-3-7 3v5c0 5.5 7 10 7 10z"/></svg>
@@ -673,12 +791,163 @@
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
     });
   }
-  function linkify(text) {
-    return esc(text).replace(/(https?:\/\/[^\s<]+)/g, function (m) {
-      var t = m.replace(/[.,;:!?)]+$/, '');
-      var tail = m.slice(t.length);
-      return '<a href="' + t + '" target="_blank" rel="noopener">' + t + '</a>' + tail;
+  /* ============================================================ Markdown */
+  /** 只放行 http(s) / mailto，避免 javascript: 之类的链接 */
+  function safeUrl(u) {
+    var s = String(u || '').trim();
+    if (!/^(https?:\/\/|mailto:)/i.test(s)) return '#';
+    return s.replace(/</g, '%3C').replace(/>/g, '%3E').replace(/"/g, '%22').replace(/'/g, '%27');
+  }
+
+  /** 行内语法：代码、链接、粗体、斜体、删除线 */
+  function mdInline(raw) {
+    var slots = [];
+    var s = esc(raw);
+    // 行内代码先占位，免得里面的 * _ 被当成强调
+    s = s.replace(/`([^`\n]+)`/g, function (m, c) {
+      slots.push('<code>' + c + '</code>');
+      return '\u0001' + (slots.length - 1) + '\u0001';
     });
+    // 图片语法退化成链接（不加载第三方资源）
+    s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, function (m, alt, url) {
+      return '<a href="' + safeUrl(url) + '" target="_blank" rel="noopener">' + (alt || url) + '</a>';
+    });
+    s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, function (m, t, url) {
+      return '<a href="' + safeUrl(url) + '" target="_blank" rel="noopener">' + t + '</a>';
+    });
+    s = s.replace(/(^|[\s(（])(https?:\/\/[^\s<]+)/g, function (m, pre, url) {
+      var t = url.replace(/[.,;:!?)]+$/, '');
+      return pre + '<a href="' + safeUrl(t) + '" target="_blank" rel="noopener">' + t + '</a>' + url.slice(t.length);
+    });
+    s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/(^|[^\w])__([^_]+)__(?![\w])/g, '$1<strong>$2</strong>');
+    s = s.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
+    s = s.replace(/(^|[^\w_])_([^_\n]+)_(?![\w])/g, '$1<em>$2</em>');
+    s = s.replace(/~~([^~]+)~~/g, '<del>$1</del>');
+    return s.replace(/\u0001(\d+)\u0001/g, function (m, i) { return slots[+i]; });
+  }
+
+  function mdCells(line) {
+    return line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(function (c) { return c.trim(); });
+  }
+
+  function mdCode(code, lang) {
+    var l = String(lang || '').toLowerCase().slice(0, 16);
+    return '<div class="code">' +
+      '<div class="code-hd"><span class="code-lang">' + (l ? esc(l) : '代码') + '</span>' +
+      '<button type="button" class="code-copy">复制</button></div>' +
+      '<pre><code>' + esc(code) + '</code></pre></div>';
+  }
+
+  function mdListItem(t) {
+    var m = /^\[([ xX])\]\s+([\s\S]*)$/.exec(t);
+    if (m) return '<li><span class="task">' + (m[1] === ' ' ? '☐' : '☑') + '</span>' + mdInline(m[2]) + '</li>';
+    return '<li>' + mdInline(t) + '</li>';
+  }
+
+  var MD_HR = /^ {0,3}([-*_])[ \t]*\1[ \t]*\1[-*_ \t]*$/;
+  var MD_FENCE = /^ {0,3}(`{3,}|~{3,})[ \t]*([^\s`]*)[ \t]*$/;
+  var MD_HEAD = /^ {0,3}(#{1,6})[ \t]+(.*?)[ \t]*#*[ \t]*$/;
+  var MD_QUOTE = /^ {0,3}>/;
+  var MD_ITEM = /^ {0,3}([-*+]|\d{1,9}[.)])[ \t]+(.*)$/;
+
+  /** 把一段 Markdown 变成 HTML（先转义，再套标签，不会执行任何脚本） */
+  function mdToHtml(src) {
+    var lines = String(src == null ? '' : src).replace(/\r\n?/g, '\n').split('\n');
+    var out = [], i = 0, n = lines.length;
+
+    while (i < n) {
+      var line = lines[i];
+
+      if (!line.trim()) { i++; continue; }
+
+      // 围栏代码块
+      var fm = MD_FENCE.exec(line);
+      if (fm) {
+        var mark = fm[1][0], need = fm[1].length, buf = [];
+        i++;
+        while (i < n) {
+          var close = lines[i].match(/^ {0,3}(`{3,}|~{3,})[ \t]*$/);
+          if (close && close[1][0] === mark && close[1].length >= need) { i++; break; }
+          buf.push(lines[i]);
+          i++;
+        }
+        out.push(mdCode(buf.join('\n'), fm[2]));
+        continue;
+      }
+
+      // 分隔线
+      if (MD_HR.test(line)) { out.push('<hr>'); i++; continue; }
+
+      // 标题
+      var hm = MD_HEAD.exec(line);
+      if (hm) {
+        var lv = hm[1].length;
+        out.push('<h' + lv + '>' + mdInline(hm[2]) + '</h' + lv + '>');
+        i++;
+        continue;
+      }
+
+      // 引用（可跨行）
+      if (MD_QUOTE.test(line)) {
+        var q = [];
+        while (i < n && lines[i].trim()) {
+          q.push(lines[i].replace(/^ {0,3}>[ \t]?/, ''));
+          i++;
+        }
+        out.push('<blockquote>' + mdToHtml(q.join('\n')) + '</blockquote>');
+        continue;
+      }
+
+      // 表格
+      if (line.indexOf('|') > -1 && i + 1 < n) {
+        var sep = mdCells(lines[i + 1]);
+        var isTable = sep.length && sep.every(function (c) { return /^:?-{2,}:?$/.test(c); });
+        if (isTable) {
+          var head = mdCells(line), rows = [];
+          i += 2;
+          while (i < n && lines[i].indexOf('|') > -1 && lines[i].trim()) { rows.push(mdCells(lines[i])); i++; }
+          var html = '<table><thead><tr>' +
+            head.map(function (c) { return '<th>' + mdInline(c) + '</th>'; }).join('') +
+            '</tr></thead><tbody>' +
+            rows.map(function (r) {
+              return '<tr>' + head.map(function (_, k) {
+                return '<td>' + mdInline(r[k] == null ? '' : r[k]) + '</td>';
+              }).join('') + '</tr>';
+            }).join('') + '</tbody></table>';
+          out.push(html);
+          continue;
+        }
+      }
+
+      // 列表
+      if (MD_ITEM.test(line)) {
+        var ordered = /\d/.test(MD_ITEM.exec(line)[1]);
+        var items = [];
+        while (i < n) {
+          var im = MD_ITEM.exec(lines[i]);
+          if (!im) break;
+          items.push(im[2]);
+          i++;
+        }
+        var tag = ordered ? 'ol' : 'ul';
+        out.push('<' + tag + '>' + items.map(mdListItem).join('') + '</' + tag + '>');
+        continue;
+      }
+
+      // 段落（连续非空行，行内换行保留）
+      var para = [];
+      while (i < n && lines[i].trim() &&
+        !MD_FENCE.test(lines[i]) && !MD_HEAD.test(lines[i]) && !MD_HR.test(lines[i]) &&
+        !MD_QUOTE.test(lines[i]) && !MD_ITEM.test(lines[i])) {
+        para.push(lines[i]);
+        i++;
+      }
+      if (!para.length) { i++; continue; }
+      out.push('<p>' + para.map(function (l) { return mdInline(l.replace(/\s+$/, '')); }).join('<br>') + '</p>');
+    }
+
+    return '<div class="md">' + out.join('') + '</div>';
   }
   function fmtSize(n) {
     if (n == null) return '';
@@ -1121,6 +1390,13 @@
     });
     pickBtn.disabled = !attachOK;
 
+    var tools = $('mtools');
+    if (tools) {
+      Array.prototype.forEach.call(tools.querySelectorAll('.tool'), function (t) {
+        if (t.dataset.tool !== 'preview') t.disabled = !textOK;
+      });
+    }
+
     var msg = '';
     if (!state.admin) {
       if (!s.allowSend) msg = '主设备已关闭其他设备的发送权限，当前只能查看和下载';
@@ -1134,8 +1410,7 @@
     if (msg) hintEl.hidden = true;
     else syncSend();
 
-    var sb = $('settingsBtn');
-    sb.hidden = !state.admin;
+    var sb = $('settingsBtn');    sb.hidden = !state.admin;
     sb.classList.toggle('admin', state.admin);
     if (!sb.firstChild) sb.innerHTML = IGEAR;
     sb.classList.toggle('dot', state.admin && state.pending > 0);
@@ -1238,7 +1513,7 @@
         flushImages();
         var body = document.createElement('div');
         body.className = 'text-body';
-        body.innerHTML = linkify(p.text);
+        body.innerHTML = mdToHtml(p.text);
         el.appendChild(body);
       } else if (p.kind === 'image') {
         run.push(p);
@@ -1281,10 +1556,10 @@
     return row;
   }
 
-  /** 长内容默认折叠：单个文字段超过约 5 行才收起并给「展开全文」 */
+  /** 长内容默认折叠：超过约 7 行才收起并给「展开全文」 */
   function maybeClamp(el) {
     el.querySelectorAll('.text-body').forEach(function (body) {
-      if (body.scrollHeight <= 138) return;
+      if (body.scrollHeight <= 180) return;
       body.classList.add('clamp');
       var btn = document.createElement('button');
       btn.type = 'button';
@@ -1428,7 +1703,8 @@
    * 所以「文字 → 图片 → 文字」这种图文混排天然成立。
    */
   var blocksEl = $('blocks');
-  var compose = [];   // { type:'text', el } | { type:'media', el, file, fid, ... }
+  var compose = [];      // { type:'text', el } | { type:'media', el, file, fid, ... }
+  var lastText = null;   // 最近获得焦点的文字块，工具条往这里插
 
   function autoGrowEl(ta) {
     ta.style.height = 'auto';
@@ -1440,12 +1716,62 @@
     ta.className = 'blk-tx';
     ta.rows = 1;
     var b = { type: 'text', el: ta };
+
     ta.addEventListener('input', function () { autoGrowEl(ta); syncSend(); });
+    ta.addEventListener('focus', function () { lastText = b; });
     ta.addEventListener('keydown', function (e) {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); sendAll(); }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); sendAll(); return; }
+
+      var atStart = ta.selectionStart === 0 && ta.selectionEnd === 0;
+      if (!atStart) return;
+      var i = compose.indexOf(b);
+
+      // 段首退格：删掉前一个附件，或把这一段并回前一段
+      if (e.key === 'Backspace' && i > 0) {
+        e.preventDefault();
+        var prev = compose[i - 1];
+        if (prev.type === 'media') removeBlock(prev, true);
+        else mergeIntoPrev(b, prev, true);
+        return;
+      }
+
+      // 上箭头：跳到上一个文字块末尾，整个输入区读起来像一块
+      if (e.key === 'ArrowUp') {
+        for (var k = i - 1; k >= 0; k--) {
+          if (compose[k].type === 'text') {
+            e.preventDefault();
+            compose[k].el.focus();
+            var len = compose[k].el.value.length;
+            compose[k].el.selectionStart = compose[k].el.selectionEnd = len;
+            return;
+          }
+        }
+      }
     });
+
     autoGrowEl(ta);
     return b;
+  }
+
+  /** 把一段并回前一段，光标留在接缝处 */
+  function mergeIntoPrev(b, prev, keepFocus) {
+    var head = prev.el.value, tail = b.el.value;
+    var gap = head && tail ? '\n' : '';
+    prev.el.value = head + gap + tail;
+    var caret = head.length + gap.length;
+
+    var i = compose.indexOf(b);
+    if (i > -1) compose.splice(i, 1);
+    if (b.el.parentNode) b.el.parentNode.removeChild(b.el);
+
+    autoGrowEl(prev.el);
+    if (keepFocus) {
+      prev.el.focus();
+      prev.el.selectionStart = prev.el.selectionEnd = caret;
+    }
+    refreshPlaceholders();
+    syncSend();
+    if (previewOn) renderPreview();
   }
 
   function addTextBlock(focus) {
@@ -1458,30 +1784,61 @@
     return b;
   }
 
-  /** 加完附件后，后面留一个空文字块，方便接着写「文本 → 图片 → 文本」 */
-  function ensureTrailingText(focus) {
-    var last = compose[compose.length - 1];
-    if (!last || last.type !== 'text') addTextBlock(focus);
-    else if (focus) last.el.focus();
-  }
-
   function refreshPlaceholders() {
     var first = true;
     compose.forEach(function (b) {
       if (b.type !== 'text') return;
-      b.el.placeholder = first ? '输入文字或链接…可插入图片后再继续写' : '';
+      b.el.placeholder = first ? '输入文字，支持 Markdown 与下方快捷插入' : '';
       first = false;
     });
   }
 
-  function removeBlock(b) {
-    if (b.preview) { try { URL.revokeObjectURL(b.preview); } catch (e) {} }
+  /** 底层移除：不整理、不刷新（供整理逻辑内部用） */
+  function dropBlock(b) {
     var i = compose.indexOf(b);
-    if (i > -1) compose.splice(i, 1);
+    if (i < 0) return;
+    if (b.preview) { try { URL.revokeObjectURL(b.preview); } catch (e) {} }
+    compose.splice(i, 1);
     if (b.el && b.el.parentNode) b.el.parentNode.removeChild(b.el);
+  }
+
+  /** 收拾多余的空文字块：只留一个落点，删附件后不留空白 */
+  function normalizeCompose() {
+    var active = document.activeElement;
+    var texts = compose.filter(function (b) { return b.type === 'text'; });
+    if (!texts.length) { addTextBlock(false); return; }
+
+    var keep = null;
+    texts.forEach(function (b) {
+      if (!b.el.value.trim() && (!keep || b.el === active)) keep = b;
+    });
+    if (!keep) return;
+    compose.slice().forEach(function (b) {
+      if (b !== keep && b.type === 'text' && !b.el.value.trim()) dropBlock(b);
+    });
+  }
+
+  function removeBlock(b, keepFocus) {
+    if (compose.indexOf(b) < 0) return;
+    dropBlock(b);
     if (!compose.some(function (x) { return x.type === 'text'; })) addTextBlock(false);
+    normalizeCompose();
     refreshPlaceholders();
     syncSend();
+    if (previewOn) renderPreview();
+
+    // 键盘触发的删除：光标交回最近的文字块，链路不断
+    if (keepFocus) {
+      for (var i = 0; i < compose.length; i++) {
+        if (compose[i].type === 'text') {
+          var ta = compose[i].el;
+          ta.focus();
+          var len = ta.value.length;
+          ta.selectionStart = ta.selectionEnd = len;
+          break;
+        }
+      }
+    }
   }
 
   function buildMediaBlock(b) {
@@ -1576,9 +1933,25 @@
     });
   }
 
+  /** 插到指定下标（compose 与 DOM 同步），用来把附件放在光标所在段落之后 */
+  function insertBlockAt(b, idx) {
+    var ref = compose[idx] || null;
+    compose.splice(idx, 0, b);
+    if (ref) blocksEl.insertBefore(b.el, ref.el);
+    else blocksEl.appendChild(b.el);
+  }
+
   function addFiles(files) {
     files = Array.prototype.slice.call(files || []).filter(Boolean);
     if (!files.length) return;
+
+    // 附件插在「正在写的那一段」后面：那一段是空的就直接顶替它，
+    // 已经有内容就新起一段接着写，不会在中间留一块空白。
+    var anchor = textTarget();
+    if (compose.indexOf(anchor) < 0) anchor = null;
+    var anchorEmpty = !anchor || !anchor.el.value.trim();
+    var base = anchor ? compose.indexOf(anchor) : compose.length;
+    var at = anchorEmpty ? base : base + 1;
 
     var added = 0;
     files.forEach(function (f) {
@@ -1597,15 +1970,25 @@
       if (isImg) { try { b.preview = URL.createObjectURL(f); } catch (e) {} }
 
       b.el = buildMediaBlock(b);
-      compose.push(b);
-      blocksEl.appendChild(b.el);
+      insertBlockAt(b, at + added);
       startUpload(b);
       added++;
     });
 
-    if (added) ensureTrailingText(true);
+    if (!added) return;
+
+    if (anchorEmpty) {
+      // 空段落已经在附件后面，直接用它继续写
+      if (anchor && anchor.el) anchor.el.focus();
+    } else {
+      var nb = newTextBlock();
+      insertBlockAt(nb, at + added);
+      nb.el.focus();
+    }
+
     refreshPlaceholders();
     syncSend();
+    if (previewOn) renderPreview();
   }
 
   function composeParts() {
@@ -1646,8 +2029,10 @@
       if (b.preview) { try { URL.revokeObjectURL(b.preview); } catch (e) {} }
     });
     compose = [];
+    lastText = null;
     blocksEl.innerHTML = '';
     addTextBlock(false);
+    if (previewOn) togglePreview(false);
     syncSend();
   }
 
@@ -1697,6 +2082,269 @@
       addFiles([f]);
     });
   }
+
+  /* ============================================================ 快捷输入 */
+  /** 工具条往哪儿插：优先当前光标所在块，其次上次聚焦的块，最后末尾 */
+  function textTarget() {
+    var a = document.activeElement;
+    for (var i = 0; i < compose.length; i++) {
+      if (compose[i].type === 'text' && compose[i].el === a) return compose[i];
+    }
+    if (lastText && compose.indexOf(lastText) > -1) return lastText;
+    for (var j = compose.length - 1; j >= 0; j--) {
+      if (compose[j].type === 'text') return compose[j];
+    }
+    return addTextBlock(false);
+  }
+
+  function fireInput(ta) {
+    ta.dispatchEvent(new Event('input'));
+    autoGrowEl(ta);
+    syncSend();
+    if (previewOn) renderPreview();
+  }
+
+  function insertAt(str, caretOffset) {
+    var b = textTarget(), ta = b.el;
+    if (ta.disabled) { toast('主设备已关闭文字发送'); return; }
+    ta.focus();
+    var s = ta.selectionStart;
+    if (s == null) s = ta.value.length;
+    // 有选区时把光标收到选区末尾再插，别把刚被选中的文字覆盖掉
+    if (ta.selectionEnd != null && ta.selectionEnd > s) s = ta.selectionEnd;
+    ta.value = ta.value.slice(0, s) + str + ta.value.slice(s);
+    var c = s + (caretOffset == null ? str.length : caretOffset);
+    ta.selectionStart = ta.selectionEnd = c;
+    lastText = b;
+    fireInput(ta);
+  }
+
+  /** 把选区包进标记里（加粗 / 斜体 / 行内代码），没选中就放占位文字并选中它 */
+  function wrapSelection(pre, post, place) {
+    var b = textTarget(), ta = b.el;
+    if (ta.disabled) { toast('主设备已关闭文字发送'); return; }
+    ta.focus();
+    var s = ta.selectionStart, e = ta.selectionEnd;
+    if (s == null) { s = e = ta.value.length; }
+    var sel = ta.value.slice(s, e) || place || '';
+    ta.value = ta.value.slice(0, s) + pre + sel + post + ta.value.slice(e);
+    var from = s + pre.length;
+    ta.selectionStart = from;
+    ta.selectionEnd = from + sel.length;
+    lastText = b;
+    fireInput(ta);
+  }
+
+  /** 对选区覆盖的每一行做变换（标题 / 引用 / 列表，再点一次取消） */
+  function transformLines(fn) {
+    var b = textTarget(), ta = b.el;
+    if (ta.disabled) { toast('主设备已关闭文字发送'); return; }
+    ta.focus();
+    var v = ta.value, s = ta.selectionStart, e = ta.selectionEnd;
+    if (s == null) { s = e = v.length; }
+    var a = v.lastIndexOf('\n', Math.max(0, s - 1)) + 1;
+    var z = v.indexOf('\n', e);
+    if (z < 0) z = v.length;
+    var lines = v.slice(a, z).split('\n');
+    var next = lines.map(fn);
+    ta.value = v.slice(0, a) + next.join('\n') + v.slice(z);
+    ta.selectionStart = a;
+    ta.selectionEnd = a + next.join('\n').length;
+    lastText = b;
+    fireInput(ta);
+  }
+
+  function insertLink() {
+    var b = textTarget(), ta = b.el;
+    if (ta.disabled) { toast('主设备已关闭文字发送'); return; }
+    ta.focus();
+    var s = ta.selectionStart, e = ta.selectionEnd, sel = ta.value.slice(s, e);
+    var label = sel || '链接文字', url = 'https://';
+    ta.value = ta.value.slice(0, s) + '[' + label + '](' + url + ')' + ta.value.slice(e);
+    if (sel) {
+      var from = s + 1 + label.length + 2;
+      ta.selectionStart = from;
+      ta.selectionEnd = from + url.length;
+    } else {
+      ta.selectionStart = s + 1;
+      ta.selectionEnd = s + 1 + label.length;
+    }
+    lastText = b;
+    fireInput(ta);
+  }
+
+  function runTool(name) {
+    var b, v, lead;
+
+    if (name === 'emoji') { toggleEmoji(); return; }
+    if (name === 'preview') { togglePreview(); return; }
+
+    if (name === 'hr') {
+      b = textTarget(); v = b.el.value;
+      lead = !v ? '' : (/\n\n$/.test(v) ? '' : (/\n$/.test(v) ? '\n' : '\n\n'));
+      insertAt(lead + '---\n\n');
+      return;
+    }
+    if (name === 'block') {
+      b = textTarget(); v = b.el.value;
+      lead = !v ? '' : (/\n$/.test(v) ? '' : '\n');
+      insertAt(lead + '```\n\n```\n', lead.length + 4);
+      return;
+    }
+    if (name === 'h') {
+      transformLines(function (l) {
+        return /^#{1,6}\s+/.test(l) ? l.replace(/^#{1,6}\s+/, '') : '## ' + l;
+      });
+      return;
+    }
+    if (name === 'quote') {
+      transformLines(function (l) { return /^>\s?/.test(l) ? l.replace(/^>\s?/, '') : '> ' + l; });
+      return;
+    }
+    if (name === 'list') {
+      transformLines(function (l) {
+        return /^[-*+]\s+/.test(l) ? l.replace(/^[-*+]\s+/, '') : '- ' + l;
+      });
+      return;
+    }
+    if (name === 'bold') { wrapSelection('**', '**', '加粗文字'); return; }
+    if (name === 'italic') { wrapSelection('*', '*', '斜体文字'); return; }
+    if (name === 'code') { wrapSelection('`', '`', '代码'); return; }
+    if (name === 'link') { insertLink(); }
+  }
+
+  /* ---- 表情面板 ---- */
+  var EMOJI_GROUPS = [
+    ['常用', ['😀', '😄', '😁', '😂', '🤣', '😊', '😍', '😘', '😎', '🤔', '😅', '😢', '😭', '😡', '🥳', '😴',
+      '🤗', '😏', '🙃', '😬', '👍', '👎', '👌', '🙏', '👏', '💪', '🤝', '👀', '✅', '❌', '⚠️', '❓',
+      '❗', '🔥', '⭐', '💡', '🎉', '❤️', '💔', '✨', '🚀', '📌', '⏰', '🎯', '🧩', '🪄', '🍀', '☕']],
+    ['物件', ['📎', '📁', '📄', '📝', '📊', '📈', '💻', '🖥', '📱', '⌨️', '🔋', '📷', '🎧', '💾', '🗂', '📦',
+      '🛠', '🔍', '🔔', '🕹', '🧾', '🗓', '📡', '🔗']],
+    ['符号', ['—', '–', '·', '•', '…', '※', '→', '←', '↑', '↓', '↔', '①', '②', '③', '④', '✓',
+      '✗', '★', '☆', '§', '°', '±', '×', '÷', '≈', '≤', '≥', '∞', '【】', '「」', '『』', '《》']]
+  ];
+  var emojiPop = null, emojiOpen = false;
+
+  function closeEmoji() {
+    if (!emojiPop) return;
+    emojiPop.classList.remove('on');
+    emojiOpen = false;
+    var btn = document.querySelector('[data-tool="emoji"]');
+    if (btn) btn.classList.remove('on');
+  }
+
+  function buildEmojiPop() {
+    if (emojiPop) return emojiPop;
+    var pop = document.createElement('div');
+    pop.className = 'emoji-pop';
+    var tabs = document.createElement('div');
+    tabs.className = 'emoji-tabs';
+    var grid = document.createElement('div');
+    grid.className = 'emoji-grid';
+
+    function fill(idx) {
+      grid.innerHTML = '';
+      EMOJI_GROUPS[idx][1].forEach(function (ch) {
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = ch;
+        btn.onclick = function () { insertAt(ch); };
+        grid.appendChild(btn);
+      });
+      Array.prototype.forEach.call(tabs.children, function (t, i) {
+        t.classList.toggle('on', i === idx);
+      });
+    }
+
+    EMOJI_GROUPS.forEach(function (g, i) {
+      var t = document.createElement('button');
+      t.type = 'button';
+      t.className = 'emoji-tab';
+      t.textContent = g[0];
+      t.onclick = function () { fill(i); };
+      tabs.appendChild(t);
+    });
+
+    pop.appendChild(tabs);
+    pop.appendChild(grid);
+    document.body.appendChild(pop);
+    fill(0);
+    emojiPop = pop;
+
+    document.addEventListener('pointerdown', function (e) {
+      if (!emojiOpen) return;
+      var t = e.target;
+      if (pop.contains(t)) return;
+      if (t && t.closest && t.closest('[data-tool="emoji"]')) return;
+      closeEmoji();
+    });
+    document.addEventListener('keydown', function (e) {
+      if (emojiOpen && e.key === 'Escape') closeEmoji();
+    });
+    return pop;
+  }
+
+  function toggleEmoji() {
+    var btn = document.querySelector('[data-tool="emoji"]');
+    var pop = buildEmojiPop();
+    if (emojiOpen) { closeEmoji(); return; }
+    pop.classList.add('on');
+    emojiOpen = true;
+    btn.classList.add('on');
+
+    var r = btn.getBoundingClientRect();
+    var w = pop.offsetWidth, h = pop.offsetHeight;
+    var left = Math.min(Math.max(8, r.left), window.innerWidth - w - 8);
+    var top = r.top - h - 10;
+    if (top < 8) top = r.bottom + 10;
+    pop.style.left = Math.round(left) + 'px';
+    pop.style.top = Math.round(top) + 'px';
+  }
+
+  /* ---- Markdown 预览 ---- */
+  var previewOn = false;
+
+  function renderPreview() {
+    var mdp = $('mdp');
+    var html = '', atts = '';
+    compose.forEach(function (b) {
+      if (b.type === 'text') {
+        var t = b.el.value.trim();
+        if (t) html += mdToHtml(t);
+      } else {
+        atts += '<span class="mdp-att">' + (b.kind === 'image' ? '🖼' : '📎') +
+          '<b>' + esc(b.name || '') + '</b><i>' + fmtSize(b.size) + '</i></span>';
+      }
+    });
+    mdp.innerHTML = (html || '<div class="mdp-empty">还没有输入内容，点「编辑」回去写</div>') +
+      (atts ? '<div class="mdp-atts">' + atts + '</div>' : '');
+  }
+
+  function togglePreview(force) {
+    previewOn = force == null ? !previewOn : !!force;
+    $('composer').classList.toggle('prev-on', previewOn);
+    var pb = $('previewBtn');
+    if (!pb) return;
+    pb.classList.toggle('on', previewOn);
+    pb.textContent = previewOn ? '编辑' : '预览';
+    if (previewOn) renderPreview();
+  }
+
+  $('mtoolsWrap').addEventListener('click', function (e) {
+    var btn = e.target.closest ? e.target.closest('[data-tool]') : null;
+    if (!btn) return;
+    runTool(btn.dataset.tool);
+  });
+
+  ['feed', 'mdp'].forEach(function (id) {
+    $(id).addEventListener('click', function (e) {
+      var btn = e.target.closest ? e.target.closest('.code-copy') : null;
+      if (!btn) return;
+      var box = btn.closest('.code');
+      var code = box && box.querySelector('code');
+      if (code) copyText(code.textContent);
+    });
+  });
 
   /* ============================================================ 设备授权 */
   function buildDeviceSection() {

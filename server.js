@@ -159,10 +159,23 @@ function modelFromUA(ua = '') {
   return '设备';
 }
 
-/** 自动名：主设备用机器名，其它设备用「型号 (IP)」，天然不会重名 */
+/** 本机对外的局域网地址（二维码、设备名都用它） */
+function primaryLanIp() {
+  const list = lanAddresses();
+  if (list.length) return list[0].address;
+  return '127.0.0.1';
+}
+
+/** 自动名：机器名 / 型号 + 本机 IP，天生不重名 */
 function autoNameFor(req, model) {
-  if (isHostRequest(req)) return os.hostname().replace(/\.local$/i, '') || '本机';
-  return `${model} (${clientIp(req)})`;
+  const ip = clientIp(req);
+  if (isHostRequest(req)) {
+    const host = os.hostname().replace(/\.local$/i, '') || '本机';
+    // 用 127.0.0.1 访问时显示真实的内网地址，别让人看到回环地址
+    const shown = ip && ip !== '127.0.0.1' && ip !== '::1' ? ip : primaryLanIp();
+    return `${host} (${shown})`;
+  }
+  return `${model} (${ip})`;
 }
 
 function touchClient(req, cidRaw, uaRaw) {
