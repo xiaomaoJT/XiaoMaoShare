@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>XM 互传 · 系统说明</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --ink:#14171c; --sub:#5b6472; --faint:#8b95a4;
+    --line:#e6e9ef; --line-2:#eef1f6;
+    --card:#ffffff; --bg:#f6f7fa;
+    --brand:#e8562f; --accent:#4c6ef5; --accent-soft:#eef2ff;
+    --dark:#11151c;
+  }
+  body{
+    width:1180px; background:var(--bg); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    -webkit-font-smoothing:antialiased; font-size:15px; line-height:1.6;
+  }
+  .page{position:relative; padding:64px 72px 56px; overflow:hidden}
+  .page:before{
+    content:''; position:absolute; inset:0; pointer-events:none;
+    background:
+      radial-gradient(760px 380px at 92% -6%, rgba(232,86,47,.10), transparent 62%),
+      radial-gradient(680px 420px at -8% 8%, rgba(76,110,245,.10), transparent 60%),
+      radial-gradient(circle at 1px 1px, rgba(20,23,28,.055) 1px, transparent 0);
+    background-size:auto,auto,22px 22px;
+  }
+  .page > *{position:relative; z-index:1}
+
+  /* ---------- 头部 ---------- */
+  .brandrow{display:flex;align-items:center;gap:14px}
+  .logo{
+    width:52px;height:52px;border-radius:15px;background:#fff;border:1px solid var(--line);
+    display:grid;place-items:center;box-shadow:0 6px 18px -10px rgba(16,24,40,.5);overflow:hidden;flex:none;
+  }
+  .logo img{width:44px;height:44px;object-fit:contain}
+  .brandname{font-size:21px;font-weight:700;letter-spacing:.2px}
+  .brandname em{color:var(--brand);font-style:normal}
+  .brandsub{font-size:12.5px;color:var(--faint);letter-spacing:.4px;margin-top:1px}
+
+  .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:26px}
+  .chip{
+    display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 11px;border-radius:999px;
+    background:rgba(255,255,255,.86);border:1px solid var(--line);color:var(--sub);
+    font-size:12px;font-weight:550;
+  }
+  .chip i{width:5px;height:5px;border-radius:50%;background:var(--accent);display:block}
+  .chip.hot i{background:var(--brand)}
+
+  h1{
+    margin-top:22px; font-size:47px; line-height:1.22; letter-spacing:-.6px; font-weight:750;
+    max-width:900px;
+  }
+  h1 span{color:var(--brand)}
+  .lead{
+    margin-top:20px; max-width:790px; font-size:16.5px; line-height:1.85; color:var(--sub);
+  }
+  .lead b{color:var(--ink);font-weight:600}
+
+  /* ---------- 数字条 ---------- */
+  .stats{
+    display:grid;grid-template-columns:repeat(4,1fr);gap:0;margin-top:38px;
+    background:var(--card);border:1px solid var(--line);border-radius:18px;overflow:hidden;
+    box-shadow:0 18px 40px -30px rgba(16,24,40,.55);
+  }
+  .stat{padding:20px 22px;border-right:1px solid var(--line-2)}
+  .stat:last-child{border-right:0}
+  .stat b{display:block;font-size:25px;font-weight:750;letter-spacing:-.3px}
+  .stat b small{font-size:13px;font-weight:600;color:var(--faint);margin-left:3px}
+  .stat span{display:block;font-size:12.5px;color:var(--faint);margin-top:3px}
+
+  /* ---------- 通用标题 ---------- */
+  .sect{margin-top:60px}
+  .sect-head{display:flex;align-items:baseline;gap:12px}
+  .sect-head h2{font-size:24px;font-weight:700;letter-spacing:-.2px}
+  .sect-head p{font-size:13.5px;color:var(--faint)}
+  .rule{height:1px;background:linear-gradient(90deg,var(--line),transparent);margin-top:14px}
+
+  /* ---------- 截图三连 ---------- */
+  .shots{display:grid;grid-template-columns:repeat(3,1fr);gap:26px;margin-top:26px}
+  .shot{}
+  .shot .n{
+    font-size:11px;font-weight:700;color:var(--brand);letter-spacing:1px;
+  }
+  .shot h3{font-size:16px;font-weight:700;margin-top:5px;letter-spacing:-.1px;min-height:25px;display:flex;align-items:center}
+  .shot p{font-size:13px;color:var(--sub);line-height:1.72;margin-top:6px;min-height:80px}
+  .frame{
+    margin-top:14px;border-radius:16px;overflow:hidden;background:#fff;
+    border:1px solid var(--line);box-shadow:0 20px 44px -28px rgba(16,24,40,.6);
+  }
+  .frame img{display:block;width:100%}
+
+  /* ---------- 外观 ---------- */
+  .theme-card{
+    margin-top:26px;display:grid;grid-template-columns:1fr 1.15fr;gap:34px;align-items:center;
+    background:var(--card);border:1px solid var(--line);border-radius:18px;padding:26px 28px;
+    box-shadow:0 18px 40px -32px rgba(16,24,40,.55);
+  }
+  .theme-card h3{font-size:17px;font-weight:700}
+  .theme-card p{font-size:13px;color:var(--sub);line-height:1.75;margin-top:8px}
+  .theme-card .frame{margin-top:0;border-radius:13px}
+  .swatch-row{display:flex;gap:10px;margin-top:14px}
+  .sw{width:26px;height:26px;border-radius:8px;border:1px solid var(--line)}
+
+  /* ---------- 功能 3x3 ---------- */
+  .feats{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:26px}
+  .feat{
+    background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px 20px 22px;
+    box-shadow:0 14px 34px -30px rgba(16,24,40,.6);
+  }
+  .ico{
+    width:34px;height:34px;border-radius:11px;display:grid;place-items:center;
+    background:var(--accent-soft);color:var(--accent);
+  }
+  .ico svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.8;
+    stroke-linecap:round;stroke-linejoin:round}
+  .feat.warm .ico{background:rgba(232,86,47,.10);color:var(--brand)}
+  .feat h4{font-size:14.5px;font-weight:700;margin-top:13px;letter-spacing:-.1px}
+  .feat p{font-size:12.5px;color:var(--sub);line-height:1.7;margin-top:5px}
+
+  /* ---------- 深色：身份与权限 ---------- */
+  .dark{
+    margin-top:60px;background:var(--dark);border-radius:24px;padding:38px 40px 34px;color:#e9eef6;
+    box-shadow:0 30px 60px -40px rgba(10,14,20,.9);
+  }
+  .dark .sect-head h2{color:#fff}
+  .dark .sect-head p{color:rgba(233,238,246,.5)}
+  .dark .rule{background:linear-gradient(90deg,rgba(255,255,255,.16),transparent)}
+  .sec-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px 34px;margin-top:24px}
+  .sec{display:flex;gap:12px}
+  .sec .dot{
+    width:24px;height:24px;border-radius:8px;flex:none;display:grid;place-items:center;
+    background:rgba(232,86,47,.16);color:#ff8b66;font-size:11px;font-weight:700;
+  }
+  .sec b{display:block;font-size:13.5px;font-weight:650;color:#fff}
+  .sec span{display:block;font-size:12.5px;line-height:1.72;color:rgba(233,238,246,.6);margin-top:3px}
+
+  /* ---------- 技术 ---------- */
+  .tech{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:24px}
+  .tech div{
+    background:rgba(255,255,255,.72);border:1px solid var(--line);border-radius:14px;padding:15px 16px;
+  }
+  .tech b{display:block;font-size:12.5px;font-weight:650}
+  .tech span{display:block;font-size:11.5px;color:var(--faint);line-height:1.65;margin-top:4px}
+
+  /* ---------- 页脚 ---------- */
+  .foot{
+    margin-top:48px;display:flex;align-items:flex-end;justify-content:space-between;gap:30px;
+    border-top:1px solid var(--line);padding-top:22px;
+  }
+  .foot .urls{display:flex;flex-direction:column;gap:6px}
+  .foot .u{font-size:13px;color:var(--sub)}
+  .foot .u code{
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;
+    background:#fff;border:1px solid var(--line);border-radius:7px;padding:2px 7px;color:var(--ink);
+  }
+  .foot .sign{text-align:right}
+  .foot .sign b{font-size:15px;font-weight:700;letter-spacing:.2px}
+  .foot .sign b em{color:var(--brand);font-style:normal}
+  .foot .sign span{display:block;font-size:11.5px;color:var(--faint);margin-top:3px}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="brandrow">
+    <div class="logo"><img src="assets/logo.gif" alt=""></div>
+    <div>
+      <div class="brandname"><em>XM</em> 互传</div>
+      <div class="brandsub">局域网互传系统 · 说明</div>
+    </div>
+  </div>
+
+  <h1>把同一 Wi-Fi 下的设备，<br>变成一块<span>共享剪贴板</span></h1>
+  <p class="lead">一个零依赖的 Node 服务，跑起来就是完整的互传面板。手机、电脑打开同一个地址，文字、图片、文件随手互传；<b>图文混排成一条消息</b>、<b>Markdown</b>、<b>私聊</b>、<b>扫码</b>、<b>Telegram 远程同步</b>都在这一个页面里，不用装 App，不用连外网。</p>
+
+  <div class="chips">
+    <span class="chip hot"><i></i>零依赖</span>
+    <span class="chip"><i></i>Node ≥ 18</span>
+    <span class="chip"><i></i>单文件服务端</span>
+    <span class="chip"><i></i>单页前端 · 无框架</span>
+    <span class="chip"><i></i>macOS / Windows / Linux</span>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><b>0<small>依赖</small></b><span>只用 Node 内置模块</span></div>
+    <div class="stat"><b>4<small>GB</small></b><span>单文件上限，流式上传</span></div>
+    <div class="stat"><b>1<small>条</small></b><span>文字 / 图片 / 文件任意合并</span></div>
+    <div class="stat"><b>3<small>套</small></b><span>浅色 / 暗色 / 毛玻璃</span></div>
+  </div>
+
+  <div class="sect">
+    <div class="sect-head">
+      <h2>界面</h2>
+      <p>手机浏览器里就是这个样子</p>
+    </div>
+    <div class="rule"></div>
+
+    <div class="shots">
+      <div class="shot">
+        <div class="n">01 · 输入与消息流</div>
+        <h3>一条输入区，图文随你排</h3>
+        <p>文字、图片、附件可以任意交替，一次发成一条消息。工具条一键插表情、标题、代码、引用、列表，还能切到 Markdown 预览。</p>
+        <div class="frame"><img src="assets/shot-composer.png" alt="输入区与消息列表"></div>
+      </div>
+      <div class="shot">
+        <div class="n">02 · 在线设备</div>
+        <h3>谁在线，一眼看清</h3>
+        <p>顶栏点开就是全部设备，主设备、本机各自标注，名字后面都带 IP，同 Wi-Fi 下不会认错人。</p>
+        <div class="frame"><img src="assets/shot-peers.png" alt="在线设备"></div>
+      </div>
+      <div class="shot">
+        <div class="n">03 · 发送对象</div>
+        <h3>发私聊，只有两台看得到</h3>
+        <p>默认全局域网可见，选中某台设备就变成私聊。别人既收不到，也看不到这条消息的存在。</p>
+        <div class="frame"><img src="assets/shot-private.png" alt="发送给谁"></div>
+      </div>
+    </div>
+
+    <div class="theme-card">
+      <div>
+        <h3>三套外观，各自记住</h3>
+        <p>浅色、暗色、毛玻璃，每台设备自己选，记在本机，不影响别人。</p>
+        <div class="swatch-row">
+          <span class="sw" style="background:#fff"></span>
+          <span class="sw" style="background:#161b22"></span>
+          <span class="sw" style="background:linear-gradient(135deg,#cfe4ff,#f7d6ff,#d9fff0)"></span>
+        </div>
+      </div>
+      <div class="frame"><img src="assets/shot-theme.png" alt="外观"></div>
+    </div>
+  </div>
+
+  <div class="sect">
+    <div class="sect-head">
+      <h2>功能</h2>
+      <p>九件事，都在一个页面里</p>
+    </div>
+    <div class="rule"></div>
+
+    <div class="feats">
+      <div class="feat">
+        <div class="ico"><svg viewBox="0 0 24 24"><path d="M4 7h11M4 12h16M4 17h9"/><path d="M18 5v4M16 7h4"/></svg></div>
+        <h4>合并发送</h4>
+        <p>多张图片、图文混排、多类型文件，都收成一条消息发出，不再刷屏。</p>
+      </div>
+      <div class="feat">
+        <div class="ico"><svg viewBox="0 0 24 24"><path d="M5 4h9l5 5v11H5z"/><path d="M14 4v5h5"/><path d="M8 13h8M8 17h5"/></svg></div>
+        <h4>Markdown</h4>
+        <p>标题、列表、表格、代码块都能写，消息卡片按排版渲染，写完可一键预览。</p>
+      </div>
+      <div class="feat warm">
+        <div class="ico"><svg viewBox="0 0 24 24"><path d="M12 3v12"/><path d="M7 11l5 5 5-5"/><path d="M5 20h14"/></svg></div>
+        <h4>存为 .md 发出</h4>
+        <p>写完点一下，内容打包成 .md 文件发送，图片内联进文件，对方下载就是可编辑文档。</p>
+      </div>
+      <div class="feat">
+        <div class="ico"><svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-3.2-6.4"/><path d="M20 4v5h-5"/><circle cx="12" cy="12" r="3"/></svg></div>
+        <h4>私聊</h4>
+        <p>只发给指定设备，别人看不到。发出去的消息带「仅对方可见」标记。</p>
+      </div>
+      <div class="feat">
+        <div class="ico"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8M12 17v4"/></svg></div>
+        <h4>在线设备</h4>
+        <p>主设备、本机、各设备 IP 一览，8 秒没心跳自动下线，不残留幽灵设备。</p>
+      </div>
+      <div class="feat">
+        <div class="ico"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><path d="M14 14h3v3h-3zM19 19h1v1h-1z"/></svg></div>
+        <h4>扫码访问</h4>
+        <p>主设备一键生成局域网地址的二维码，别人扫一下就进来，不用手打 IP。</p>
+      </div>
+      <div class="feat warm">
+        <div class="ico"><svg viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div>
+        <h4>接入许可</h4>
+        <p>陌生设备第一次访问要输密码（默认 XM），再由主设备点同意；之后长期有效。</p>
+      </div>
+      <div class="feat">
+        <div class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 4v16"/><path d="M12 8a4 4 0 0 1 0 8"/></svg></div>
+        <h4>三套外观</h4>
+        <p>浅色、暗色、毛玻璃，一键切换，记在各自设备上，手机夜里不刺眼。</p>
+      </div>
+      <div class="feat">
+        <div class="ico"><svg viewBox="0 0 24 24"><path d="M21 4L3 11l5 2 2 5 3-3 4 3 4-14z"/></svg></div>
+        <h4>Telegram 远程</h4>
+        <p>主设备配置 Bot，各端输密码解锁后，消息同时同步到手机，支持走代理。</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="dark">
+    <div class="sect-head">
+      <h2>身份与权限</h2>
+      <p>一台主设备管权限，其他设备各自记账</p>
+    </div>
+    <div class="rule"></div>
+    <div class="sec-grid">
+      <div class="sec">
+        <span class="dot">01</span>
+        <div>
+          <b>主设备不靠 IP 认</b>
+          <span>用 localhost 或一次性令牌打开才算主设备，端口转发、虚拟网卡都不会把别人的电脑变成管理员。</span>
+        </div>
+      </div>
+      <div class="sec">
+        <span class="dot">02</span>
+        <div>
+          <b>授权按设备指纹记账</b>
+          <span>同一个 IP 上挂多台设备也互不覆盖；单独移除某台，其他设备照常在线。</span>
+        </div>
+      </div>
+      <div class="sec">
+        <span class="dot">03</span>
+        <div>
+          <b>权限可以分级</b>
+          <span>能整体关掉「其他设备发送」，也能分别禁止文字 / 图片 / 文件，主设备始终完整权限。</span>
+        </div>
+      </div>
+      <div class="sec">
+        <span class="dot">04</span>
+        <div>
+          <b>Token 不出主设备</b>
+          <span>Telegram Bot Token 单独存盘、权限 600，接口只回「配没配」，接收人和掩码只给主设备。</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sect">
+    <div class="sect-head">
+      <h2>技术形态</h2>
+      <p>轻，是为了传得快</p>
+    </div>
+    <div class="rule"></div>
+    <div class="tech">
+      <div><b>服务端</b><span>server.js 单文件，只用 http / fs / path / os / crypto</span></div>
+      <div><b>前端</b><span>单页 HTML，内联 CSS/JS，无框架、无构建步骤</span></div>
+      <div><b>数据</b><span>data/ 下 index.json、files/、devices.json、settings.json</span></div>
+      <div><b>启动</b><span>启动.bat / 启动.command，终端直接打印访问地址</span></div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <div class="urls">
+      <div class="u">启动后终端会打印：本机 <code>http://localhost:6767/?host=…</code></div>
+      <div class="u">手机连同一个 Wi-Fi，打开局域网地址 <code>http://192.168.110.76:6767</code></div>
+    </div>
+    <div class="sign">
+      <b><em>XM</em> 互传 <span style="display:inline;font-size:12px;color:var(--faint);font-weight:500">轻量 · 够快 · 不外传</span></b>
+      <span>github.com/xiaomaoJT/XiaoMaoShare</span>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
