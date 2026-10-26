@@ -25,11 +25,28 @@ const OPEN_ON_START = ARGS.includes('--open') || ARGS.includes('-o');
 
 const BASE_PORT = Number(process.env.PORT || 6767);
 const MAX_FILE = 4 * 1024 * 1024 * 1024; // 4GB 单文件上限
-const MAX_TEXT = 50 * 1024;              // 文字消息 50KB 上限
 const MAX_PARTS = 30;                    // 一条消息最多带 30 个附件
 const MAX_STAGED = 120;                  // 暂存区上限，防内存/磁盘被灌爆
 const STAGE_TTL = 30 * 60e3;             // 暂存文件 30 分钟没发送就清掉
+
+/**
+ * 文字上限按「UTF-8 字节」算，不能按字符数。
+ * 中文一个字占 3 字节，早年 MAX_TEXT=51200「字符」意味着中文只有约 1.7 万字就超限，
+ * 而超限后把连接直接 destroy —— 浏览器拿不到任何响应，只看到 Failed to fetch，
+ * 看起来就是「发送失败 / 加载失败」，且超过 51200 字符的内容还会被静默截断。
+ */
+const MAX_TEXT_BYTES = 400 * 1024;       // 单个文字片段上限
+const MAX_TEXT_TOTAL = 512 * 1024;       // 一条消息里文字总量上限
+const WARN_TEXT_BYTES = 48 * 1024;       // 超过这个量，前端就提示改用「存为 .md」
+const MAX_SEND_BODY = 768 * 1024;        // /api/send 请求体上限
+
 const IS_WIN = process.platform === 'win32';
+
+/** UTF-8 字节数 */
+const bytesOf = (s) => Buffer.byteLength(String(s == null ? '' : s), 'utf8');
+
+/** 字节数变「人能读的量」：409600 → 400 KB */
+const fmtKB = (n) => Math.round(n / 1024) + ' KB';
 
 fs.mkdirSync(FILES_DIR, { recursive: true });
 
@@ -84,6 +101,51 @@ function reindexFiles() {
 }
 reindexFiles();
 
+/* ------------------------------------------------ 文件去重 / 引用计数 */
+
+/**
+ * 同一个文件被反复传（改个名、转发一次）在互传场景里太常见了：
+ * 存一份就够。删除时要看还有没有别人指着它，否则会把别人的附件一起删掉。
+ */
+function refCount(file) {
+  let n = 0;
+  for (const it of items) {
+    for (const p of it.parts || []) if (p.file === file) n++;
+  }
+  return n;
+}
+
+/** 同上，但把待发送的暂存项也算进来（暂存区过期清理要用，免得删掉别人正要发的文件） */
+function refCountWithStaged(file, exceptFid) {
+  let n = refCount(file);
+  for (const [fid, s] of staged) if (fid !== exceptFid && s.file === file) n++;
+  return n;
+}
+
+/** 回收一组片段占用的磁盘文件：还有别的消息或待发项指着它，就留着 */
+function unlinkParts(parts) {
+  for (const p of parts || []) {
+    if (!p.file) continue;
+    // 调用方在 splice 掉本条之后才调这里，所以 refCount 只数得到「还活着」的引用。
+    // 只要还有 1 个存活引用（含暂存区里的待发项），就不能删盘上的文件。
+    if (refCountWithStaged(p.file) >= 1) continue;
+    fs.unlink(path.join(FILES_DIR, p.file), () => {});
+  }
+}
+
+/** 内容完全一样（hash + 大小都对得上）且盘上还在 → 复用那一份 */
+function findDuplicate(hash, size) {
+  if (!hash || !size) return null;
+  const alive = (f) => f && fs.existsSync(path.join(FILES_DIR, f));
+  for (const { part } of fileIndex.values()) {
+    if (part.hash === hash && part.size === size && alive(part.file)) return part.file;
+  }
+  for (const s of staged.values()) {
+    if (s.hash === hash && s.size === size && alive(s.file)) return s.file;
+  }
+  return null;
+}
+
 /**
  * 暂存区：先上传拿 fid，再调 /api/send 一次性组成一条消息。
  * 这样多文件能合并发送，且上传过程依旧是流式落盘，不占内存。
@@ -94,7 +156,8 @@ setInterval(() => {
   const now = Date.now();
   for (const [fid, s] of staged) {
     if (now - s.at < STAGE_TTL) continue;
-    fs.unlink(path.join(FILES_DIR, s.file), () => {});
+    // 去重后可能指着别人正在用的那份，别顺手删掉
+    if (refCountWithStaged(s.file, fid) === 0) fs.unlink(path.join(FILES_DIR, s.file), () => {});
     staged.delete(fid);
   }
 }, 60e3).unref();
@@ -114,17 +177,257 @@ const newId = () => Date.now().toString(36) + crypto.randomBytes(3).toString('he
 const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 const SETTING_KEYS = ['allowSend', 'allowText', 'allowImage', 'allowFile'];
 
+// keepDays：内容保留天数，0 = 永不自动清理
+const clampDays = (v) => Math.max(0, Math.min(3650, Math.floor(Number(v) || 0)));
+
 // 主设备（跑服务这台机器）可以改；其他设备只能按这里的规则来
-let settings = { allowSend: true, allowText: true, allowImage: true, allowFile: true };
+let settings = { allowSend: true, allowText: true, allowImage: true, allowFile: true, keepDays: 0 };
 try {
   const saved = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
   for (const k of SETTING_KEYS) if (typeof saved[k] === 'boolean') settings[k] = saved[k];
+  if (saved && Number.isFinite(Number(saved.keepDays))) settings.keepDays = clampDays(saved.keepDays);
 } catch {
   /* 首次运行用默认值 */
 }
 
 function saveSettings() {
   fs.writeFile(SETTINGS_FILE, JSON.stringify(settings, null, 2), () => {});
+}
+
+/* -------------------------------------------------- 过期内容自动清理 */
+
+function fmtBytes(n) {
+  n = Number(n) || 0;
+  if (n >= 1024 ** 3) return (n / 1024 ** 3).toFixed(2) + ' GB';
+  if (n >= 1024 ** 2) return (n / 1024 ** 2).toFixed(1) + ' MB';
+  return Math.max(1, Math.round(n / 1024)) + ' KB';
+}
+
+/**
+ * 互传的内容大多是「传完就走」，攒久了既占磁盘又难翻。
+ * 设了保留天数就定期把过期内容连同文件一起清掉（文件有人共用就先留着）。
+ */
+function sweepExpired() {
+  const days = Number(settings.keepDays) || 0;
+  if (days <= 0) return 0;
+  const cutoff = Date.now() - days * 864e5;
+  const gone = items.filter((it) => Number(it.time || 0) < cutoff);
+  if (!gone.length) return 0;
+
+  let bytes = 0;
+  for (const it of gone) for (const p of it.parts || []) bytes += Number(p.size) || 0;
+
+  items = items.filter((it) => Number(it.time || 0) >= cutoff);
+  reindexFiles();                              // 先重索引，引用计数才数得准
+  for (const it of gone) unlinkParts(it.parts);
+  saveIndex();
+  console.log(`  自动清理 清掉 ${gone.length} 条超过 ${days} 天的内容（约 ${fmtBytes(bytes)}）`);
+  return gone.length;
+}
+setInterval(() => { try { sweepExpired(); } catch { /* 清理失败不影响服务 */ } }, 6 * 3600e3).unref();
+
+/* ------------------------------------------------------------- ZIP 打包 */
+
+/**
+ * 一次下载多条内容：浏览器没有「多文件打包」这种能力，只能服务端现打一个 zip。
+ * 走 store（不压缩）——照片、视频、压缩包本来就已经压过，再压一遍纯属浪费 CPU。
+ */
+const ZIP_MAX_TOTAL = 2 * 1024 ** 3;   // 单次打包上限，超了让用户分批
+
+const CRC_TABLE = (() => {
+  const t = new Int32Array(256);
+  for (let i = 0; i < 256; i++) {
+    let c = i;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+    t[i] = c;
+  }
+  return t;
+})();
+
+function crc32Update(crc, buf) {
+  let c = (~crc) >>> 0;
+  for (let i = 0; i < buf.length; i++) c = CRC_TABLE[(c ^ buf[i]) & 0xff] ^ (c >>> 8);
+  return (~c) >>> 0;
+}
+
+function dosStamp(ms) {
+  const d = new Date(Number(ms) || Date.now());
+  return {
+    time: ((d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1)) & 0xffff,
+    date: (((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate()) & 0xffff,
+  };
+}
+
+/** Windows / macOS 都不认的那一堆字符，统一换成下划线 */
+function safeZipName(s) {
+  const BAD = '\\/:*?"<>|';
+  let out = '';
+  const raw = String(s || 'file');
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i];
+    const code = raw.charCodeAt(i);
+    out += (code < 32 || BAD.indexOf(ch) >= 0) ? '_' : ch;
+  }
+  return out.trim().slice(-120) || 'file';
+}
+
+async function crcOfFile(abs) {
+  let crc = 0;
+  for await (const chunk of fs.createReadStream(abs, { highWaterMark: 256 * 1024 })) {
+    crc = crc32Update(crc, chunk);
+  }
+  return crc >>> 0;
+}
+
+/** 边算边写，不把整个包憋在内存里（几个 G 的视频也能打包） */
+async function streamZip(res, files) {
+  const write = (buf) => new Promise((resolve) => {
+    if (res.write(buf)) resolve();
+    else res.once('drain', resolve);
+  });
+  const pipe = (abs) => new Promise((resolve, reject) => {
+    const rs = fs.createReadStream(abs, { highWaterMark: 256 * 1024 });
+    rs.on('error', reject);
+    rs.on('data', (c) => { if (!res.write(c)) { rs.pause(); res.once('drain', () => rs.resume()); } });
+    rs.on('end', resolve);
+  });
+
+  const central = [];
+  let offset = 0;
+
+  for (const f of files) {
+    const nameBuf = Buffer.from(f.name, 'utf8');
+    const crc = await crcOfFile(f.abs);
+    const { time, date } = dosStamp(f.time);
+
+    const lh = Buffer.alloc(30);
+    lh.writeUInt32LE(0x04034b50, 0);
+    lh.writeUInt16LE(20, 4);
+    lh.writeUInt16LE(0x0800, 6);       // bit 11：文件名按 UTF-8 解，中文名才不乱码
+    lh.writeUInt16LE(0, 8);            // 0 = store
+    lh.writeUInt16LE(time, 10);
+    lh.writeUInt16LE(date, 12);
+    lh.writeUInt32LE(crc, 14);
+    lh.writeUInt32LE(f.size, 18);
+    lh.writeUInt32LE(f.size, 22);
+    lh.writeUInt16LE(nameBuf.length, 26);
+    lh.writeUInt16LE(0, 28);
+    await write(lh);
+    await write(nameBuf);
+    await pipe(f.abs);
+
+    central.push({ nameBuf, crc, size: f.size, time, date, offset });
+    offset += 30 + nameBuf.length + f.size;
+  }
+
+  const cdStart = offset;
+  let cdSize = 0;
+  for (const e of central) {
+    const ch = Buffer.alloc(46);
+    ch.writeUInt32LE(0x02014b50, 0);
+    ch.writeUInt16LE(20, 4);
+    ch.writeUInt16LE(20, 6);
+    ch.writeUInt16LE(0x0800, 8);
+    ch.writeUInt16LE(0, 10);
+    ch.writeUInt16LE(e.time, 12);
+    ch.writeUInt16LE(e.date, 14);
+    ch.writeUInt32LE(e.crc, 16);
+    ch.writeUInt32LE(e.size, 20);
+    ch.writeUInt32LE(e.size, 24);
+    ch.writeUInt16LE(e.nameBuf.length, 28);
+    ch.writeUInt32LE(e.offset, 42);
+    await write(ch);
+    await write(e.nameBuf);
+    cdSize += 46 + e.nameBuf.length;
+  }
+
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(central.length, 8);
+  end.writeUInt16LE(central.length, 10);
+  end.writeUInt32LE(cdSize, 12);
+  end.writeUInt32LE(cdStart, 16);
+  await write(end);
+  res.end();
+}
+
+/* -------------------------------------------- 每台设备的单独发送权限 */
+
+const PERM_KEYS = ['send', 'text', 'image', 'file'];
+
+/**
+ * 某台设备的独立权限。没单独设过 = 全开。
+ * 最终能不能发，是这个权限 ∩ 全局设置（主设备不受两者限制）。
+ */
+function permsOf(cid) {
+  const d = cid && devices[cid];
+  const p = (d && d.perms) || {};
+  return {
+    send: p.send !== false,
+    text: p.text !== false,
+    image: p.image !== false,
+    file: p.file !== false,
+  };
+}
+
+/* ---------------------------------------------------- 临时提权（专属密码） */
+/**
+ * 主设备之外的设备，输对专属密码后临时获得主设备级的管理能力
+ * （改权限、审批设备、配 Telegram、清空全部、删别人发的内容）。
+ * 记账维度是设备指纹 cid，并要求该设备已经通过接入许可。
+ */
+const ELEVATED_FILE = path.join(DATA_DIR, 'elevated.json');
+const ELEVATE_PASSWORD = String(process.env.ELEVATE_PASSWORD || 'xiaomao');
+const ELEVATE_TTL = 8 * 60 * 60e3;      // 提权有效期 8 小时
+const ELEVATE_TRY_LIMIT = 5;
+const ELEVATE_TRY_WINDOW = 10 * 60e3;
+
+let elevated = {}; // cid -> { cid, name, ip, at }
+try {
+  const saved = JSON.parse(fs.readFileSync(ELEVATED_FILE, 'utf8'));
+  if (saved && typeof saved === 'object') elevated = saved;
+} catch {
+  /* 首次运行 */
+}
+
+function saveElevated() {
+  fs.writeFile(ELEVATED_FILE, JSON.stringify(elevated, null, 2), () => {});
+}
+
+const elevateTries = new Map(); // ip -> { n, until }
+function elevateBlocked(ip) {
+  const t = elevateTries.get(ip);
+  if (!t) return false;
+  if (Date.now() > t.until) { elevateTries.delete(ip); return false; }
+  return t.n >= ELEVATE_TRY_LIMIT;
+}
+function elevateFail(ip) {
+  const t = elevateTries.get(ip) || { n: 0, until: 0 };
+  t.n += 1;
+  t.until = Date.now() + ELEVATE_TRY_WINDOW;
+  elevateTries.set(ip, t);
+}
+
+function elevateRec(cid) {
+  const e = cid && elevated[cid];
+  if (!e) return null;
+  if (Date.now() - e.at > ELEVATE_TTL) {
+    delete elevated[cid];
+    saveElevated();
+    return null;
+  }
+  return e;
+}
+
+/** 这台设备当前是否处在提权状态（主设备天然算，cid 为空就不算） */
+function isElevated(req, cid) {
+  if (isHostRequest(req)) return false; // 是主设备就不用「提权」这个概念
+  return !!elevateRec(cid);
+}
+
+/** 是否拥有管理级能力：跑服务的那台机器，或已用专属密码临时提权的设备 */
+function canManage(req, cid) {
+  return isHostRequest(req) || isElevated(req, cid);
 }
 
 /* ------------------------------------------------------ Telegram 远程 */
@@ -137,7 +440,8 @@ const TG_TRY_LIMIT = 5;                  // 密码错几次就锁一会儿
 const TG_TRY_WINDOW = 10 * 60e3;
 
 // token 单独存一个文件：settings 会随 /api/list 发给每台设备，绝不能混进去
-let tg = { token: '', chatId: '', botUser: '', enabled: true };
+// enabled 默认关：没在主设备设置里显式打开之前，任何设备都不该看到 TG 入口
+let tg = { token: '', chatId: '', botUser: '', enabled: false };
 try {
   const saved = JSON.parse(fs.readFileSync(TG_FILE, 'utf8'));
   if (typeof saved.token === 'string') tg.token = saved.token.trim();
@@ -446,6 +750,8 @@ function touchClient(req, cidRaw, uaRaw) {
   c.admin = admin;
   // 有些请求不带 UA，别把已经认出来的机型降级成「设备」
   if (model !== '设备' || !c.model) c.model = model;
+  // 顺手记下提权状态：主设备永远是主设备，其它设备可能用专属密码提过权
+  c.elevated = c.admin || !!elevateRec(cid);
   c.lastSeen = now;
   c.autoName = autoNameFor(req, c.model);
   return c;
@@ -454,7 +760,11 @@ function touchClient(req, cidRaw, uaRaw) {
 const displayName = (c) => c.customName || c.autoName;
 
 function publicClient(c) {
-  return { cid: c.cid, name: displayName(c), ip: c.ip, model: c.model, admin: c.admin, since: c.firstSeen };
+  return {
+    cid: c.cid, name: displayName(c), ip: c.ip, model: c.model,
+    // admin = 跑服务的那台；elevated = 用专属密码临时提过权的
+    admin: !!c.admin, elevated: !!c.elevated, since: c.firstSeen,
+  };
 }
 
 function peersPayload() {
@@ -474,20 +784,37 @@ function peersPayload() {
   return out;
 }
 
-/** 某类内容当前是否允许发送（主设备永远允许） */
-function canSendType(req, kind) {
+/**
+ * 某类内容当前是否允许发送。
+ * cid 是这台设备的指纹：全局开关只管「整体放不放行」，per-device perms 管「这一台」。
+ * 主设备永远允许。
+ */
+function canSendType(req, kind, cid) {
   if (isHostRequest(req)) return true;
-  if (!settings.allowSend) return false;
-  if (kind === 'text') return settings.allowText;
-  if (kind === 'image') return settings.allowImage;
-  return settings.allowFile;
+  const p = permsOf(cid);
+  if (!settings.allowSend || !p.send) return false;
+  if (kind === 'text') return settings.allowText && p.text;
+  if (kind === 'image') return settings.allowImage && p.image;
+  return settings.allowFile && p.file;
 }
 
-function denyReason(kind) {
+/** 一次性把三种能力的判定结果发给前端，UI 就不用重复推规则了 */
+function capsPayload(req, cid) {
+  return {
+    send: isHostRequest(req) || (settings.allowSend && permsOf(cid).send),
+    text: canSendType(req, 'text', cid),
+    image: canSendType(req, 'image', cid),
+    file: canSendType(req, 'file', cid),
+  };
+}
+
+function denyReason(kind, cid) {
+  const p = permsOf(cid);
   if (!settings.allowSend) return '主设备已关闭其他设备的发送权限';
-  if (kind === 'text' && !settings.allowText) return '主设备已关闭文字发送';
-  if (kind === 'image' && !settings.allowImage) return '主设备已关闭图片发送';
-  if (kind === 'file' && !settings.allowFile) return '主设备已关闭文件发送';
+  if (!p.send) return '主设备已禁止这台设备发送内容';
+  if (kind === 'text' && !(settings.allowText && p.text)) return '这台设备的文字发送被限制';
+  if (kind === 'image' && !(settings.allowImage && p.image)) return '这台设备的图片发送被限制';
+  if (kind === 'file' && !(settings.allowFile && p.file)) return '这台设备的文件发送被限制';
   return '暂无发送权限';
 }
 
@@ -855,10 +1182,21 @@ for (const [key, v] of Object.entries(devices)) {
   }
 }
 
+// 补 device perms：旧版本没有「每台设备单独限权」这个概念，补默认全开 = 行为不变
+let permsMigrated = false;
+for (const key of Object.keys(devices)) {
+  const d = devices[key];
+  if (!d || typeof d !== 'object') continue;
+  if (!d.perms || typeof d.perms !== 'object') {
+    d.perms = { send: true, text: true, image: true, file: true };
+    permsMigrated = true;
+  }
+}
+
 function saveDevices() {
   fs.writeFile(DEVICES_FILE, JSON.stringify(devices, null, 2), () => {});
 }
-if (legacyDeviceIps.length) saveDevices();
+if (legacyDeviceIps.length || permsMigrated) saveDevices();
 
 /**
  * 主设备身份不能只看 IP：
@@ -927,7 +1265,7 @@ function anyDeviceAtIp(ip) {
  * 这种（strict=false）才退化成「这个 IP 上有授权设备就放行」，否则图片会全裂。
  */
 function authState(req, given, strict) {
-  if (isHostRequest(req)) return { authorized: true, status: 'host' };
+  if (isHostRequest(req)) return { authorized: true, status: 'host', cid: '' };
 
   const cid = cidOf(req, given);
   if (cid) {
@@ -935,16 +1273,25 @@ function authState(req, given, strict) {
     if (d) {
       d.ip = clientIp(req);
       d.lastSeen = Date.now();
-      return { authorized: true, status: 'approved' };
+      return { authorized: true, status: 'approved', cid };
     }
     const p = pending.get(cid);
-    if (p && p.status === 'rejected') return { authorized: false, status: 'rejected' };
-    if (p) return { authorized: false, status: 'pending' };
-    return { authorized: false, status: 'none' };
+    if (p && p.status === 'rejected') return { authorized: false, status: 'rejected', cid };
+    if (p) return { authorized: false, status: 'pending', cid };
+    return { authorized: false, status: 'none', cid };
   }
 
-  if (!strict && anyDeviceAtIp(clientIp(req))) return { authorized: true, status: 'approved' };
-  return { authorized: false, status: 'none' };
+  if (!strict && anyDeviceAtIp(clientIp(req))) return { authorized: true, status: 'approved', cid: '' };
+  return { authorized: false, status: 'none', cid: '' };
+}
+
+/**
+ * 本次请求对应的是哪台设备。
+ * 优先用准入阶段已经查过库的结果；兜底再看查询串 / 请求头。
+ */
+function reqCid(req, auth) {
+  if (auth && auth.cid) return auth.cid;
+  return cidOf(req, req.__cidQ);
 }
 
 function pendingList() {
@@ -993,22 +1340,63 @@ function json(res, code, obj) {
   res.end(body);
 }
 
+/**
+ * 读请求体。
+ * 超限**不能掐连接**：一掐，浏览器只收到 ECONNRESET，拿不到任何 HTTP 响应，
+ * 前端就只能弹一个没有上下文的「Failed to fetch」。
+ * 这里改成：超了就停止缓存（不浪费内存）但继续把流读完，最后 reject 一个带
+ * tooBig 标记的错误，由路由统一回 413 JSON，用户才能看到「太长了该怎么做」。
+ */
 function readBody(req, limit) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
+    let tooBig = false;
+    let done = false;
+
+    function settle(fn) {
+      if (done) return;
+      done = true;
+      fn();
+    }
+
     req.on('data', (c) => {
       size += c.length;
-      if (size > limit) {
-        reject(new Error('payload too large'));
-        req.destroy();
-        return;
-      }
+      if (size > limit) { tooBig = true; return; }
       chunks.push(c);
     });
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
-    req.on('error', reject);
+    req.on('end', () => settle(() => {
+      if (tooBig) {
+        const e = new Error('payload too large');
+        e.tooBig = true;
+        e.size = size;
+        reject(e);
+      } else {
+        resolve(Buffer.concat(chunks).toString('utf8'));
+      }
+    }));
+    req.on('aborted', () => settle(() => reject(new Error('aborted'))));
+    req.on('error', (e) => settle(() => reject(e)));
   });
+}
+
+/** 请求体相关的兜底：超限给 413 + 可执行的建议，其它按 bad request */
+function badBody(res, tooBigMsg) {
+  return function (e) {
+    if (e && e.tooBig) json(res, 413, { error: tooBigMsg, tooBig: true });
+    else json(res, 400, { error: 'bad request' });
+  };
+}
+
+/** 所有接口统一告诉客户端当前的上限，前端才能提前拦而不是等服务端报错 */
+function limitsPayload() {
+  return {
+    textBytes: MAX_TEXT_BYTES,
+    textTotal: MAX_TEXT_TOTAL,
+    warnBytes: WARN_TEXT_BYTES,
+    fileBytes: MAX_FILE,
+    parts: MAX_PARTS,
+  };
 }
 
 /**
@@ -1059,6 +1447,7 @@ const server = http.createServer((req, res) => {
 
   // 主设备令牌：地址栏带 ?host=xxx 时种下 cookie，之后的请求都认得它
   req.__hostQ = url.searchParams.get('host') || '';
+  req.__cidQ = url.searchParams.get('cid') || '';
   if (sameToken(req.__hostQ, hostToken)) {
     res.setHeader('Set-Cookie',
       `${HOST_COOKIE}=${encodeURIComponent(hostToken)}; Path=/; Max-Age=31536000; SameSite=Lax; HttpOnly`);
@@ -1099,6 +1488,34 @@ const server = http.createServer((req, res) => {
       });
       res.end(buf);
     });
+    return;
+  }
+
+  // PWA 清单：加到手机主屏后独立窗口打开，没有地址栏，跟原生 App 一个观感
+  if (method === 'GET' && (pathname === '/manifest.webmanifest' || pathname === '/manifest.json')) {
+    const appName = process.env.APP_NAME || 'XiaoMao 互传';
+    const manifest = {
+      name: appName,
+      short_name: '互传',
+      description: '同一 Wi-Fi 下互传文字、图片和文件',
+      start_url: './',
+      scope: './',
+      display: 'standalone',
+      orientation: 'portrait',
+      background_color: '#f2f4f7',
+      theme_color: '#f2f4f7',
+      lang: 'zh-CN',
+      icons: [
+        { src: '/icon.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+        { src: '/icon.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+        { src: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png', purpose: 'any' },
+      ],
+    };
+    res.writeHead(200, {
+      'Content-Type': 'application/manifest+json; charset=utf-8',
+      'Cache-Control': 'no-cache',
+    });
+    res.end(JSON.stringify(manifest, null, 2));
     return;
   }
 
@@ -1172,8 +1589,10 @@ const server = http.createServer((req, res) => {
           });
         }
 
-        const c = touchClient(req, body.cid, body.ua);
+        const cidHere = cidOf(req, body.cid);
+        const c = touchClient(req, cidHere, body.ua);
         const host = isHostRequest(req);
+        const effAdmin = host || isElevated(req, cidHere);
         json(res, 200, {
           authorized: true,
           status: st.status,
@@ -1181,8 +1600,12 @@ const server = http.createServer((req, res) => {
           peers: peersPayload(),
           settings,
           tg: publicTg(c),
-          admin: c.admin,
-          pending: host ? pendingList().length : 0,
+          admin: effAdmin,
+          hostAdmin: host,
+          elevated: !host && effAdmin,
+          caps: capsPayload(req, cidHere),
+          limits: limitsPayload(),
+          pending: effAdmin ? pendingList().length : 0,
         });
       })
       .catch(() => json(res, 400, { error: 'bad request' }));
@@ -1200,16 +1623,21 @@ const server = http.createServer((req, res) => {
       authorized: false,
     });
   }
+  const cid = reqCid(req, auth);   // 准入阶段已认定的设备指纹，权限判定都靠它
+  const manage = canManage(req, cid); // 管理级权限：主设备，或用专属密码提过权的设备
 
-  // 主设备管理授权设备
+  // 管理设备 / 权限（主设备，或用专属密码提过权的设备）
   if (pathname === '/api/devices') {
-    if (!isHostRequest(req)) return json(res, 403, { error: '只有主设备可以管理设备' });
+    if (!manage) return json(res, 403, { error: '没有管理权限' });
 
     if (method === 'GET') {
+      const list = deviceList();
       return json(res, 200, {
-        devices: deviceList(),
+        devices: list,
+        perms: list.reduce(function (m, v) { m[v.cid] = permsOf(v.cid); return m; }, {}),
         pending: pendingList(),
         rejected: [...pending.values()].filter((p) => p.status === 'rejected'),
+        elevated: Object.keys(elevated).filter(function (k) { return elevateRec(k); }),
       });
     }
     if (method === 'DELETE') {
@@ -1218,24 +1646,29 @@ const server = http.createServer((req, res) => {
         const n = Object.keys(devices).length;
         devices = {};
         saveDevices();
+        // 授权没了，建立在授权之上的提权也一并作废
+        const m = Object.keys(elevated).length;
+        elevated = {};
+        saveElevated();
         for (const [k, p] of pending) if (p.status !== 'rejected') pending.delete(k);
-        console.log(`  主设备撤销了全部设备授权（${n} 台）`);
+        console.log(`  主设备撤销了全部设备授权（${n} 台，其中 ${m} 台的提权同时失效）`);
         return json(res, 200, { ok: true, removed: n });
       }
-      const cid = String(url.searchParams.get('cid') || '').slice(0, 64);
-      if (devices[cid]) {
-        const nm = devices[cid].name || devices[cid].ip || cid;
-        delete devices[cid];
+      const cidKey = String(url.searchParams.get('cid') || '').slice(0, 64);
+      if (devices[cidKey]) {
+        const nm = devices[cidKey].name || devices[cidKey].ip || cidKey;
+        delete devices[cidKey];
         saveDevices();
+        if (elevated[cidKey]) { delete elevated[cidKey]; saveElevated(); }
         console.log(`  主设备移除了设备授权：${nm}`);
       }
-      pending.delete(cid);
+      pending.delete(cidKey);
       return json(res, 200, { ok: true });
     }
   }
 
   if (method === 'POST' && (pathname === '/api/devices/approve' || pathname === '/api/devices/reject')) {
-    if (!isHostRequest(req)) return json(res, 403, { error: '只有主设备可以审批' });
+    if (!manage) return json(res, 403, { error: '没有管理权限' });
     readBody(req, 4096)
       .then((raw) => {
         let body = {};
@@ -1254,6 +1687,8 @@ const server = http.createServer((req, res) => {
             firstSeen: p.at || Date.now(),
             approvedAt: Date.now(),
             lastSeen: Date.now(),
+            // 新授权的设备默认全开，主设备可以随后逐项收紧
+            perms: { send: true, text: true, image: true, file: true },
           };
           saveDevices();
           pending.delete(cid);
@@ -1290,14 +1725,38 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // 主设备改权限
+  // 主设备：单独给某台设备设定能发什么
+  if (method === 'POST' && pathname === '/api/devices/perms') {
+    if (!manage) return json(res, 403, { error: '没有管理权限' });
+    readBody(req, 4096)
+      .then((raw) => {
+        let body = {};
+        try { body = JSON.parse(raw || '{}'); } catch {}
+        const target = String(body.cid || '').slice(0, 64);
+        if (!devices[target]) return json(res, 404, { error: '这台设备还没有授权记录' });
+
+        const src = body.perms || {};
+        const next = permsOf(target);
+        for (const k of PERM_KEYS) if (typeof src[k] === 'boolean') next[k] = src[k];
+        devices[target].perms = next;
+        saveDevices();
+        console.log(`  调整设备权限：${devices[target].name || target} → ` +
+          PERM_KEYS.map((k) => k + '=' + (next[k] ? '开' : '关')).join(' '));
+        json(res, 200, { ok: true, cid: target, perms: next });
+      })
+      .catch(() => json(res, 400, { error: 'bad request' }));
+    return;
+  }
+
+  // 主设备改权限（只作用于「其他设备」整体，单台设备的限制走 /api/devices/perms）
   if (method === 'POST' && pathname === '/api/settings') {
-    if (!isHostRequest(req)) return json(res, 403, { error: '只有主设备可以修改设置' });
+    if (!manage) return json(res, 403, { error: '没有管理权限' });
     readBody(req, 8192)
       .then((raw) => {
         let body = {};
         try { body = JSON.parse(raw || '{}'); } catch {}
         for (const k of SETTING_KEYS) if (typeof body[k] === 'boolean') settings[k] = body[k];
+        if ('keepDays' in body) settings.keepDays = clampDays(body.keepDays);
         saveSettings();
         json(res, 200, { settings });
       })
@@ -1307,7 +1766,7 @@ const server = http.createServer((req, res) => {
 
   // 主设备生成二维码（其他设备扫码直接打开）
   if (method === 'GET' && pathname === '/api/qr') {
-    if (!isHostRequest(req)) return json(res, 403, { error: '只有主设备可以生成二维码' });
+    if (!manage) return json(res, 403, { error: '没有管理权限' });
     const port = server.address().port;
     const list = lanAddresses();
     const pick = String(url.searchParams.get('ip') || '') || (list[0] && list[0].address);
@@ -1328,7 +1787,6 @@ const server = http.createServer((req, res) => {
 
   // 列表 + 在线设备 + 当前权限
   if (method === 'GET' && pathname === '/api/list') {
-    const cid = url.searchParams.get('cid');
     const me = cid ? touchClient(req, cid, '') : null;
     // 私聊内容只有收发双方能看到；to 为空 = 全网可见
     const visible = me
@@ -1342,17 +1800,118 @@ const server = http.createServer((req, res) => {
       settings,
       tg: publicTg(me),
       me: me ? publicClient(me) : null,
-      admin: host,
-      pending: host ? pendingList().length : 0,
+      admin: manage,
+      hostAdmin: host,
+      elevated: isElevated(req, cid),
+      caps: capsPayload(req, cid),
+      limits: limitsPayload(),
+      pending: manage ? pendingList().length : 0,
       now: Date.now(),
     });
     return;
   }
 
-  // 发文字
+  // 批量打包下载：勾选多条内容，一次拿走
+  if (method === 'GET' && pathname === '/api/zip') {
+    const ids = String(url.searchParams.get('ids') || '')
+      .split(',').map((s) => s.trim()).filter(Boolean).slice(0, 300);
+    const me = cid ? clients.get(cid) : null;
+    // 跟 /api/list 同一套可见性规则：私聊内容不能打包给别人
+    const visible = me
+      ? items.filter((it) => !it.to || it.to === me.cid || it.owner === me.cid)
+      : items.filter((it) => !it.to);
+    const chosen = visible.filter((it) => ids.indexOf(it.id) !== -1);
+    if (!chosen.length) return json(res, 404, { error: '没有可打包的内容' });
+
+    const used = new Map();
+    const files = [];
+    let total = 0;
+    for (const it of chosen) {
+      for (const p of it.parts || []) {
+        if (!p.file) continue;
+        const abs = path.join(FILES_DIR, p.file);
+        let st;
+        try { st = fs.statSync(abs); } catch { continue; }
+        const raw = safeZipName(p.name || ('文件-' + it.id));
+        const n = (used.get(raw) || 0) + 1;
+        used.set(raw, n);
+        const dot = raw.lastIndexOf('.');
+        const name = n === 1
+          ? raw
+          : (dot > 0 ? raw.slice(0, dot) + ' (' + n + ')' + raw.slice(dot) : raw + ' (' + n + ')');
+        total += st.size;
+        files.push({ abs, name, size: st.size, time: it.time });
+      }
+    }
+    if (!files.length) return json(res, 404, { error: '选中的内容里没有文件（纯文字不用打包）' });
+    // probe=1：只问「能不能打、多大」，不真的打包——前端用它提前把错误挑出来
+    if (url.searchParams.get('probe') === '1') {
+      return json(res, 200, {
+        ok: true, count: files.length, size: total, tooBig: total > ZIP_MAX_TOTAL,
+      });
+    }
+    if (total > ZIP_MAX_TOTAL) {
+      return json(res, 413, { error: '选中的内容有 ' + fmtBytes(total) + '，太大了，请分批下载' });
+    }
+
+    const ascii = 'XiaoMao-' + new Date().toISOString().slice(0, 10).replace(/-/g, '') + '.zip';
+    const cn = '小毛互传-' + new Date().toISOString().slice(0, 10) + '.zip';
+    res.writeHead(200, {
+      'Content-Type': 'application/zip',
+      'Content-Disposition':
+        'attachment; filename="' + ascii + '"; filename*=UTF-8\'\'' + encodeURIComponent(cn),
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    streamZip(res, files).catch(() => { try { res.end(); } catch {} });
+    return;
+  }
+
+  /* ---------------- 临时提权：专属密码，无需主设备二次确认 ---------------- */
+
+  // 提权：输对专属密码立刻拥有管理权限（仅限已经通过接入许可的设备）
+  if (method === 'POST' && pathname === '/api/elevate') {
+    const ip = clientIp(req);
+    if (isHostRequest(req)) return json(res, 200, { ok: true, admin: true, elevated: false, host: true });
+    if (!cid) return json(res, 403, { error: '这台设备还没有通过接入许可' });
+    if (elevateBlocked(ip)) return json(res, 429, { error: '密码错太多次了，过 10 分钟再试' });
+
+    readBody(req, 4096)
+      .then((raw) => {
+        let body = {};
+        try { body = JSON.parse(raw || '{}'); } catch {}
+        if (String(body.password || '').trim() !== ELEVATE_PASSWORD) {
+          elevateFail(ip);
+          return json(res, 403, { error: '专属密码不正确' });
+        }
+        elevateTries.delete(ip);
+        const c = touchClient(req, cid, '');
+        elevated[cid] = { cid, name: displayName(c), ip, at: Date.now() };
+        saveElevated();
+        c.elevated = true;
+        console.log(`  ${displayName(c)} 用专属密码临时提权（8 小时内有效）`);
+        json(res, 200, { ok: true, admin: true, elevated: true, host: false });
+      })
+      .catch(() => json(res, 400, { error: 'bad request' }));
+    return;
+  }
+
+  // 交回临时提权
+  if (method === 'POST' && pathname === '/api/elevate/off') {
+    if (cid && elevated[cid]) {
+      delete elevated[cid];
+      saveElevated();
+      const c = clients.get(cid);
+      if (c) c.elevated = false;
+      console.log('  已收回临时提权：' + cid.slice(-4));
+    }
+    json(res, 200, { ok: true, admin: isHostRequest(req), elevated: false, host: isHostRequest(req) });
+    return;
+  }
+
+  // 发文字。长度按 UTF-8 字节算，超限回 413 并带上可执行的建议
   if (method === 'POST' && pathname === '/api/text') {
-    if (!canSendType(req, 'text')) return json(res, 403, { error: denyReason('text') });
-    readBody(req, MAX_TEXT)
+    readBody(req, MAX_TEXT_BYTES + 8192)
       .then((raw) => {
         let text = '';
         let cid = '';
@@ -1365,9 +1924,19 @@ const server = http.createServer((req, res) => {
         } catch {
           text = raw;
         }
+        cid = cidOf(req, cid) || cid;
+        if (!canSendType(req, 'text', cid)) return json(res, 403, { error: denyReason('text', cid) });
+
         text = text.replace(/\u0000/g, '').trim();
         if (!text) return json(res, 400, { error: '内容为空' });
-        if (text.length > MAX_TEXT) text = text.slice(0, MAX_TEXT);
+        // 超了也是拒，不在服务端悄悄截断
+        if (bytesOf(text) > MAX_TEXT_BYTES) {
+          return json(res, 413, {
+            error: '文字有 ' + fmtKB(bytesOf(text)) + '，超过上限 ' + fmtKB(MAX_TEXT_BYTES) +
+              '。建议拆开发送，或改用「存为 .md」',
+            tooBig: true,
+          });
+        }
 
         const c = touchClient(req, cid, '');
         if (to === c.cid) to = ''; // 发给自己就等于群发
@@ -1388,7 +1957,7 @@ const server = http.createServer((req, res) => {
         saveIndex();
         json(res, 200, { item });
       })
-      .catch(() => json(res, 413, { error: '内容过长' }));
+      .catch(badBody(res, '文字超过 ' + fmtKB(MAX_TEXT_BYTES) + '，建议拆开，或改用「存为 .md」发送'));
     return;
   }
 
@@ -1397,9 +1966,10 @@ const server = http.createServer((req, res) => {
     const name = (url.searchParams.get('name') || 'file').slice(-180);
     const declaredType = url.searchParams.get('type') || '';
     const isImage = /^image\//i.test(declaredType) || /\.(png|jpe?g|gif|webp|avif|bmp|svg|heic)$/i.test(name);
+    const cidHere = cidOf(req, url.searchParams.get('cid'));
 
-    if (!canSendType(req, isImage ? 'image' : 'file')) {
-      return json(res, 403, { error: denyReason(isImage ? 'image' : 'file') });
+    if (!canSendType(req, isImage ? 'image' : 'file', cidHere)) {
+      return json(res, 403, { error: denyReason(isImage ? 'image' : 'file', cidHere) });
     }
     if (staged.size >= MAX_STAGED) {
       return json(res, 429, { error: '待发送的文件太多了，先把它们发出去' });
@@ -1415,6 +1985,8 @@ const server = http.createServer((req, res) => {
     let size = 0;
     let aborted = false;
     let done = false;
+    // 边写边算指纹：写完就知道这份内容是不是已经存过一份了
+    const hash = crypto.createHash('sha256');
 
     const fail = (code, msg) => {
       if (done) return;
@@ -1428,6 +2000,7 @@ const server = http.createServer((req, res) => {
     req.on('data', (chunk) => {
       size += chunk.length;
       if (size > MAX_FILE) fail(413, '文件过大');
+      hash.update(chunk);
     });
 
     req.on('aborted', () => fail(499, '已取消'));
@@ -1438,16 +2011,26 @@ const server = http.createServer((req, res) => {
       done = true;
       if (!size) return fail(400, '空文件');
 
+      const digest = hash.digest('hex');
+      let stored_ = stored;
+      const dup = findDuplicate(digest, size);
+      if (dup) {
+        // 内容磁盘上已经有了，刚写的这份直接丢掉，指向原来那份
+        fs.unlink(path.join(FILES_DIR, stored), () => {});
+        stored_ = dup;
+      }
+
       const part = {
         kind: isImage ? 'image' : 'file',
         fid: id,
         name,
         size,
         mime: mimeOf(name, declaredType),
-        file: stored,
+        file: stored_,
+        hash: digest,
       };
       staged.set(id, { ...part, owner: owner.cid, at: Date.now() });
-      json(res, 200, { part });
+      json(res, 200, { part, deduped: !!dup });
     });
 
     req.pipe(ws);
@@ -1459,12 +2042,13 @@ const server = http.createServer((req, res) => {
    * 于是「一段文字 + 两张图 + 一段文字 + 一个压缩包」就是一条消息。
    */
   if (method === 'POST' && pathname === '/api/send') {
-    readBody(req, 256 * 1024)
+    readBody(req, MAX_SEND_BODY)
       .then((raw) => {
         let body = {};
         try { body = JSON.parse(raw || '{}'); } catch { /* 空 body */ }
 
-        const owner = touchClient(req, body.cid, '');
+        const ownerCid = cidOf(req, body.cid);
+        const owner = touchClient(req, ownerCid, '');
         let to = String(body.to || '').slice(0, 64);
         if (to === owner.cid) to = ''; // 发给自己就等于群发
         const target = to ? clients.get(to) : null;
@@ -1473,14 +2057,34 @@ const server = http.createServer((req, res) => {
         const parts = [];
         const picked = [];
         const missing = [];
+        let textBytes = 0;
 
         for (const p of wanted) {
           if (!p) continue;
           if (p.type === 'text' || p.kind === 'text') {
             const t = String(p.text || '').replace(/\u0000/g, '').trim();
             if (!t) continue;
-            if (!canSendType(req, 'text')) return json(res, 403, { error: denyReason('text') });
-            parts.push({ kind: 'text', text: t.slice(0, MAX_TEXT) });
+            if (!canSendType(req, 'text', ownerCid)) return json(res, 403, { error: denyReason('text', ownerCid) });
+
+            const piece = t;
+            const need = bytesOf(piece);
+            // 单段超了：只能截断，而截断就是丢内容 —— 宁可直接拒，也别让人以为发全了
+            if (need > MAX_TEXT_BYTES) {
+              return json(res, 413, {
+                error: '其中有一段文字就有 ' + fmtKB(need) + '，超过单段上限 ' +
+                  fmtKB(MAX_TEXT_BYTES) + '。建议拆开发送，或改用「存为 .md」',
+                tooBig: true,
+              });
+            }
+            if (textBytes + need > MAX_TEXT_TOTAL) {
+              return json(res, 413, {
+                error: '这条消息的文字总量超过 ' + fmtKB(MAX_TEXT_TOTAL) +
+                  '，建议拆开发送，或改用「存为 .md」',
+                tooBig: true,
+              });
+            }
+            textBytes += need;
+            parts.push({ kind: 'text', text: piece });
             continue;
           }
           const s = staged.get(String(p.fid || ''));
@@ -1517,7 +2121,7 @@ const server = http.createServer((req, res) => {
         saveIndex();
         json(res, 200, { item });
       })
-      .catch(() => json(res, 400, { error: 'bad request' }));
+      .catch(badBody(res, '内容超过 ' + fmtKB(MAX_SEND_BODY) + '，建议少带一些附件，或改用「存为 .md」发送'));
     return;
   }
 
@@ -1525,7 +2129,7 @@ const server = http.createServer((req, res) => {
 
   // 主设备：读写 Bot 配置（token 只回掩码，留空表示不改）
   if (method === 'POST' && pathname === '/api/tg/config') {
-    if (!isHostRequest(req)) return json(res, 403, { error: '只有主设备可以配置 Telegram' });
+    if (!manage) return json(res, 403, { error: '没有管理权限，只有主设备能配 Telegram' });
     readBody(req, 8192)
       .then(async (raw) => {
         let body = {};
@@ -1573,7 +2177,7 @@ const server = http.createServer((req, res) => {
 
   // 主设备：发一条测试消息，确认握手成功
   if (method === 'POST' && pathname === '/api/tg/test') {
-    if (!isHostRequest(req)) return json(res, 403, { error: '只有主设备可以测试' });
+    if (!manage) return json(res, 403, { error: '没有管理权限' });
     if (!tgReady()) return json(res, 400, { error: '还没配置好 Token 或接收人' });
     tgCall('sendMessage', {
       chat_id: tg.chatId,
@@ -1697,26 +2301,24 @@ const server = http.createServer((req, res) => {
     if (idx === -1) return json(res, 404, { error: '不存在' });
 
     const target = items[idx];
-    const cid = url.searchParams.get('cid');
-    const me = cid ? clients.get(cid) : null;
+    const cidDel = cidOf(req, url.searchParams.get('cid'));
+    const me = cidDel ? clients.get(cidDel) : null;
     const isMine = me && me.ip === clientIp(req) && target.owner === me.cid;
-    if (!isHostRequest(req) && !isMine) {
+    if (!canManage(req, cidDel) && !isMine) {
       return json(res, 403, { error: '只能删除自己发送的内容' });
     }
 
     items.splice(idx, 1);
-    for (const p of target.parts || []) {
-      if (p.file) fs.unlink(path.join(FILES_DIR, p.file), () => {});
-    }
+    unlinkParts(target.parts);
     reindexFiles();
     saveIndex();
     json(res, 200, { ok: true });
     return;
   }
 
-  // 清空全部：仅主设备
+  // 清空全部：主设备，或用专属密码提过权的设备
   if (method === 'DELETE' && pathname === '/api/all') {
-    if (!isHostRequest(req)) return json(res, 403, { error: '只有主设备可以清空' });
+    if (!manage) return json(res, 403, { error: '没有管理权限，只有主设备可以清空' });
     for (const it of items) {
       for (const p of it.parts || []) {
         if (p.file) fs.unlink(path.join(FILES_DIR, p.file), () => {});
@@ -1745,6 +2347,7 @@ function listen(port, attempt = 0) {
     }
   });
   server.listen(port, '0.0.0.0', () => {
+    sweepExpired();   // 开张前先把过期内容清掉，banner 上的条数才是真实存量
     const actual = server.address().port;
     const nets = lanAddresses();
     const line = '─'.repeat(46);

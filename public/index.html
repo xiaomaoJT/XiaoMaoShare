@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#f2f4f7">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="互传">
+<link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" type="image/png" href="/icon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <title>XiaoMao 互传</title>
@@ -15,6 +18,12 @@
   /* ---------------- 主题变量 ---------------- */
   :root{
     --bg:#f2f4f7;
+    /* --kb：软键盘高度，JS 按 visualViewport 实时写入；没有键盘时是 0 */
+    --kb:0px;
+    /* --fill：按钮 / 输入框 / 标签等小控件的底色。
+       毛玻璃主题里卡片本身就是半透明的，嵌在里面的小控件再半透明一次，
+       底色层层叠加后会透出背景色，文字对比度掉得很厉害。 */
+    --fill:#f7f9fc;
     --bg-image:radial-gradient(1100px 520px at 6% -10%, #dde5f8 0%, transparent 58%),
                radial-gradient(900px 460px at 100% -4%, #ece0f8 0%, transparent 52%);
     --card:#ffffff; --card-2:#f7f9fc;
@@ -30,7 +39,7 @@
   :root[data-theme="dark"]{
     --bg:#0d1015;
     --bg-image:radial-gradient(900px 420px at 8% -8%, #17203a 0%, transparent 60%);
-    --card:#161b22; --card-2:#1b2129;
+    --card:#161b22; --card-2:#1b2129; --fill:#1b2129;
     --text:#e7ecf3; --sub:#8c96a8; --faint:#5f6b7d;
     --line:#242c37; --line-soft:#1d242e;
     --accent:#6b8afd; --accent-soft:#1d2740;
@@ -45,14 +54,25 @@
                radial-gradient(700px 620px at 96% 4%, #f7c2f0 0%, transparent 58%),
                radial-gradient(760px 560px at 50% 108%, #b9f4dc 0%, transparent 62%),
                radial-gradient(520px 420px at 78% 62%, #ffe6b8 0%, transparent 60%);
-    --card:rgba(255,255,255,.52); --card-2:rgba(255,255,255,.40);
-    --text:#161c28; --sub:#4a5568; --faint:#6b7788;
-    --line:rgba(255,255,255,.72); --line-soft:rgba(255,255,255,.55);
-    --accent:#3f63f0; --accent-soft:rgba(255,255,255,.55);
-    --header:rgba(255,255,255,.55);
-    --shadow:0 10px 40px -14px rgba(28,42,74,.30);
-    --shadow-sm:0 4px 16px -8px rgba(28,42,74,.22);
-    --glass:18px;
+    /* 整体不透明度往上提：卡片 0.52 时正文压不住后面的渐变，读起来发糊 */
+    --card:rgba(255,255,255,.74); --card-2:rgba(255,255,255,.60);
+    --fill:rgba(255,255,255,.86);
+    --text:#141a26; --sub:#3d4859; --faint:#5a6679;
+    --line:rgba(255,255,255,.92); --line-soft:rgba(255,255,255,.72);
+    --accent:#3557e8; --accent-soft:rgba(53,87,232,.15);
+    --header:rgba(255,255,255,.66);
+    --shadow:0 10px 40px -14px rgba(28,42,74,.36);
+    --shadow-sm:0 4px 16px -8px rgba(28,42,74,.26);
+    --glass:20px;
+  }
+  /* 不支持 backdrop-filter 的浏览器（老 WebView / 部分安卓内置浏览器）直接给实色，
+     否则会退化成「半透明白底 + 无模糊」，字全糊在一块。 */
+  @supports not ((backdrop-filter: blur(4px)) or (-webkit-backdrop-filter: blur(4px))){
+    :root[data-theme="glass"]{
+      --card:#f3f6fd; --card-2:#e7edfb; --fill:#eef2fd;
+      --header:rgba(244,247,253,.96);
+      --bg-image:none;
+    }
   }
 
   html,body{margin:0;padding:0}
@@ -63,7 +83,7 @@
     font:15px/1.55 -apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;
     -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
   }
-  /* 毛玻璃主题：所有卡片透出背景 */
+  /* 毛玻璃主题：卡片透出背景，但必须留住可读性 */
   :root[data-theme="glass"] .card,
   :root[data-theme="glass"] .composer,
   :root[data-theme="glass"] .peer,
@@ -74,7 +94,47 @@
   :root[data-theme="glass"] .theme-opt{
     -webkit-backdrop-filter:blur(var(--glass)) saturate(170%);
     backdrop-filter:blur(var(--glass)) saturate(170%);
+    /* 顶部一道高光，边缘立起来，卡片才不会「浮不起来」 */
+    box-shadow:var(--shadow), inset 0 1px 0 rgba(255,255,255,.55);
   }
+  /* 图片 / 代码块 / 表格这类内容必须给实底：透明背景会把本身的细节吃掉 */
+  :root[data-theme="glass"] .thumb,
+  :root[data-theme="glass"] .blk-thumb,
+  :root[data-theme="glass"] .blk-ico,
+  :root[data-theme="glass"] .fico,
+  :root[data-theme="glass"] .md .code,
+  :root[data-theme="glass"] .md table th,
+  :root[data-theme="glass"] .empty .logo,
+  :root[data-theme="glass"] .gate-logo,
+  :root[data-theme="glass"] .mark,
+  :root[data-theme="glass"] .qr-box{
+    background:#fff;
+  }
+  :root[data-theme="glass"] .md table td{background:rgba(255,255,255,.72)}
+  :root[data-theme="glass"] .md blockquote{color:var(--sub);border-left-color:rgba(28,42,74,.28)}
+  /* 小控件统一用更实的底色，避免透明套透明 */
+  :root[data-theme="glass"] .dl,
+  :root[data-theme="glass"] .mini,
+  :root[data-theme="glass"] .tg-field input,
+  :root[data-theme="glass"] .tg-state,
+  :root[data-theme="glass"] .theme-opt,
+  :root[data-theme="glass"] .qr-ip,
+  :root[data-theme="glass"] .fmt-grid button,
+  :root[data-theme="glass"] .blk-md,
+  :root[data-theme="glass"] .mdp-att,
+  :root[data-theme="glass"] .count-pill,
+  :root[data-theme="glass"] .set-tab,
+  :root[data-theme="glass"] .dlg input[type=text],
+  :root[data-theme="glass"] .gate-form input,
+  :root[data-theme="glass"] .emoji-pop,
+  :root[data-theme="glass"] .fmt-pop{background:var(--fill)}
+  /* 顶栏 / 输入条要长期驻留视线里，玻璃强度比普通卡片再高一档 */
+  :root[data-theme="glass"] .top,
+  :root[data-theme="glass"] .composer-bar{
+    -webkit-backdrop-filter:blur(26px) saturate(185%);
+    backdrop-filter:blur(26px) saturate(185%);
+  }
+  :root[data-theme="glass"] .top{background:rgba(255,255,255,.72)}
 
   /* ---------------- 顶栏 ---------------- */
   .top{
@@ -292,8 +352,61 @@
   .peers-empty{padding:14px 6px;text-align:center;font-size:12px;color:var(--faint)}
 
   /* ---------------- 工具条 / 卡片 ---------------- */
-  .toolbar{display:flex;align-items:center;gap:8px;margin:6px 2px 10px}
+  .toolbar{display:flex;align-items:center;gap:8px;margin:6px 2px 10px;flex-wrap:wrap}
   .count{font-size:12.5px;color:var(--sub);font-weight:500}
+
+  /* 断线提示：轮询连续失败才出现，恢复了自动收起 */
+  .net-bar{
+    display:flex;align-items:center;gap:8px;margin:0 2px 10px;padding:9px 12px;
+    border-radius:12px;font-size:12.5px;font-weight:550;
+    background:rgba(232,86,47,.10);border:1px solid rgba(232,86,47,.30);color:var(--brand);
+  }
+  .net-bar[hidden]{display:none}
+  .net-bar .dot{
+    width:7px;height:7px;border-radius:50%;background:var(--brand);flex:none;
+    animation:pulse 1.1s ease-in-out infinite;
+  }
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+
+  /* 筛选 + 搜索 */
+  .filters{
+    display:flex;gap:2px;padding:3px;border-radius:999px;
+    background:var(--fill);border:1px solid var(--line);box-shadow:var(--shadow-sm);
+  }
+  .fchip{
+    height:23px;padding:0 10px;border:0;border-radius:999px;background:transparent;
+    color:var(--sub);font-family:inherit;font-size:12px;font-weight:550;cursor:pointer;
+    white-space:nowrap;transition:color .15s ease,background .15s ease,box-shadow .15s ease;
+  }
+  .fchip:hover{color:var(--text)}
+  .fchip.on{background:var(--card);color:var(--text);box-shadow:var(--shadow-sm)}
+  .keep-seg{display:flex;gap:6px;flex-wrap:wrap;margin:2px 0 6px}
+  .search{
+    display:flex;align-items:center;gap:6px;height:29px;padding:0 9px;
+    border-radius:999px;background:var(--fill);border:1px solid var(--line);box-shadow:var(--shadow-sm);
+    transition:border-color .16s ease,box-shadow .16s ease;
+  }
+  .search:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  .search svg{width:13px;height:13px;flex:none;color:var(--faint)}
+  .search input{
+    width:118px;border:0;background:none;outline:none;
+    font-family:inherit;font-size:12.5px;color:var(--text);
+  }
+  .search input::placeholder{color:var(--faint)}
+  .search input::-webkit-search-cancel-button{display:none}
+  .q-clear{border:0;background:none;color:var(--faint);cursor:pointer;font-size:11px;padding:2px 1px;line-height:1}
+  .q-clear:hover{color:var(--text)}
+  .q-clear[hidden]{display:none}
+  mark.qh{background:rgba(76,110,245,.24);color:inherit;border-radius:3px;padding:0 1px}
+
+  /* 加载更早的内容 */
+  .more-row{display:flex;justify-content:center;padding:8px 0 2px}
+  .more-btn{
+    height:30px;padding:0 14px;border-radius:999px;background:var(--card);border:1px solid var(--line);
+    color:var(--sub);font-family:inherit;font-size:12px;font-weight:550;cursor:pointer;box-shadow:var(--shadow-sm);
+  }
+  .more-btn:hover{color:var(--accent);border-color:var(--accent)}
+  .search-empty{text-align:center;padding:36px 20px;color:var(--faint);font-size:13px}
   .link{font-size:12.5px;color:var(--sub);background:none;border:0;cursor:pointer;padding:4px 6px;border-radius:8px;font-family:inherit}
   .link:hover{color:var(--danger);background:var(--card-2)}
 
@@ -315,6 +428,32 @@
   .clear-btn:hover svg{transform:translateY(-1px) rotate(-6deg)}
   .clear-btn:active{transform:scale(.96)}
   .clear-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  /* 批量选择：卡片左上角一个勾，点整张卡切换 */
+  .pick-dot{
+    position:absolute;top:10px;left:-7px;width:17px;height:17px;border-radius:50%;
+    display:none;place-items:center;
+    background:var(--card);border:1.5px solid var(--line);color:transparent;
+    box-shadow:var(--shadow-sm);transition:all .15s ease;
+  }
+  .pick-dot svg{width:11px;height:11px;stroke-width:3}
+  body.picking .card{cursor:pointer;padding-left:22px}
+  body.picking .pick-dot{display:grid}
+  body.picking .card.sel{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+  body.picking .card.sel .pick-dot{background:var(--accent);border-color:var(--accent);color:#fff}
+  .sel-bar{
+    position:fixed;left:50%;transform:translateX(-50%);
+    bottom:calc(14px + env(safe-area-inset-bottom,0px) + var(--kb,0px));
+    z-index:130;display:flex;align-items:center;gap:8px;
+    width:min(560px,calc(100vw - 24px));
+    padding:10px 12px;border-radius:14px;
+    background:var(--card);border:1px solid var(--line);
+    -webkit-backdrop-filter:blur(var(--glass)) saturate(170%);
+    backdrop-filter:blur(var(--glass)) saturate(170%);
+    box-shadow:0 14px 36px -14px rgba(16,24,40,.45);
+    font-size:12.5px;font-weight:550;
+  }
+  .sel-bar[hidden]{display:none}
 
   .feed{display:flex;flex-direction:column;gap:10px}
   .card{
@@ -430,18 +569,26 @@
   .empty p{margin:0;font-size:13.5px;line-height:1.7}
 
   .foot{
-    max-width:760px;width:100%;margin:0 auto;padding:20px 16px calc(22px + env(safe-area-inset-bottom));
+    max-width:760px;width:100%;margin:0 auto;padding:20px 16px calc(22px + env(safe-area-inset-bottom,0px));
     display:flex;align-items:center;justify-content:center;gap:6px;
     font-size:11.5px;color:var(--faint);letter-spacing:.2px;
+  }
+  /* 手机上底部导航条 / 手势条会吃掉一截，给 footer 多留点安全区 */
+  @media (max-width:520px){
+    .foot{padding-bottom:calc(34px + env(safe-area-inset-bottom,0px))}
   }
   .foot b{color:var(--brand);font-weight:700;letter-spacing:.3px}
   .foot .sep{opacity:.5}
 
   /* ---------------- 弹窗组件 ---------------- */
   .dlg-mask{
-    position:fixed;inset:0;z-index:120;display:flex;align-items:center;justify-content:center;padding:20px;
+    position:fixed;inset:0;z-index:120;display:flex;align-items:center;justify-content:center;
+    /* --kb 由 JS 按软键盘实际高度写入：键盘弹出时把整张弹窗顶上去，
+       否则输入框会连着底部的「保存 / 取消」一起被盖住 */
+    padding:20px 20px calc(20px + env(safe-area-inset-bottom,0px) + var(--kb,0px));
     background:rgba(12,15,20,.42);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);
     animation:fade .18s ease;
+    transition:padding-bottom .18s ease;
   }
   @keyframes fade{from{opacity:0}to{opacity:1}}
   .dlg-mask.out{animation:fadeout .17s ease forwards}
@@ -475,11 +622,12 @@
   }
   .dlg input[type=text]:focus{border-color:var(--accent)}
   @media (max-width:520px){
-    .dlg-mask{align-items:flex-end;padding:0}
+    .dlg-mask{align-items:flex-end;padding:0 0 calc(var(--kb,0px) + env(safe-area-inset-bottom,0px))}
     .dlg{
       max-width:none;border-radius:20px 20px 0 0;
-      padding:18px 18px calc(14px + env(safe-area-inset-bottom));
-      max-height:88vh;max-height:88dvh;
+      /* 底部安全区由外层 .dlg-mask 统一兜，这里给正常的呼吸空间就行，别重复计算 */
+      padding:18px 18px 20px;
+      max-height:calc(88vh - var(--kb,0px));max-height:calc(88dvh - var(--kb,0px));
       animation:up .26s cubic-bezier(.2,.8,.3,1);
     }
     @keyframes up{from{transform:translateY(100%)}to{transform:none}}
@@ -555,8 +703,11 @@
     padding:8px 16px;border-radius:99px;
   }
   .toasts{
-    position:fixed;left:50%;transform:translateX(-50%);bottom:calc(24px + env(safe-area-inset-bottom));
-    z-index:140;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none;
+    position:fixed;left:50%;transform:translateX(-50%);
+    /* 键盘弹起时 toast 也要跟着抬起来，否则会被输入法整个盖住 */
+    bottom:calc(24px + env(safe-area-inset-bottom,0px) + var(--kb,0px));
+    z-index:200;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none;
+    transition:bottom .18s ease;
   }
   .toast{
     background:rgba(20,23,28,.94);color:#fff;font-size:13px;padding:9px 16px;border-radius:11px;
@@ -624,6 +775,10 @@
   .dev-row{display:flex;align-items:center;gap:9px;padding:9px 0;border-bottom:1px solid var(--line-soft)}
   .dev-row:last-child{border-bottom:0}
   .dev-row:first-of-type{padding-top:6px}
+  /* 已授权的设备带一行独立的权限开关，整组算一个条目 */
+  .dev-item{border-bottom:1px solid var(--line-soft)}
+  .dev-item:last-child{border-bottom:0}
+  .dev-item .dev-row{border-bottom:0}
   .dev-ava{
     width:26px;height:26px;flex:none;border-radius:8px;display:grid;place-items:center;
     font-size:11.5px;font-weight:650;color:#fff;
@@ -828,6 +983,98 @@
   .card > .shots + .text-body,.card > .shots + .file{margin-top:10px}
   .card > .file{margin-top:10px}
   .img-broken{font-size:12px;color:var(--faint);padding:10px 2px}
+
+  /* 通用提示条 */
+  .note-box{
+    display:flex;align-items:flex-start;gap:8px;padding:10px 11px;border-radius:11px;
+    background:var(--card-2);border:1px solid var(--line);
+    font-size:12px;color:var(--sub);line-height:1.62;
+  }
+  .note-box svg{width:14px;height:14px;flex:none;margin-top:2px}
+  .note-box > span{min-width:0;flex:1}
+  .note-box.accent{color:var(--accent);border-color:rgba(76,110,245,.34);background:var(--accent-soft)}
+  .note-box.warn{color:#a85c0c;border-color:rgba(214,120,20,.34);background:rgba(240,140,30,.10)}
+  :root[data-theme="dark"] .note-box.warn{color:#f0aa63;background:rgba(240,140,30,.13)}
+  .note-box .mini{margin-top:8px}
+
+  /* ---- 输入区：文字长度提示 / 超限拦控件 ---- */
+  .len-chip{
+    display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:999px;
+    font-size:11px;font-weight:600;font-variant-numeric:tabular-nums;flex:none;white-space:nowrap;
+    color:var(--sub);background:var(--card-2);border:1px solid var(--line);transition:.15s;
+  }
+  /* display:inline-flex 会盖掉 hidden 的 UA 样式 */
+  .len-chip[hidden]{display:none}
+  .len-chip.warn{color:#a85c0c;border-color:rgba(214,120,20,.42);background:rgba(240,140,30,.1)}
+  .len-chip.bad{color:var(--danger);border-color:rgba(229,72,77,.42);background:rgba(229,72,77,.09)}
+  :root[data-theme="dark"] .len-chip.warn{color:#f0aa63}
+  .limit-box{
+    margin-top:10px;padding:10px 12px;border-radius:12px;font-size:12.5px;line-height:1.62;
+    background:rgba(229,72,77,.09);color:#c2410c;border:1px solid rgba(229,72,77,.28);
+  }
+  :root[data-theme="dark"] .limit-box{color:#ffb08a;background:rgba(229,72,77,.14)}
+  .limit-box.warn{background:rgba(240,140,30,.1);color:#a85c0c;border-color:rgba(214,120,20,.34)}
+  :root[data-theme="dark"] .limit-box.warn{color:#f0aa63;background:rgba(240,140,30,.13)}
+  .limit-box b{font-weight:650}
+  .limit-box .btn{height:30px;margin-top:9px;font-size:12.5px}
+  :root[data-theme="glass"] .limit-box,
+  :root[data-theme="glass"] .note-box{background:var(--fill)}
+
+  /* ---- 设置弹窗：左侧 tab 导航 + 右侧内容 ---- */
+  .dlg.wide{max-width:720px}
+  .set-wrap{display:flex;gap:16px;align-items:flex-start}
+  .set-nav{
+    width:134px;flex:none;display:flex;flex-direction:column;gap:2px;
+  }
+  .set-tab{
+    display:flex;align-items:center;gap:8px;min-height:38px;padding:0 11px;border-radius:10px;
+    border:1px solid transparent;background:transparent;color:var(--sub);
+    font:inherit;font-size:13px;font-weight:550;text-align:left;cursor:pointer;transition:.14s;
+  }
+  .set-tab:hover{color:var(--text);background:var(--card-2)}
+  .set-tab.on{background:var(--accent-soft);color:var(--accent);border-color:rgba(76,110,245,.26)}
+  .set-tab svg{width:15px;height:15px;flex:none}
+  .set-tab .pg{margin-left:auto;font-size:10.5px;font-weight:700;color:var(--faint)}
+  .set-pane{flex:1;min-width:0;display:none}
+  .set-pane.on{display:block;animation:setIn .18s ease}
+  @keyframes setIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+  .set-sec-t{
+    font-size:12px;font-weight:650;letter-spacing:.3px;color:var(--sub);
+    text-transform:uppercase;margin:0 0 2px;
+  }
+  /* 与 .dev-sec 同样的分隔线，但因为它是每个 pane 的第一块，不需要上边距 */
+  .set-pane .dev-sec:first-child{margin-top:0;padding-top:0;border-top:0}
+  @media (max-width:640px){
+    .dlg.wide{max-width:none}
+    .set-wrap{flex-direction:column;gap:11px}
+    /* 窄屏放不下竖排导航：改成顶部横向滚动的分段条 */
+    .set-nav{
+      width:auto;flex-direction:row;gap:6px;overflow-x:auto;scrollbar-width:none;
+      padding:2px 0 4px;
+    }
+    .set-nav::-webkit-scrollbar{display:none}
+    .set-tab{
+      flex:none;height:34px;min-height:34px;padding:0 12px;border-radius:999px;
+      border:1px solid var(--line);background:var(--card-2);white-space:nowrap;
+    }
+    .set-tab.on{border-color:var(--accent)}
+    .set-tab .pg{display:none}
+    .set-pane{width:100%}
+  }
+
+  /* ---- 单台设备的发送权限：一行小开关 ---- */
+  .perm-row{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px 35px}
+  .perm-chip{
+    display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 9px;border-radius:8px;
+    border:1px solid var(--line);background:var(--fill);color:var(--sub);
+    font:inherit;font-size:11.5px;font-weight:550;cursor:pointer;transition:.14s;
+  }
+  .perm-chip:hover{border-color:var(--faint);color:var(--text)}
+  .perm-chip i{width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
+  .perm-chip.on{color:#0f9b6c;border-color:rgba(15,155,108,.4);background:rgba(18,184,134,.1)}
+  .perm-chip.off{color:var(--danger);border-color:rgba(229,72,77,.38);background:rgba(229,72,77,.07)}
+  :root[data-theme="dark"] .perm-chip.on{color:#4ade9b}
+  .perm-note{font-size:11.5px;color:var(--faint);line-height:1.6;margin:0 0 4px}
 </style>
 </head>
 <body>
@@ -896,17 +1143,36 @@
         </button>
         <input type="file" id="file" multiple hidden>
         <span class="hint" id="hint">拖拽文件到页面 · 可直接粘贴截图</span>
+        <span class="len-chip" id="lenChip" hidden></span>
         <button class="btn primary" id="send" disabled>发送</button>
       </div>
+      <div class="limit-box" id="limitBox" hidden></div>
       <div class="locked" id="locked" hidden></div>
     </section>
   </div>
 </div>
 
 <main class="wrap">
+  <div class="net-bar" id="netBar" hidden>
+    <span class="dot"></span>
+    <span id="netMsg">连不上服务了，正在重试…</span>
+  </div>
   <div class="toolbar">
     <span class="count" id="count">载入中…</span>
     <div class="spacer"></div>
+    <div class="filters" id="filters" role="tablist" aria-label="内容筛选">
+      <button class="fchip on" data-f="all" type="button">全部</button>
+      <button class="fchip" data-f="text" type="button">文字</button>
+      <button class="fchip" data-f="image" type="button">图片</button>
+      <button class="fchip" data-f="file" type="button">文件</button>
+      <button class="fchip" data-f="private" type="button">私聊</button>
+    </div>
+    <div class="search" id="search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+      <input id="q" type="search" placeholder="搜内容 / 文件名" autocomplete="off" aria-label="搜索内容">
+      <button class="q-clear" id="qClear" type="button" hidden aria-label="清除搜索">✕</button>
+    </div>
+    <button class="link" id="selBtn" type="button" title="勾选多条内容，打包成一个 zip 下载">批量选择</button>
     <button class="clear-btn" id="clear" hidden title="删除全部内容">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
@@ -931,6 +1197,14 @@
   <a class="lb-open" id="lbOpen" target="_blank" rel="noopener">查看原图</a>
 </div>
 <div class="toasts" id="toasts"></div>
+
+<div class="sel-bar" id="selBar" hidden>
+  <span id="selCount">已选 0 项</span>
+  <div class="spacer"></div>
+  <button class="mini" id="selAll" type="button">全选</button>
+  <button class="mini ok" id="selDl" type="button">打包下载</button>
+  <button class="mini" id="selExit" type="button">退出</button>
+</div>
 
 <div class="peers-pop" id="peersPop" hidden>
   <div class="peers-head">
@@ -961,6 +1235,7 @@
   var mdBtn = $('mdBtn'), mdBusy = false;
   var tgBtn = $('tgBtn'), tgLabel = $('tgLabel'), tgBusy = false;
   var clearBtn = $('clear'), hintEl = $('hint'), lockedEl = $('locked');
+  var netBar = $('netBar');
 
   function esc(s) {
     return String(s).replace(/[&<>"']/g, function (c) {
@@ -1158,6 +1433,12 @@
   var ICONTRAST = svgIcon('<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18" fill="currentColor" stroke="none"/>', 1.8);
   var IQR = svgIcon('<rect x="3.2" y="3.2" width="6.6" height="6.6" rx="1.3"/><rect x="14.2" y="3.2" width="6.6" height="6.6" rx="1.3"/><rect x="3.2" y="14.2" width="6.6" height="6.6" rx="1.3"/><path d="M14.2 14.2h2.6v2.6h-2.6zM18.2 18.2h2.6v2.6h-2.6zM14.2 20.8h1.2M20.8 14.2v1.2"/>', 1.9);
   var ICHECK = svgIcon('<path d="M20 6L9 17l-5-5"/>', 2.6);
+  var ISHIELD = svgIcon('<path d="M12 3l7 3v5.4c0 4.2-2.9 7.6-7 8.6-4.1-1-7-4.4-7-8.6V6l7-3z"/><path d="M9.4 12.1l1.9 1.9 3.3-3.3"/>', 1.9);
+  var ISHIELD_OPEN = svgIcon('<path d="M12 3l7 3v5.4c0 4.2-2.9 7.6-7 8.6-4.1-1-7-4.4-7-8.6V6l7-3z"/>', 1.9);
+  var IDEV = svgIcon('<rect x="2" y="5" width="14" height="10" rx="2"/><path d="M6 19h6M11 15v1"/><path d="M18 9h2v6"/>', 1.8);
+  var ISLIDERS = svgIcon('<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>', 1.9);
+  var IPALETTE = svgIcon('<circle cx="12" cy="12" r="8.4"/><circle cx="9.2" cy="9.4" r="1.1" fill="currentColor" stroke="none"/><circle cx="14.6" cy="9.4" r="1.1" fill="currentColor" stroke="none"/><circle cx="10" cy="14.6" r="1.1" fill="currentColor" stroke="none"/><circle cx="14.4" cy="14.2" r="1.1" fill="currentColor" stroke="none"/>', 1.8);
+  var ITG = svgIcon('<path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4Z"/>', 1.9);
 
   function toast(msg) {
     var box = $('toasts');
@@ -1202,6 +1483,65 @@
     }
   })();
 
+  /* ============================================================ 移动端软键盘 */
+  /**
+   * 手机上输入框一聚焦，输入法会把弹窗底部的按钮整个盖住——尤其是那些
+   * 自带候选词工具栏的输入法，能把操作区挡掉大半。
+   * 做法：用 visualViewport 量出被吃掉的高度写进 --kb，
+   * CSS 里 .dlg-mask 和 .toasts 的 bottom padding 都吃这个变量，于是整张弹窗会被抬起来。
+   */
+  var Keyboard = (function () {
+    var vv = window.visualViewport;
+    var root = document.documentElement;
+    var maxH = 0;
+
+    function isTextField(el) {
+      return !!el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName);
+    }
+    function set(px) {
+      root.style.setProperty('--kb', Math.round(px) + 'px');
+    }
+    function measure() {
+      if (!vv) return;
+      // 没在输入：把当前高度记作「无键盘」基准，并清空偏移
+      if (!isTextField(document.activeElement)) {
+        maxH = Math.max(maxH, vv.height);
+        set(0);
+        return;
+      }
+      maxH = Math.max(maxH, vv.height);
+      set(Math.max(0, maxH - vv.height));
+    }
+    /** 键盘有弹出动画，量一次不够，跟着刷几帧 */
+    function track(el) {
+      var n = 0, centered = false;
+      (function step() {
+        measure();
+        if (!centered) {
+          centered = true;
+          try { el.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch (err) {}
+        }
+        if (++n < 10) setTimeout(step, 110);
+      })();
+    }
+
+    document.addEventListener('focusin', function (e) {
+      if (isTextField(e.target)) track(e.target);
+    }, true);
+    document.addEventListener('focusout', function () { setTimeout(measure, 80); }, true);
+    if (vv) {
+      vv.addEventListener('resize', measure);
+      vv.addEventListener('scroll', measure);
+    }
+    window.addEventListener('resize', measure);
+    window.addEventListener('orientationchange', function () {
+      maxH = 0;
+      setTimeout(measure, 260);
+    });
+    measure();
+    return { measure: measure };
+  })();
+
   /* ============================================================ 弹窗组件 */
   var Dialog = (function () {
     function build(opt) {
@@ -1209,7 +1549,7 @@
         var mask = document.createElement('div');
         mask.className = 'dlg-mask';
         var card = document.createElement('div');
-        card.className = 'dlg';
+        card.className = 'dlg' + (opt.wide ? ' wide' : '');
         card.setAttribute('role', 'dialog');
         card.setAttribute('aria-modal', 'true');
 
@@ -1280,7 +1620,7 @@
             if (focusEl.select) focusEl.select();
           } catch (err) {}
         }, 40);
-        if (opt.onReady) opt.onReady({ close: finish });
+        if (opt.onReady) opt.onReady({ close: finish, relayout: syncFade, body: box });
       });
     }
 
@@ -1322,15 +1662,31 @@
     tg: { ready: false, enabled: false, configured: false, unlocked: false, bot: '', target: '' },
     tgOn: localStorage.getItem('xm.tg') === '1',
     peers: [],
+    // admin = 拥有管理能力（主设备，或用专属密码临时提过权的设备）
     admin: false,
+    hostAdmin: false,
+    elevated: false,
+    // caps = 这台设备实际能发什么，由服务端按「全局开关 ∩ 本机权限」算好
+    caps: { send: true, text: true, image: true, file: true },
+    // limits = 服务端下发的长度上限，前端据此提前拦
+    limits: { textBytes: 400 * 1024, textTotal: 512 * 1024, warnBytes: 48 * 1024, parts: 30 },
     pending: 0,
     toCid: '',
-    toName: ''
+    toName: '',
+    pickMode: false,         // 批量选择模式
+    picked: new Set()        // 勾中的消息 id
   };
+  var textOverLimit = false;   // 文字超上限：发送按钮要锁掉，避免内容被静默截断
   var nodes = new Map();
   var lastSig = '';
   var pollTimer = null;
   var tickTimer = null;
+
+  /* 列表筛选 / 分页：内容攒多了不能一次性全铺到 DOM 里 */
+  var allItems = [];
+  var pageLimit = 20;          // 当前渲染多少条，滚到底再 +20
+  var view = { q: '', filter: 'all' };
+  var netFail = 0;             // 连续失败次数，攒够就提示断线
 
   /** 设备指纹：授权要靠它认设备（只看 IP 会让换了设备的同一个 IP 白嫖授权） */
   function setCid(cid) {
@@ -1361,7 +1717,12 @@
     opt.headers = headers;
     return fetch(path, opt).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (d) {
-        if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+        if (!r.ok) {
+          var er = new Error(d.error || ('HTTP ' + r.status));
+          er.status = r.status;
+          er.tooBig = !!d.tooBig;   // 服务端明确标记「内容过长」，前端要给引导而不是干巴巴一句失败
+          throw er;
+        }
         return d;
       });
     });
@@ -1555,6 +1916,13 @@
         b.className = 'pbadge';
         b.textContent = '主设备';
         el.appendChild(b);
+      } else if (p.elevated) {
+        // 用专属密码提过权的设备也算管理者，得让人一眼看出来
+        var eb = document.createElement('span');
+        eb.className = 'pbadge';
+        eb.textContent = '提权中';
+        eb.title = '这台设备用专属密码临时提权中';
+        el.appendChild(eb);
       }
       if (isMe) {
         var me = document.createElement('span');
@@ -1679,22 +2047,24 @@
   }
 
   /* ============================================================ 权限 */
+  /**
+   * 能不能发某种内容，由服务端算好的 caps 决定。
+   * 服务端会把「全局开关 ∩ 这台设备的独立权限」一起算进去，前端不再自己推规则，
+   * 免得改了服务端逻辑前端还在按老规则放行，最后发出去才被 403 打回来。
+   */
   function canSend(kind) {
-    if (state.admin) return true;
-    var s = state.settings;
-    if (!s.allowSend) return false;
-    if (kind === 'text') return s.allowText;
-    if (kind === 'image') return s.allowImage;
-    return s.allowFile;
+    var c = state.caps || {};
+    return !!c[kind];
   }
   function canDelete(it) {
     return state.admin || (it.owner && it.owner === state.cid);
   }
 
   function applyPermissions() {
-    var s = state.settings;
     var textOK = canSend('text');
     var attachOK = canSend('image') || canSend('file');
+    var fileOK = canSend('file');
+    var imgOK = canSend('image');
 
     compose.forEach(function (b) {
       if (b.type === 'text') b.el.disabled = !textOK;
@@ -1710,10 +2080,12 @@
 
     var msg = '';
     if (!state.admin) {
-      if (!s.allowSend) msg = '主设备已关闭其他设备的发送权限，当前只能查看和下载';
-      else if (!textOK && !attachOK) msg = '主设备限制了可发送的内容类型';
-      else if (!textOK) msg = '当前只能发送图片或文件';
-      else if (!attachOK) msg = '当前只能发送文字';
+      if (!textOK && !attachOK) msg = '这台设备的发送权限已被关闭，当前只能查看和下载';
+      else if (!textOK) msg = '这台设备当前只能发送图片或文件';
+      else if (!attachOK) msg = '这台设备当前只能发送文字';
+      else if (!imgOK && !fileOK) msg = '这台设备的附件发送已被关闭';
+      else if (!imgOK) msg = '这台设备不能发图片';
+      else if (!fileOK) msg = '这台设备不能发文件';
     }
     lockedEl.hidden = !msg;
     lockedEl.innerHTML = msg ? (ILOCK + '<span>' + esc(msg) + '</span>') : '';
@@ -1721,13 +2093,18 @@
     if (msg) hintEl.hidden = true;
     else syncSend();
 
-    var sb = $('settingsBtn');    sb.hidden = !state.admin;
-    sb.classList.toggle('admin', state.admin);
-    if (!sb.firstChild) sb.innerHTML = IGEAR;
+    // 谁都能看到这个入口：主设备直接进设置，其他设备点它走「临时提权」
+    var sb = $('settingsBtn');
+    sb.hidden = false;
+    sb.innerHTML = state.admin ? IGEAR : ISHIELD;
+    sb.classList.toggle('admin', !!state.admin);
+    sb.classList.toggle('elev', !!state.elevated);
+    sb.title = state.hostAdmin
+      ? '主设备设置'
+      : state.elevated
+        ? '临时提权中 · 主设备设置（有效期 8 小时）'
+        : '用专属密码临时提权';
     sb.classList.toggle('dot', state.admin && state.pending > 0);
-    sb.title = state.admin && state.pending > 0
-      ? ('主设备设置 · ' + state.pending + ' 台设备等待确认')
-      : '主设备设置';
 
     var qb = $('qrBtn');
     qb.hidden = !state.admin;
@@ -1743,7 +2120,12 @@
    */
   function renderTg() {
     var t = state.tg || {};
-    // 没配好机器人时不打扰其他设备；主设备留个入口，点了直接去配置
+    /**
+     * 这个按钮只在「主设备已经在设置里显式启用 Telegram」之后才出现。
+     * 之前是 admin 就无条件显示，很多人压根没配机器人，栏里却常年挂着一个 TG。
+     */
+    if (!t.enabled) { tgBtn.hidden = true; return; }
+    // 启用了但还没配好：只给有管理权限的设备留入口，别的设备没必要看
     if (!t.ready && !state.admin) { tgBtn.hidden = true; return; }
     tgBtn.hidden = false;
 
@@ -1753,6 +2135,8 @@
 
     if (!t.ready) {
       tgBtn.title = '主设备还没配置 Telegram 机器人 · 点这里去设置';
+    } else if (!t.enabled) {
+      tgBtn.title = 'Telegram 未启用 · 点这里去设置';
     } else if (!t.unlocked) {
       tgBtn.title = '输入密码解锁 Telegram 远程发送';
     } else if (on) {
@@ -1809,6 +2193,11 @@
 
   tgBtn.addEventListener('click', function () {
     if (tgBusy) return;
+    if (!state.tg.enabled) {
+      if (state.admin) { openSettings('tg'); toast('请先在设置里打开 Telegram 开关'); }
+      else toast('Telegram 未启用');
+      return;
+    }
     if (!state.tg.ready) {
       if (state.admin) openSettings();
       else toast('主设备还没配置 Telegram 机器人');
@@ -1856,6 +2245,12 @@
     var el = document.createElement('article');
     el.className = 'card';
     el.dataset.tg = it.tgAt ? '1' : '';
+
+    // 批量选择的勾：平时藏起来，进入选择模式才出现
+    var dot = document.createElement('span');
+    dot.className = 'pick-dot';
+    dot.innerHTML = ICHECK;
+    el.appendChild(dot);
 
     var meta = document.createElement('div');
     meta.className = 'meta';
@@ -1957,7 +2352,63 @@
     });
     flushImages();
 
+    // 选择模式下点整张卡切换选中；卡片里本来就有按钮/链接，那些照旧各干各的
+    el.addEventListener('click', function (e) {
+      if (!state.pickMode) return;
+      if (e.target.closest && e.target.closest('.icon, a, button, img')) return;
+      togglePick(it.id);
+    });
+
     return el;
+  }
+
+  /* ---------------- 批量选择 ---------------- */
+  var selBar = $('selBar'), selBtn = $('selBtn');
+
+  function setPickMode(on) {
+    state.pickMode = on;
+    state.picked.clear();
+    document.body.classList.toggle('picking', on);
+    selBar.hidden = !on;
+    selBtn.textContent = on ? '退出选择' : '批量选择';
+    render();
+    updateSelBar();
+  }
+  function togglePick(id) {
+    if (state.picked.has(id)) state.picked.delete(id);
+    else state.picked.add(id);
+    var el = nodes.get(id);
+    if (el) el.classList.toggle('sel', state.picked.has(id));
+    updateSelBar();
+  }
+  function updateSelBar() {
+    var n = state.picked.size;
+    $('selCount').textContent = n ? ('已选 ' + n + ' 项') : '点卡片选择要下载的内容';
+    $('selDl').disabled = !n;
+  }
+  async function downloadZip() {
+    var ids = [];
+    state.picked.forEach(function (id) { ids.push(id); });
+    if (!ids.length) return;
+    var qs = '?ids=' + encodeURIComponent(ids.join(',')) + '&cid=' + encodeURIComponent(state.cid);
+    try {
+      // 先探一下能不能打包，别让用户下载到一个写着错误信息的 zip
+      var info = await api('/api/zip' + qs + '&probe=1');
+      if (!info.count) return toast('选中的内容里没有文件');
+      if (info.tooBig) {
+        return toast('选中的内容有 ' + Math.round(info.size / 1048576) + ' MB，太大了，请分批下载');
+      }
+      toast('正在打包 ' + info.count + ' 个文件…');
+      var a = document.createElement('a');
+      a.href = '/api/zip' + qs;
+      a.download = '';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setPickMode(false);
+    } catch (e) {
+      toast(e.message || '打包失败');
+    }
   }
 
   function fileRow(p) {
@@ -2036,11 +2487,75 @@
     } catch (e) { toast(e.message || '删除失败'); }
   }
 
-  function render(items) {
+  /* ---------------- 筛选 / 分页 ---------------- */
+  function isImagePart(p) {
+    return !!p && p.kind === 'file' && /^image\//i.test(p.type || '');
+  }
+  function matchFilter(it) {
+    var f = view.filter;
+    if (f === 'all') return true;
+    var parts = it.parts || [];
+    if (f === 'private') return !!it.to;
+    if (f === 'text') return parts.some(function (p) { return p.kind === 'text'; });
+    if (f === 'image') return parts.some(isImagePart);
+    if (f === 'file') return parts.some(function (p) { return p.kind === 'file' && !isImagePart(p); });
+    return true;
+  }
+  function matchQuery(it) {
+    var q = view.q;
+    if (!q) return true;
+    if ((it.from || '').toLowerCase().indexOf(q) >= 0) return true;
+    var parts = it.parts || [];
+    for (var i = 0; i < parts.length; i++) {
+      var p = parts[i];
+      var s = p.kind === 'text' ? p.text : p.name;
+      if (s && String(s).toLowerCase().indexOf(q) >= 0) return true;
+    }
+    return false;
+  }
+  function visibleItems() {
+    return allItems.filter(function (it) { return matchFilter(it) && matchQuery(it); });
+  }
+
+  var moreIO = null;
+  /** 「加载更早」按钮：滚到附近自动续，不用一下把上百条都塞进 DOM */
+  function renderMore(total, shown) {
+    var row = feed.querySelector('.more-row');
+    if (shown < total) {
+      if (!row) {
+        row = document.createElement('div');
+        row.className = 'more-row';
+        var b = document.createElement('button');
+        b.className = 'more-btn';
+        b.type = 'button';
+        b.onclick = function () { pageLimit += 20; render(); };
+        row.appendChild(b);
+        feed.appendChild(row);
+      }
+      row.querySelector('.more-btn').textContent =
+        '加载更早的 ' + Math.min(20, total - shown) + ' 条（还有 ' + (total - shown) + ' 条）';
+      if (typeof IntersectionObserver !== 'undefined') {
+        if (moreIO) moreIO.disconnect();
+        moreIO = new IntersectionObserver(function (es) {
+          for (var i = 0; i < es.length; i++) {
+            if (es[i].isIntersecting) { pageLimit += 20; render(); break; }
+          }
+        }, { rootMargin: '400px 0px' });
+        moreIO.observe(row.querySelector('.more-btn'));
+      }
+    } else if (row) {
+      if (moreIO) { moreIO.disconnect(); moreIO = null; }
+      row.remove();
+    }
+  }
+
+  function render() {
+    var list = visibleItems();
+    var shown = list.slice(0, pageLimit);
     var seen = new Set();
     var fresh = [];
     var frag = document.createDocumentFragment();
-    items.forEach(function (it) {
+    shown.forEach(function (it) {
       var el = nodes.get(it.id);
       // Telegram 同步状态变了要重画：卡片按 id 缓存，不重画就永远看不到那个标记
       if (el && (el.dataset.tg === '1') !== !!it.tgAt) {
@@ -2051,6 +2566,7 @@
         fresh.push(re);
       }
       if (!el) { el = makeCard(it); nodes.set(it.id, el); fresh.push(el); }
+      el.classList.toggle('sel', state.picked.has(it.id));
       frag.appendChild(el);
       seen.add(it.id);
     });
@@ -2065,17 +2581,52 @@
       s.textContent = fmtTime(Number(s.dataset.ts));
     });
 
-    countEl.textContent = items.length ? ('共 ' + items.length + ' 条内容') : '还没有内容';
-    var empty = feed.querySelector('.empty');
-    if (!items.length && !empty) {
-      var e = document.createElement('div');
-      e.className = 'empty';
-      e.innerHTML = '<div class="logo"><img src="/logo.gif" alt="XiaoMao"></div>'
-        + '<p>把文件、图片拖进来，或直接粘贴截图<br>发送后，同一 Wi-Fi 下的设备都能看到</p>';
-      feed.appendChild(e);
-    } else if (items.length && empty) {
-      empty.remove();
+    if (view.q || view.filter !== 'all') {
+      countEl.textContent = '筛出 ' + list.length + ' 条 · 共 ' + allItems.length + ' 条';
+    } else {
+      countEl.textContent = allItems.length ? ('共 ' + allItems.length + ' 条内容') : '还没有内容';
     }
+
+    var empty = feed.querySelector('.empty');
+    var sEmpty = feed.querySelector('.search-empty');
+    if (!allItems.length) {
+      if (sEmpty) sEmpty.remove();
+      if (!empty) {
+        var e = document.createElement('div');
+        e.className = 'empty';
+        e.innerHTML = '<div class="logo"><img src="/logo.gif" alt="XiaoMao"></div>'
+          + '<p>把文件、图片拖进来，或直接粘贴截图<br>发送后，同一 Wi-Fi 下的设备都能看到</p>';
+        feed.appendChild(e);
+      }
+    } else {
+      if (empty) empty.remove();
+      if (!list.length) {
+        if (!sEmpty) {
+          var se = document.createElement('div');
+          se.className = 'search-empty';
+          se.textContent = '没有匹配的内容，换个关键词或筛选试试';
+          feed.appendChild(se);
+        }
+      } else if (sEmpty) {
+        sEmpty.remove();
+      }
+    }
+    renderMore(list.length, shown.length);
+  }
+
+  function setFilter(f) {
+    view.filter = f;
+    Array.prototype.forEach.call(document.querySelectorAll('#filters .fchip'), function (b) {
+      b.classList.toggle('on', b.dataset.f === f);
+    });
+    pageLimit = 20;
+    render();
+  }
+  function setQuery(q) {
+    view.q = String(q || '').trim().toLowerCase();
+    $('qClear').hidden = !view.q && !String(q || '');
+    pageLimit = 20;
+    render();
   }
 
   /* ============================================================ 同步 */
@@ -2084,8 +2635,28 @@
   }
   function startPolling() {
     stopPolling();
-    pollTimer = setInterval(function () { poll(false); }, 1500);
+    pollTimer = setInterval(function () { poll(false); }, pollMs);
     if (!tickTimer) tickTimer = setInterval(tickTimes, 20000);
+  }
+
+  /* 断线：连续两次拉不到才提示，避免一次抖动就吓人一跳；断了就把频率降下来省电 */
+  var pollMs = 1500;
+  function markOffline() {
+    netFail++;
+    if (netFail < 2) return;
+    if (netBar.hidden) {
+      netBar.hidden = false;
+      $('netMsg').textContent = '连不上服务了，正在重试（可能是电脑休眠或 Wi-Fi 断了）';
+    }
+    if (pollMs !== 4000) { pollMs = 4000; startPolling(); }
+  }
+  function markOnline() {
+    if (!netBar.hidden) {
+      netBar.hidden = true;
+      toast('已重新连上');
+    }
+    if (netFail >= 2 && pollMs !== 1500) { pollMs = 1500; startPolling(); }
+    netFail = 0;
   }
 
   function poll(force) {
@@ -2104,12 +2675,16 @@
     }).then(function (d) {
       applyHello(d);
 
-      var list = d.items || [];
-      var sig = list.map(function (x) { return x.id; }).join(',');
+      markOnline();
+      allItems = d.items || [];
+      var sig = allItems.map(function (x) { return x.id; }).join(',');
       if (!force && sig === lastSig) { tickTimes(); return; }
       lastSig = sig;
-      render(list);
-    }).catch(function () {});
+      render();
+    }).catch(function (e) {
+      if (e && e.message === 'unauthorized') return;
+      markOffline();
+    });
   }
 
   function applyHello(d) {
@@ -2119,8 +2694,12 @@
       state.me = d.me;
     }
     if (typeof d.admin === 'boolean') state.admin = d.admin;
+    if (typeof d.hostAdmin === 'boolean') state.hostAdmin = d.hostAdmin;
+    if (typeof d.elevated === 'boolean') state.elevated = d.elevated;
     if (typeof d.pending === 'number') state.pending = d.pending;
     if (d.settings) state.settings = d.settings;
+    if (d.caps) state.caps = d.caps;
+    if (d.limits) state.limits = d.limits;
     if (d.tg) state.tg = d.tg;
     if (d.peers) { state.peers = d.peers; renderPeers(d.peers); }
     applyPermissions();
@@ -2452,9 +3031,96 @@
     });
   }
 
+  /* ---- 文字长度：一律按 UTF-8 字节算 ----
+     之前服务端按「字符数」限量，中文一个字 3 字节，1.7 万字就超了；
+     而超限时它直接掐连接，浏览器只收到一个没有正文的 Failed to fetch。 */
+  function byteLen(s) {
+    s = String(s == null ? '' : s);
+    try {
+      if (typeof TextEncoder === 'function') return new TextEncoder().encode(s).length;
+    } catch (e) {}
+    var n = 0;
+    for (var i = 0; i < s.length; i++) {
+      var c = s.charCodeAt(i);
+      n += c < 0x80 ? 1 : c < 0x800 ? 2 : 3;
+    }
+    return n;
+  }
+  function fmtKB(n) { return Math.round(n / 1024) + ' KB'; }
+
+  function textMetrics() {
+    var total = 0, biggest = 0;
+    compose.forEach(function (b) {
+      if (b.type !== 'text') return;
+      var v = byteLen(b.el.value);
+      total += v;
+      if (v > biggest) biggest = v;
+    });
+    return { total: total, biggest: biggest };
+  }
+
+  /** 更新长度徽标与超限提示，返回 true 表示当前文字量已经超限 */
+  function applyTextMeter() {
+    var L = state.limits || {};
+    var maxTotal = L.textTotal || L.textBytes || 512 * 1024;
+    var maxOne = L.textBytes || 400 * 1024;
+    var warn = L.warnBytes || 48 * 1024;
+
+    var m = textMetrics();
+    var n = m.total;
+    var chip = $('lenChip'), box = $('limitBox');
+    var over = n > maxTotal || m.biggest > maxOne;
+
+    textOverLimit = over;
+
+    if (n < Math.min(warn, 6 * 1024)) {
+      chip.hidden = true;
+      box.hidden = true;
+      return over;
+    }
+
+    chip.hidden = false;
+    chip.textContent = fmtKB(n) + ' / ' + fmtKB(maxTotal);
+    chip.className = 'len-chip' + (over ? ' bad' : n >= warn ? ' warn' : '');
+    chip.title = over ? '文字超出上限，发送已被拦下' : '已输入文字 / 单条上限';
+
+    if (over) {
+      box.hidden = false;
+      box.className = 'limit-box';
+      var why = m.biggest > maxOne
+        ? '其中最长的一段就有 ' + fmtKB(m.biggest) + '，超过单段上限 ' + fmtKB(maxOne) + '，发出去会被截断。'
+        : '这条消息的文字共 ' + fmtKB(n) + '，超过单条上限 ' + fmtKB(maxTotal) + '。';
+      box.innerHTML = '<div>' + why + '</div>';
+      var canFile = canSend('file');
+      if (canFile) {
+        box.insertAdjacentHTML('beforeend',
+          '<div><b>建议改用「存为 .md」发送</b>：内容会打包成一个 md 文件，不受这个长度限制。</div>');
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'btn primary';
+        b.textContent = '改用 .md 发送';
+        b.onclick = function () { sendAsMarkdown(); };
+        box.appendChild(b);
+      } else {
+        box.insertAdjacentHTML('beforeend', '<div>这台设备没有文件发送权限，请把内容拆短后再发。</div>');
+      }
+    } else if (n >= warn) {
+      box.hidden = false;
+      box.className = 'limit-box warn';
+      box.innerHTML = '<div>内容较长（' + fmtKB(n) + '，上限 ' + fmtKB(maxTotal) +
+        '）。后面还要加的话，建议点工具条上的「.md」打包发送。</div>';
+    } else {
+      box.hidden = true;
+    }
+    return over;
+  }
+
   function syncSend() {
+    // 先量长度：textOverLimit 直接决定发送按钮能不能点
+    applyTextMeter();
+
     var allowed = canSend('text') || canSend('image') || canSend('file');
-    sendBtn.disabled = !allowed || !hasContent();
+    sendBtn.disabled = !allowed || !hasContent() || textOverLimit;
     if (mdBtn) mdBtn.disabled = mdBusy || !canSend('file') || !hasContent();
 
     var n = compose.filter(function (b) { return b.type === 'media'; }).length;
@@ -2477,6 +3143,25 @@
     addTextBlock(false);
     if (previewOn) togglePreview(false);
     syncSend();
+  }
+
+  /** 服务端判定「太长」时弹的常驻提示，带一条直接能点的出路 */
+  function showLimitNotice(msg) {
+    var box = $('limitBox');
+    if (!box) return;
+    box.hidden = false;
+    box.className = 'limit-box';
+    box.innerHTML = '<div>' + esc(msg) + '</div>';
+    if (canSend('file')) {
+      box.insertAdjacentHTML('beforeend', '<div><b>建议改用「存为 .md」发送</b>：内容打包成文件后不受长度限制。</div>');
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn primary';
+      b.textContent = '改用 .md 发送';
+      b.onclick = function () { sendAsMarkdown(); };
+      box.appendChild(b);
+    }
+    if ($('lenChip')) $('lenChip').className = 'len-chip bad';
   }
 
   async function sendAll() {
@@ -2506,7 +3191,9 @@
       toast(parts.length > 1 ? '已合并发送' : '已发送');
       pushTg(r && r.item && r.item.id);
     } catch (e) {
-      toast(e.message || '发送失败');
+      var m = e.message || '发送失败';
+      if (e.tooBig) showLimitNotice(m);
+      toast(m);
     } finally {
       syncSend();
     }
@@ -3049,7 +3736,7 @@
 
     var hint = document.createElement('div');
     hint.className = 'dev-hint';
-    hint.textContent = '每台设备按自己的指纹单独记账，同一个 IP 上同时挂多台设备也互不影响。移除后那台设备要重新输密码并由你再同意一次。';
+    hint.textContent = '每台设备按自己的指纹单独记账，同一个 IP 上同时挂多台设备也互不影响。新授权的设备默认全开，可以在下面逐台收紧：单独关掉它的文字 / 图片 / 文件发送；移除后那台设备要重新输密码并由你再同意一次。';
     box.appendChild(hint);
 
     function row(name, sub, actions) {
@@ -3124,6 +3811,8 @@
     function paint(d) {
       var pend = d.pending || [];
       var devs = d.devices || [];
+      var perms = d.perms || {};
+      var elev = d.elevated || [];
       tag.hidden = !pend.length;
       tag.textContent = pend.length ? pend.length + ' 台待确认' : '';
       wipe.hidden = !devs.length;
@@ -3137,12 +3826,17 @@
       });
       if (devs.length) {
         devs.forEach(function (v) {
+          var item = document.createElement('div');
+          item.className = 'dev-item';
           var sub = (v.ip || '') + ' · 已授权';
           // 授权绑定了设备指纹：显示后 4 位，方便确认到底放行了哪台
           if (v.cid) sub += ' · 指纹 ' + String(v.cid).slice(-4);
-          listEl.appendChild(row(v.name || v.ip, sub, [
+          if (elev.indexOf(v.cid) > -1) sub += ' · 已提权';
+          item.appendChild(row(v.name || v.ip, sub, [
             { label: '移除', cls: 'bad', fn: function () { removeDevice(v); } }
           ]));
+          item.appendChild(permRow(v, perms[v.cid] || {}));
+          listEl.appendChild(item);
         });
       } else if (!pend.length) {
         var e = document.createElement('div');
@@ -3150,6 +3844,68 @@
         e.textContent = '还没有其他设备获得授权';
         listEl.appendChild(e);
       }
+    }
+
+    /**
+     * 每台设备一行小开关：主开关「允许发送」+ 文字 / 图片 / 文件。
+     * 点一下立刻生效（服务端即时拦截），不用等「保存」。
+     */
+    function permRow(v, p0) {
+      var box = document.createElement('div');
+      box.className = 'perm-row';
+      var cur = {
+        send: p0.send !== false,
+        text: p0.text !== false,
+        image: p0.image !== false,
+        file: p0.file !== false
+      };
+      var ITEMS = [['send', '允许发送'], ['text', '文字'], ['image', '图片'], ['file', '文件']];
+      var chips = {};
+
+      function sync() {
+        ITEMS.forEach(function (it) {
+          var b = chips[it[0]];
+          if (!b) return;
+          // 主开关关着时，其余三项在服务端就一定不放行，界面上跟着显示成关
+          var on = it[0] === 'send' ? cur.send : (cur.send && cur[it[0]]);
+          b.className = 'perm-chip ' + (on ? 'on' : 'off');
+          b.lastChild.textContent = it[1];
+          b.title = it[1] + '：' + (on ? '当前允许，点击改为禁止' : '当前禁止，点击改为允许');
+        });
+      }
+
+      function push(next) {
+        api('/api/devices/perms', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cid: v.cid, perms: next })
+        }).then(function (d2) {
+          var np = d2.perms || next;
+          ITEMS.forEach(function (it) { cur[it[0]] = np[it[0]] !== false; });
+          sync();
+          poll(true);
+        }).catch(function (e) {
+          toast(e.message || '权限修改失败');
+          load(); // 没成功就把界面拉回服务端的真实状态
+        });
+      }
+
+      ITEMS.forEach(function (it) {
+        var k = it[0];
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'perm-chip';
+        b.innerHTML = '<i></i><span>' + it[1] + '</span>';
+        b.onclick = function () {
+          cur[k] = !cur[k];
+          sync();
+          push({ send: cur.send, text: cur.text, image: cur.image, file: cur.file });
+        };
+        chips[k] = b;
+        box.appendChild(b);
+      });
+      sync();
+      return box;
     }
 
     function load() {
@@ -3160,7 +3916,7 @@
         var e2 = document.createElement('div');
         e2.className = 'dev-empty';
         var msg = String(e.message || '');
-        if (/HTTP 403/.test(msg)) e2.textContent = '这台浏览器不是主设备，看不到授权列表。请用控制台打印的「本机」地址（带 ?host=）打开。';
+        if (/HTTP 403|没有管理权限/.test(msg)) e2.textContent = '没有管理权限，看不到授权列表。主设备请用控制台打印的「本机」地址打开；其他设备可以先用专属密码临时提权。';
         else if (/HTTP 401/.test(msg)) e2.textContent = '当前设备还没通过接入校验，看不到授权列表。';
         else e2.textContent = '授权列表读取失败：' + (msg || '未知错误');
         listEl.appendChild(e2);
@@ -3172,8 +3928,73 @@
     return { el: box, stop: function () { clearInterval(timer); } };
   }
 
+  /* ============================================================ 临时提权 */
+  /**
+   * 主设备之外的机器，输对了专属密码就能临时拿到管理权限，不用等主设备点头。
+   * 密码校验全在服务端做，这里只负责要一次密码并把结果落到 state。
+   */
+  function askElevate(err) {
+    var wrap = document.createElement('div');
+    wrap.className = 'gate-form';
+    var inp = document.createElement('input');
+    inp.type = 'password';
+    inp.placeholder = '专属密码';
+    inp.autocomplete = 'off';
+    inp.maxLength = 32;
+    inp.setAttribute('aria-label', '专属密码');
+    var note = document.createElement('div');
+    note.className = 'gate-err';
+    note.textContent = err || '';
+    wrap.appendChild(inp);
+    wrap.appendChild(note);
+
+    function submit() {
+      var v = inp.value.trim();
+      if (!v) { note.textContent = '请输入专属密码'; return; }
+      api('/api/elevate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cid: state.cid, password: v })
+      }).then(function () {
+        state.admin = true;
+        state.elevated = true;
+        applyPermissions();
+        poll(true);
+        toast('已提权，现在可以使用主设备的管理功能');
+        openSettings();
+      }).catch(function (e) {
+        askElevate(e.message || '密码不正确');
+      });
+    }
+
+    var dlgHandle = null;
+    Dialog.open({
+      title: '临时提权',
+      desc: '输入专属密码后，这台设备可以临时使用主设备的管理能力：改权限、审批 / 移除设备、配置 Telegram、清空全部内容。有效期 8 小时，可在设置里随时交回。',
+      body: wrap,
+      actions: [
+        { label: '取消', value: null },
+        { label: '提权', value: 'ok', kind: 'primary' }
+      ],
+      onReady: function (h) { dlgHandle = h; }
+    }).then(function (v) { if (v === 'ok') submit(); });
+  }
+
+  function dropElevate() {
+    api('/api/elevate/off', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cid: state.cid })
+    }).then(function () {
+      state.elevated = false;
+      state.admin = !!state.hostAdmin;
+      applyPermissions();
+      poll(true);
+      toast('已交回临时提权');
+    }).catch(function (e) { toast(e.message || '操作失败'); });
+  }
+
   /* ============================================================ 设置 / 外观 */
-  /** 主设备配置 Telegram：Token + 接收人，配好后各端用密码解锁才用得上 */
   function buildTgSection() {
     var box = document.createElement('div');
     box.className = 'dev-sec';
@@ -3193,14 +4014,14 @@
     sw.className = 'sw';
     var cb = document.createElement('input');
     cb.type = 'checkbox';
-    cb.checked = state.tg.enabled !== false;
+    cb.checked = !!state.tg.enabled;
     var track = document.createElement('span');
     track.className = 'track';
     var stxt = document.createElement('span');
     stxt.className = 'txt';
     stxt.textContent = '启用 Telegram 转发';
     var ssub = document.createElement('small');
-    ssub.textContent = '关掉后所有设备都用不了，配置会保留';
+    ssub.textContent = '关掉后所有设备的 TG 按钮都会消失，配置会保留';
     stxt.appendChild(ssub);
     sw.appendChild(cb); sw.appendChild(track); sw.appendChild(stxt);
     form.appendChild(sw);
@@ -3242,7 +4063,9 @@
       stateEl.className = 'tg-state' + (kind ? ' ' + kind : '');
       stx.innerHTML = text;
     }
-    if (state.tg.ready) {
+    if (!state.tg.enabled) {
+      setState('', '未启用：打开上面的开关并填好下面两项后才会生效');
+    } else if (state.tg.ready) {
       setState('ok', '已连接 <b>' + esc(state.tg.bot || '机器人') + '</b> · 目标 ' + esc(state.tg.target || '未填'));
     } else if (state.tg.configured) {
       setState('', 'Token 已配置，但还没填接收人 ID');
@@ -3339,8 +4162,45 @@
     return { el: box };
   }
 
-  function openSettings() {
-    var wrapEl = document.createElement('div');
+  /** 外观：主题色板，设置页和独立入口共用 */
+  function buildThemeGrid() {
+    var grid = document.createElement('div');
+    grid.className = 'theme-grid';
+    grid.style.marginTop = '0';
+    var opts = [];
+    THEMES.forEach(function (t) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'theme-opt' + (currentTheme() === t.key ? ' on' : '');
+      b.innerHTML = '<span class="theme-swatch ' + t.cls + '"></span><span>' + t.label + '</span>';
+      b.onclick = function () {
+        applyTheme(t.key);
+        opts.forEach(function (o) { o.classList.remove('on'); });
+        b.classList.add('on');
+      };
+      grid.appendChild(b);
+      opts.push(b);
+    });
+    return grid;
+  }
+
+  function buildLookPane() {
+    var wrap = document.createElement('div');
+    wrap.className = 'dev-sec';
+    var head = document.createElement('div');
+    head.className = 'dev-head';
+    head.innerHTML = '<span>主题</span>';
+    wrap.appendChild(head);
+    wrap.appendChild(buildThemeGrid());
+    var tip = document.createElement('div');
+    tip.className = 'dev-hint';
+    tip.textContent = '外观只记在这台设备上，不影响其他设备。';
+    wrap.appendChild(tip);
+    return wrap;
+  }
+
+  /** 通用：约束「其他设备」的整体默认值；单台设备的收紧在「设备与权限」里 */
+  function buildGeneralPane() {
     var rows = [
       ['allowSend', '允许其他设备发送', '关闭后只有主设备能发内容'],
       ['allowText', '允许发送文字', ''],
@@ -3348,6 +4208,38 @@
       ['allowFile', '允许发送文件', '']
     ];
     var boxes = {};
+    var box = document.createElement('div');
+    box.className = 'dev-sec';
+
+    var head = document.createElement('div');
+    head.className = 'dev-head';
+    head.innerHTML = '<span>发送权限（默认）</span>';
+    box.appendChild(head);
+
+    // 临时提权状态：给一个显眼的出口，随时可以交回
+    if (state.elevated && !state.hostAdmin) {
+      var nb = document.createElement('div');
+      nb.className = 'note-box accent';
+      nb.innerHTML = ISHIELD_OPEN +
+        '<span>这台设备正处在<b>临时提权</b>状态，可以用主设备的全部管理能力，8 小时内有效。</span>';
+      box.appendChild(nb);
+      var acts = document.createElement('div');
+      acts.className = 'tg-acts';
+      var off = document.createElement('button');
+      off.type = 'button';
+      off.className = 'mini bad';
+      off.textContent = '退出提权';
+      off.onclick = function () {
+        Dialog.confirm({
+          title: '退出临时提权？',
+          desc: '这台设备会立刻失去管理能力，回到普通设备。想再用就重新输一次专属密码。',
+          ok: '退出提权', danger: true
+        }).then(function (ok) { if (ok) dropElevate(); });
+      };
+      acts.appendChild(off);
+      box.appendChild(acts);
+    }
+
     rows.forEach(function (r) {
       var lab = document.createElement('label');
       lab.className = 'sw';
@@ -3365,7 +4257,7 @@
         txt.appendChild(small);
       }
       lab.appendChild(cb); lab.appendChild(track); lab.appendChild(txt);
-      wrapEl.appendChild(lab);
+      box.appendChild(lab);
       boxes[r[0]] = cb;
     });
 
@@ -3379,57 +4271,145 @@
     boxes.allowSend.addEventListener('change', syncDeps);
     syncDeps();
 
-    var devSec = buildDeviceSection();
-    wrapEl.appendChild(devSec.el);
+    var tip = document.createElement('div');
+    tip.className = 'dev-hint';
+    tip.textContent = '这里定的是所有设备的默认值。要给某一台单独收紧（比如只许它发文字），去「设备与权限」那一页。';
+    box.appendChild(tip);
 
-    var tgSec = buildTgSection();
-    wrapEl.appendChild(tgSec.el);
+    /* 自动清理：互传的东西大多传完就走，攒久了既占盘又难翻 */
+    var keepBox = document.createElement('div');
+    keepBox.className = 'dev-sec';
+    var kh = document.createElement('div');
+    kh.className = 'dev-head';
+    kh.innerHTML = '<span>自动清理</span>';
+    keepBox.appendChild(kh);
+
+    var keepVal = Number(state.settings.keepDays) || 0;
+    var seg = document.createElement('div');
+    seg.className = 'keep-seg';
+    var keepBtns = [];
+    [[0, '不清理'], [1, '1 天'], [3, '3 天'], [7, '7 天'], [30, '30 天']].forEach(function (c) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'fchip' + (keepVal === c[0] ? ' on' : '');
+      b.textContent = c[1];
+      b.onclick = function () {
+        keepVal = c[0];
+        keepBtns.forEach(function (x) { x.classList.remove('on'); });
+        b.classList.add('on');
+      };
+      keepBtns.push(b);
+      seg.appendChild(b);
+    });
+    keepBox.appendChild(seg);
+
+    var ktip = document.createElement('div');
+    ktip.className = 'dev-hint';
+    ktip.textContent = '超过这个时间的内容会在启动时、之后每 6 小时自动清掉，文件一并删除。选「不清理」就一直留着。';
+    keepBox.appendChild(ktip);
+    box.appendChild(keepBox);
+
+    return {
+      el: box,
+      save: function () {
+        var payload = { keepDays: keepVal };
+        Object.keys(boxes).forEach(function (k) { payload[k] = boxes[k].checked; });
+        return api('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        }).then(function (d) {
+          if (d.settings) state.settings = d.settings;
+          applyPermissions();
+          poll(true);
+          toast('设置已保存');
+        }).catch(function (e) { toast(e.message || '保存失败'); });
+      }
+    };
+  }
+
+  /**
+   * 设置弹窗：左边竖排 tab，右边内容区。
+   * 内容是「通用 / 设备与权限 / Telegram / 外观」四块，窄屏自动切成顶部横向滚动的分段条。
+   */
+  function openSettings(initTab) {
+    if (!state.admin) { askElevate(); return; }
+
+    var wrapEl = document.createElement('div');
+    wrapEl.className = 'set-wrap';
+    var navEl = document.createElement('div');
+    navEl.className = 'set-nav';
+    navEl.setAttribute('role', 'tablist');
+    wrapEl.appendChild(navEl);
+
+    var cleanups = [];
+    var panes = {}, tabs = {}, order = [];
+    var relayout = null;
+
+    function addTab(id, icon, label, built) {
+      var t = document.createElement('button');
+      t.type = 'button';
+      t.className = 'set-tab';
+      t.setAttribute('role', 'tab');
+      t.innerHTML = icon + '<span>' + label + '</span>';
+      t.onclick = function () { show(id); };
+      navEl.appendChild(t);
+      tabs[id] = t;
+
+      var p = document.createElement('div');
+      p.className = 'set-pane';
+      p.setAttribute('role', 'tabpanel');
+      p.appendChild(built && built.el ? built.el : built);
+      if (built && built.stop) cleanups.push(built.stop);
+      wrapEl.appendChild(p);
+      panes[id] = p;
+      order.push(id);
+    }
+
+    function show(id) {
+      if (!panes[id]) id = order[0];
+      order.forEach(function (k) {
+        var on = k === id;
+        panes[k].classList.toggle('on', on);
+        tabs[k].classList.toggle('on', on);
+        tabs[k].setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+      // 换页后内容高度变了，重算一下滚动渐隐
+      if (relayout) setTimeout(relayout, 0);
+    }
+
+    var gen = buildGeneralPane();
+    addTab('general', ISLIDERS, '通用', gen);
+    addTab('device', IDEV, '设备与权限', buildDeviceSection());
+    addTab('tg', ITG, 'Telegram', buildTgSection());
+    addTab('look', IPALETTE, '外观', buildLookPane());
 
     Dialog.open({
-      title: '主设备设置',
-      desc: '这里的开关只约束其他设备，主设备始终拥有完整权限。',
+      title: state.hostAdmin ? '主设备设置' : '主设备设置（临时提权）',
+      desc: state.hostAdmin
+        ? '这里的开关只约束其他设备，主设备始终拥有完整权限。'
+        : '这台设备通过专属密码临时提权，管理权限 8 小时后自动失效。',
       body: wrapEl,
+      wide: true,
+      onReady: function (h) { relayout = h.relayout; },
       actions: [
         { label: '关闭', value: null },
         { label: '保存', value: 'save', kind: 'primary' }
       ]
     }).then(function (v) {
-      devSec.stop();
-      if (v !== 'save') return;
-      var payload = {};
-      Object.keys(boxes).forEach(function (k) { payload[k] = boxes[k].checked; });
-      api('/api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      }).then(function (d) {
-        if (d.settings) state.settings = d.settings;
-        applyPermissions();
-        toast('设置已保存');
-      }).catch(function (e) { toast(e.message || '保存失败'); });
+      cleanups.forEach(function (fn) { fn(); });
+      if (v !== 'save') { poll(true); return; }
+      gen.save().then(function () { poll(true); });
     });
+
+    show(initTab || 'general');
   }
 
   function openTheme() {
-    var wrapEl = document.createElement('div');
-    wrapEl.className = 'theme-grid';
-    var opts = [];
-    THEMES.forEach(function (t) {
-      var b = document.createElement('button');
-      b.className = 'theme-opt' + (currentTheme() === t.key ? ' on' : '');
-      b.innerHTML = '<span class="theme-swatch ' + t.cls + '"></span><span>' + t.label + '</span>';
-      b.onclick = function () {
-        applyTheme(t.key);
-        opts.forEach(function (o) { o.classList.remove('on'); });
-        b.classList.add('on');
-      };
-      wrapEl.appendChild(b);
-      opts.push(b);
-    });
     Dialog.open({
       title: '外观',
       desc: '选一个顺眼的，会记在这台设备上。',
-      body: wrapEl,
+      body: buildLookPane(),
       actions: [{ label: '完成', value: true, kind: 'primary' }]
     });
   }
@@ -3529,9 +4509,42 @@
   /* ============================================================ 事件 */
   $('themeBtn').addEventListener('click', openTheme);
   $('qrBtn').addEventListener('click', openQr);
-  $('settingsBtn').addEventListener('click', openSettings);
+  $('settingsBtn').addEventListener('click', function () {
+    if (state.admin) openSettings();
+    else askElevate();
+  });
   $('who').addEventListener('click', renameSelf);
   $('toBtn').addEventListener('click', openTargetPicker);
+
+  // 筛选 + 搜索
+  $('filters').addEventListener('click', function (e) {
+    var b = e.target.closest('.fchip');
+    if (b) setFilter(b.dataset.f);
+  });
+  var qEl = $('q');
+  qEl.addEventListener('input', function () { setQuery(qEl.value); });
+  qEl.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') { qEl.value = ''; setQuery(''); qEl.blur(); }
+  });
+  $('qClear').addEventListener('click', function () {
+    qEl.value = ''; setQuery(''); qEl.focus();
+  });
+
+  // 批量选择
+  selBtn.addEventListener('click', function () { setPickMode(!state.pickMode); });
+  $('selExit').addEventListener('click', function () { setPickMode(false); });
+  $('selAll').addEventListener('click', function () {
+    visibleItems().forEach(function (it) { state.picked.add(it.id); });
+    render();
+    updateSelBar();
+  });
+  $('selDl').addEventListener('click', downloadZip);
+
+  // 手机切到后台会暂停定时器，回到前台立刻补一次，别让用户盯着旧列表
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden && state.cid) poll(true);
+  });
+  window.addEventListener('online', function () { poll(true); });
 
   // 输入条吸顶：滚动后加分隔线与投影
   var composerBar = $('composerBar');
