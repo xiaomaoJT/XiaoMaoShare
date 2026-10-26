@@ -1575,7 +1575,7 @@ const server = http.createServer((req, res) => {
     if (!tgReady()) return json(res, 400, { error: '还没配置好 Token 或接收人' });
     tgCall('sendMessage', {
       chat_id: tg.chatId,
-      text: '🤖 XM 互传 · 测试消息\n\n配置已生效。之后在任意设备输入密码解锁，就能把消息同步到这里。',
+      text: '🤖 XiaoMao 互传 · 测试消息\n\n配置已生效。之后在任意设备输入密码解锁，就能把消息同步到这里。',
       disable_web_page_preview: true,
     })
       .then(() => json(res, 200, { ok: true }))
@@ -1747,7 +1747,7 @@ function listen(port, attempt = 0) {
     const nets = lanAddresses();
     const line = '─'.repeat(46);
     const hostUrl = `http://localhost:${actual}/?host=${hostToken}`;
-    console.log('\n  XM 互传已启动\n' + line);
+    console.log('\n  XiaoMao 互传已启动\n' + line);
     console.log(`  本机     ${hostUrl}`);
     if (nets.length) {
       for (const n of nets) console.log(`  局域网   http://${n.address}:${actual}   (${n.name})`);

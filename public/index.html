@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <link rel="icon" type="image/png" href="/icon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
-<title>XM 互传</title>
+<title>XiaoMao 互传</title>
 <style>
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   [hidden]{display:none!important}
@@ -834,7 +834,7 @@
 
 <header class="top">
   <div class="top-in">
-    <div class="mark"><img src="/logo.gif" alt="XM"></div>
+    <div class="mark"><img src="/logo.gif" alt="XiaoMao"></div>
     <div class="headtext">
       <div class="title"><span class="brand">XM</span> 互传</div>
       <div class="addr" id="addr">连接中…</div>
@@ -921,7 +921,7 @@
 </main>
 
 <footer class="foot">
-  <b>XM</b><span class="sep">·</span><span>局域网互传</span>
+  <b>XiaoMao</b><span class="sep">·</span><span>局域网互传</span>
 </footer>
 
 <div class="drop" id="drop"><div class="drop-in">松开即可发送</div></div>
@@ -941,7 +941,7 @@
 
 <div class="gate" id="gate">
   <div class="gate-card">
-    <div class="gate-logo"><img src="/logo.gif" alt="XM"></div>
+    <div class="gate-logo"><img src="/logo.gif" alt="XiaoMao"></div>
     <h2 id="gateTitle">需要接入许可</h2>
     <p id="gateDesc"></p>
     <div id="gateBody"></div>
@@ -2070,7 +2070,7 @@
     if (!items.length && !empty) {
       var e = document.createElement('div');
       e.className = 'empty';
-      e.innerHTML = '<div class="logo"><img src="/logo.gif" alt="XM"></div>'
+      e.innerHTML = '<div class="logo"><img src="/logo.gif" alt="XiaoMao"></div>'
         + '<p>把文件、图片拖进来，或直接粘贴截图<br>发送后，同一 Wi-Fi 下的设备都能看到</p>';
       feed.appendChild(e);
     } else if (items.length && empty) {
@@ -2549,7 +2549,7 @@
 
     if (!stem) {
       var d = new Date(), p = function (n) { return (n < 10 ? '0' : '') + n; };
-      stem = 'XM-笔记-' + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) +
+      stem = 'XiaoMao-笔记-' + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) +
         '-' + p(d.getHours()) + p(d.getMinutes());
     }
     return stem + '.md';
