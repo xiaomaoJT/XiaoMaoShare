@@ -1921,10 +1921,10 @@
         var img = document.createElement('img');
         img.className = 'thumb';
         img.loading = 'lazy';
-        img.src = '/f/' + p.fid;
+        img.src = '/f/' + p.fid + '?cid=' + encodeURIComponent(state.cid);
         img.alt = p.name || '图片';
         img.title = (p.name || '图片') + ' · ' + fmtSize(p.size);
-        img.onclick = function () { openLb('/f/' + p.fid); };
+        img.onclick = function () { openLb('/f/' + p.fid + '?cid=' + encodeURIComponent(state.cid)); };
         img.onerror = function () {
           img.remove();
           if (!grid.querySelector('img')) {
@@ -1980,7 +1980,7 @@
     info.appendChild(fsize);
     var dl = document.createElement('a');
     dl.className = 'dl';
-    dl.href = '/f/' + p.fid + '?dl=1';
+    dl.href = '/f/' + p.fid + '?dl=1&cid=' + encodeURIComponent(state.cid);
     dl.setAttribute('download', nm);
     dl.innerHTML = IDL + '<span>下载</span>';
     row.appendChild(fico);
@@ -3049,7 +3049,7 @@
 
     var hint = document.createElement('div');
     hint.className = 'dev-hint';
-    hint.textContent = '授权同时绑定 IP 和设备指纹：同一个 IP 换了设备不会自动放行。移除后那台设备要重新输密码并由你再同意一次。';
+    hint.textContent = '每台设备按自己的指纹单独记账，同一个 IP 上同时挂多台设备也互不影响。移除后那台设备要重新输密码并由你再同意一次。';
     box.appendChild(hint);
 
     function row(name, sub, actions) {
@@ -3084,11 +3084,11 @@
       return el;
     }
 
-    function act(kind, ip) {
+    function act(kind, cid) {
       api('/api/devices/' + kind, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ip: ip })
+        body: JSON.stringify({ cid: cid })
       }).then(function () {
         toast(kind === 'approve' ? '已同意接入' : '已拒绝接入');
         load();
@@ -3102,7 +3102,7 @@
         ok: '移除授权', danger: true
       }).then(function (ok) {
         if (!ok) return;
-        api('/api/devices?ip=' + encodeURIComponent(v.ip), { method: 'DELETE' })
+        api('/api/devices?cid=' + encodeURIComponent(v.cid), { method: 'DELETE' })
           .then(function () { toast('已移除授权'); load(); })
           .catch(function (e) { toast(e.message || '移除失败'); });
       });
@@ -3131,8 +3131,8 @@
       listEl.innerHTML = '';
       pend.forEach(function (p) {
         listEl.appendChild(row(p.name || p.ip, (p.ip || '') + ' · 正在申请接入', [
-          { label: '同意', cls: 'ok', fn: function () { act('approve', p.ip); } },
-          { label: '拒绝', cls: 'bad', fn: function () { act('reject', p.ip); } }
+          { label: '同意', cls: 'ok', fn: function () { act('approve', p.cid); } },
+          { label: '拒绝', cls: 'bad', fn: function () { act('reject', p.cid); } }
         ]));
       });
       if (devs.length) {

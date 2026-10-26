@@ -831,8 +831,10 @@ const QR = (() => {
 const DEVICES_FILE = path.join(DATA_DIR, 'devices.json');
 const GATE_PASSWORD = String(process.env.SHARE_PASSWORD || 'XM');
 
-// 已授权设备：IP + 设备指纹（cid）双重绑定，永久生效，除非主设备移除
-let devices = {};
+// 已授权设备：**按设备指纹（cid）记账**，IP 只用于显示和排查。
+// 为什么不能拿 IP 当 key：端口转发 / 代理 / 虚拟网卡 / 公司网关会让多台设备共用同一个来源 IP，
+// 按 IP 存会互相覆盖 —— 后登录的设备一获批，前一台立刻掉线。
+let devices = {}; // cid -> { cid, ip, name, model, firstSeen, approvedAt, lastSeen }
 try {
   const saved = JSON.parse(fs.readFileSync(DEVICES_FILE, 'utf8'));
   if (saved && typeof saved === 'object') devices = saved;
@@ -841,15 +843,15 @@ try {
 }
 
 /**
- * 一次性迁移：旧版授权只记了 IP，没绑设备指纹。
- * 后果是一台新设备拿到同一个 IP 就能直接「继承」授权（DHCP 重新分配就会发生）。
- * 这里把没有 cid 的凭证整条作废，让它重新走「密码 + 主设备同意」。
+ * 一次性迁移：旧版授权按 IP 记账（key 是 IP，且没有 cid）。
+ * 这类记录既会「同 IP 换设备就继承授权」，也会「同 IP 多设备互相覆盖」。
+ * 全部作废，让它们重新走「密码 + 主设备同意」，之后按 cid 记账。
  */
 const legacyDeviceIps = [];
-for (const [ip, v] of Object.entries(devices)) {
-  if (!v || typeof v !== 'object' || !v.cid) {
-    delete devices[ip];
-    legacyDeviceIps.push(ip);
+for (const [key, v] of Object.entries(devices)) {
+  if (!v || typeof v !== 'object' || !v.cid || key !== v.cid) {
+    delete devices[key];
+    legacyDeviceIps.push((v && v.ip) || key);
   }
 }
 
@@ -904,47 +906,44 @@ function isLoopbackHostHeader(req) {
 }
 
 // 待审批 / 被拒的申请（临时，不落盘）
-const pending = new Map(); // ip -> { ip, cid, name, model, at, status }
-const lastCidWarn = new Map(); // ip -> 上次提示时间（防止刷屏）
+const pending = new Map(); // cid -> { cid, ip, name, model, at, status }
 
-/** 取请求里的设备指纹：显式传参 > 请求头 > URL 查询串 */
+/** 取请求里的设备指纹：显式传参 > 请求头（URL 查询串由调用方先读出来传进来） */
 function cidOf(req, given) {
   const c = given != null ? given : (req.headers['x-xm-cid'] || '');
   return String(c || '').slice(0, 64);
 }
 
-/**
- * 这个 IP 上的已授权记录，能不能算到当前这台设备头上。
- * 只认 IP 是不够的：同一 IP 换台设备（DHCP 重新分配、手动改 IP）会白嫖授权。
- * 所以授权必须同时满足「同 IP」+「同设备指纹」。
- * 但 /f/ 下载、二维码这类由 <img>/<a> 直接发起的请求带不了自定义头，
- * 那种情况（strict=false）没有指纹可用，退化为按 IP 放行，否则图片全裂。
- */
-function deviceFor(req, given, strict) {
-  const entry = devices[clientIp(req)];
-  if (!entry) return null;
-  if (!entry.cid) return entry; // 理论上迁移后不会有，兜底
-  const cid = cidOf(req, given);
-  if (!cid) return strict ? null : entry;
-  return entry.cid === cid ? entry : null;
+/** 这个 IP 上是否有已授权设备（只给带不了指纹的静态请求用） */
+function anyDeviceAtIp(ip) {
+  for (const k in devices) if (devices[k].ip === ip) return true;
+  return false;
 }
 
+/**
+ * 准入判定。
+ * 身份 = 设备指纹，跟 IP 无关：同一个 IP 上同时挂 5 台设备也互不影响。
+ * 只有 /f/ 下载、二维码这类由 <img>/<a> 直接发起的请求带不了请求头，
+ * 这种（strict=false）才退化成「这个 IP 上有授权设备就放行」，否则图片会全裂。
+ */
 function authState(req, given, strict) {
   if (isHostRequest(req)) return { authorized: true, status: 'host' };
-  const ip = clientIp(req);
-  if (deviceFor(req, given, strict)) return { authorized: true, status: 'approved' };
-  const p = pending.get(ip);
-  if (p && p.status === 'rejected') return { authorized: false, status: 'rejected' };
-  if (p) return { authorized: false, status: 'pending' };
-  if (devices[ip]) {
-    // 这个 IP 有授权，但不属于当前这台设备（换设备 / 清了浏览器存储）
-    const now = Date.now();
-    if ((lastCidWarn.get(ip) || 0) + 10000 < now) {
-      lastCidWarn.set(ip, now);
-      console.log(`  ${ip} 的授权属于另一台设备（${devices[ip].name || '未知'}），本次按未授权处理`);
+
+  const cid = cidOf(req, given);
+  if (cid) {
+    const d = devices[cid];
+    if (d) {
+      d.ip = clientIp(req);
+      d.lastSeen = Date.now();
+      return { authorized: true, status: 'approved' };
     }
+    const p = pending.get(cid);
+    if (p && p.status === 'rejected') return { authorized: false, status: 'rejected' };
+    if (p) return { authorized: false, status: 'pending' };
     return { authorized: false, status: 'none' };
   }
+
+  if (!strict && anyDeviceAtIp(clientIp(req))) return { authorized: true, status: 'approved' };
   return { authorized: false, status: 'none' };
 }
 
@@ -1135,12 +1134,12 @@ const server = http.createServer((req, res) => {
         const ip = clientIp(req);
         const ua = String(body.ua || req.headers['user-agent'] || '').slice(0, 300);
         const model = modelFromUA(ua);
-        const prev = pending.get(ip);
-        // 没有设备指纹就现生成一个，回给前端存起来（否则授权没法绑到这台设备上）
+        // 没有设备指纹就现生成一个，回给前端存起来（授权是按指纹记账的）
         const cid = cidOf(req, body.cid) || crypto.randomBytes(9).toString('base64url');
-        pending.set(ip, {
-          ip,
+        const prev = pending.get(cid);
+        pending.set(cid, {
           cid,
+          ip,
           model,
           name: prev && prev.name ? prev.name : `${model} (${ip})`,
           at: prev && prev.at ? prev.at : Date.now(),
@@ -1223,13 +1222,14 @@ const server = http.createServer((req, res) => {
         console.log(`  主设备撤销了全部设备授权（${n} 台）`);
         return json(res, 200, { ok: true, removed: n });
       }
-      const ip = String(url.searchParams.get('ip') || '').slice(0, 64);
-      if (devices[ip]) {
-        delete devices[ip];
+      const cid = String(url.searchParams.get('cid') || '').slice(0, 64);
+      if (devices[cid]) {
+        const nm = devices[cid].name || devices[cid].ip || cid;
+        delete devices[cid];
         saveDevices();
+        console.log(`  主设备移除了设备授权：${nm}`);
       }
-      pending.delete(ip);
-      console.log(`  主设备移除了设备授权：${ip}`);
+      pending.delete(cid);
       return json(res, 200, { ok: true });
     }
   }
@@ -1240,34 +1240,36 @@ const server = http.createServer((req, res) => {
       .then((raw) => {
         let body = {};
         try { body = JSON.parse(raw || '{}'); } catch {}
-        const ip = String(body.ip || '').slice(0, 64);
-        const p = pending.get(ip);
+        // 审批按设备指纹走：同一个 IP 上可能同时挂着好几台设备
+        const cid = String(body.cid || '').slice(0, 64);
+        const p = pending.get(cid);
 
         if (pathname.endsWith('/approve')) {
-          if (!p) return json(res, 404, { error: '申请已失效' });
-          devices[ip] = {
-            ip,
-            cid: p.cid || '',
-            name: p.name || ip,
+          if (!p) return json(res, 404, { error: '申请已失效，请让对方刷新页面重新申请' });
+          devices[cid] = {
+            cid,
+            ip: p.ip || clientIp(req),
+            name: p.name || p.ip || cid,
             model: p.model || '',
             firstSeen: p.at || Date.now(),
             approvedAt: Date.now(),
+            lastSeen: Date.now(),
           };
           saveDevices();
-          pending.delete(ip);
-          console.log(`  已授权设备：${devices[ip].name}`);
+          pending.delete(cid);
+          console.log(`  已授权设备：${devices[cid].name}  （当前共 ${Object.keys(devices).length} 台）`);
           return json(res, 200, { ok: true });
         }
 
-        pending.set(ip, {
-          ip,
-          cid: p ? p.cid : '',
+        pending.set(cid, {
+          cid,
+          ip: p ? p.ip : clientIp(req),
           model: p ? p.model : '',
-          name: p ? p.name : ip,
+          name: p ? p.name : cid,
           at: p ? p.at : Date.now(),
           status: 'rejected',
         });
-        console.log(`  已拒绝设备接入：${ip}`);
+        console.log(`  已拒绝设备接入：${(p && p.name) || cid}`);
         json(res, 200, { ok: true });
       })
       .catch(() => json(res, 400, { error: 'bad request' }));
