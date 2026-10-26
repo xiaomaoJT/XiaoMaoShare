@@ -390,15 +390,12 @@ function clientIp(req) {
   return ip;
 }
 
-let LAN_IPS = new Set();
-function refreshLanIps() {
-  LAN_IPS = new Set(lanAddresses().map((n) => n.address));
-}
-
 /** 请求是否来自跑服务的这台机器（= 主设备，拥有管理权限） */
 function isHostRequest(req) {
+  if (hasHostToken(req)) return true;
+  // 只有「回环地址 + localhost 地址栏」才算本机，防止端口转发把别人变成主设备
   const ip = clientIp(req);
-  return ip === '127.0.0.1' || ip === '0.0.0.0' || LAN_IPS.has(ip);
+  return (ip === '127.0.0.1' || ip === '::1') && isLoopbackHostHeader(req);
 }
 
 function modelFromUA(ua = '') {
@@ -847,6 +844,51 @@ function saveDevices() {
   fs.writeFile(DEVICES_FILE, JSON.stringify(devices, null, 2), () => {});
 }
 
+/**
+ * 主设备身份不能只看 IP：
+ * 走端口转发 / 容器 / 反向代理时，局域网其他设备的请求会被中转成 127.0.0.1 或主机 LAN IP，
+ * 于是「陌生设备被当成主设备」。这里改成：本机浏览器用 localhost 打开，或者带着主设备令牌。
+ */
+const HOST_FILE = path.join(DATA_DIR, 'host.json');
+const HOST_COOKIE = 'xmhost';
+const hostToken = (() => {
+  try {
+    const saved = JSON.parse(fs.readFileSync(HOST_FILE, 'utf8'));
+    if (saved && typeof saved.token === 'string' && /^[A-Za-z0-9_-]{20,}$/.test(saved.token)) return saved.token;
+  } catch { /* 首次运行 */ }
+  const t = crypto.randomBytes(18).toString('base64url');
+  try { fs.writeFileSync(HOST_FILE, JSON.stringify({ token: t }, null, 2), { mode: 0o600 }); } catch { /* 只读目录也能跑 */ }
+  return t;
+})();
+
+function sameToken(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || !a.length || a.length !== b.length) return false;
+  try { return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b)); } catch { return false; }
+}
+
+function cookieOf(req, name) {
+  const raw = String(req.headers.cookie || '');
+  for (const part of raw.split(';')) {
+    const i = part.indexOf('=');
+    if (i < 0) continue;
+    if (part.slice(0, i).trim() !== name) continue;
+    try { return decodeURIComponent(part.slice(i + 1).trim()); } catch { return part.slice(i + 1).trim(); }
+  }
+  return '';
+}
+
+/** 请求里是否带了主设备令牌（?host=token 或 cookie） */
+function hasHostToken(req) {
+  if (sameToken(req.__hostQ, hostToken)) return true;
+  return sameToken(cookieOf(req, HOST_COOKIE), hostToken);
+}
+
+/** 地址栏是 localhost / 127.0.0.1 才算「本机打开」（被中转的请求 Host 仍是局域网地址） */
+function isLoopbackHostHeader(req) {
+  const name = String(req.headers.host || '').toLowerCase().split(':')[0];
+  return name === 'localhost' || name === '127.0.0.1' || name === '[::1]' || name === '::1';
+}
+
 // 待审批 / 被拒的申请（临时，不落盘）
 const pending = new Map(); // ip -> { ip, cid, name, model, at, status }
 
@@ -868,13 +910,12 @@ function deviceList() {
   return Object.values(devices).sort((a, b) => (b.approvedAt || 0) - (a.approvedAt || 0));
 }
 
-// 定期清理掉线设备、刷新本机网卡地址
+// 定期清理掉线设备
 setInterval(() => {
   const now = Date.now();
   for (const [cid, c] of clients) {
     if (now - c.lastSeen > PRESENCE_FORGET) clients.delete(cid);
   }
-  refreshLanIps();
 }, 15e3).unref();
 
 /* ------------------------------------------------------------------ 工具 */
@@ -970,6 +1011,13 @@ const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
   const pathname = decodeURIComponent(url.pathname);
   const method = req.method;
+
+  // 主设备令牌：地址栏带 ?host=xxx 时种下 cookie，之后的请求都认得它
+  req.__hostQ = url.searchParams.get('host') || '';
+  if (sameToken(req.__hostQ, hostToken)) {
+    res.setHeader('Set-Cookie',
+      `${HOST_COOKIE}=${encodeURIComponent(hostToken)}; Path=/; Max-Age=31536000; SameSite=Lax; HttpOnly`);
+  }
 
   res.setHeader('X-Content-Type-Options', 'nosniff');
 
@@ -1638,8 +1686,9 @@ function listen(port, attempt = 0) {
     const actual = server.address().port;
     const nets = lanAddresses();
     const line = '─'.repeat(46);
+    const hostUrl = `http://localhost:${actual}/?host=${hostToken}`;
     console.log('\n  XiaoMao 互传已启动\n' + line);
-    console.log(`  本机     http://localhost:${actual}`);
+    console.log(`  本机     ${hostUrl}`);
     if (nets.length) {
       for (const n of nets) console.log(`  局域网   http://${n.address}:${actual}   (${n.name})`);
       console.log('\n  手机连同一个 Wi-Fi，在浏览器里打开上面「局域网」地址');
@@ -1649,17 +1698,17 @@ function listen(port, attempt = 0) {
     console.log(line);
     console.log(`  数据目录 ${DATA_DIR}`);
     console.log(`  已有内容 ${items.length} 条`);
-    console.log('  主设备   本机浏览器（localhost 访问）拥有删除 / 权限设置');
+    console.log('  主设备   用上面的「本机」地址打开一次（带 ?host= 会自动记住），即拥有删除 / 权限设置');
+    console.log(`  其他设备 用「局域网」地址打开，需输入密码 ${GATE_PASSWORD}，再由主设备同意`);
     console.log(`  停止服务 ${IS_WIN ? '按 Ctrl+C，或双击「停止.bat」' : '按 Ctrl+C'}\n`);
 
     if (IS_WIN && nets.length) {
       console.log('  首次运行如果 Windows 弹出防火墙提示，请勾选「专用网络」并允许。\n');
     }
-    if (OPEN_ON_START) openBrowser(`http://localhost:${actual}`);
+    if (OPEN_ON_START) openBrowser(hostUrl);
   });
 }
 
-refreshLanIps();
 listen(BASE_PORT);
 
 process.on('SIGINT', () => {

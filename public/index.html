@@ -430,12 +430,26 @@
   .dlg{
     width:100%;max-width:390px;background:var(--card);border:1px solid var(--line);border-radius:20px;
     padding:20px;box-shadow:0 24px 64px -20px rgba(0,0,0,.45);
+    display:flex;flex-direction:column;
+    max-height:calc(100vh - 40px);max-height:calc(100dvh - 40px);
     animation:pop .22s cubic-bezier(.2,.8,.3,1);
   }
   @keyframes pop{from{opacity:0;transform:translateY(10px) scale(.97)}to{opacity:1;transform:none}}
-  .dlg h3{margin:0 0 6px;font-size:16px;font-weight:650;letter-spacing:.2px}
-  .dlg p{margin:0;font-size:13.5px;color:var(--sub);line-height:1.62}
-  .dlg-acts{display:flex;gap:8px;justify-content:flex-end;margin-top:18px}
+  .dlg h3{margin:0 0 6px;font-size:16px;font-weight:650;letter-spacing:.2px;flex:none}
+  .dlg p{margin:0;font-size:13.5px;color:var(--sub);line-height:1.62;flex:none}
+  /* 内容区自己滚，标题和按钮始终留在可视范围内 */
+  .dlg-body{
+    flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;
+    -webkit-overflow-scrolling:touch;margin:6px -6px 0;padding:0 6px;scrollbar-width:thin;
+  }
+  /* 内容还能往下滚时，底部渐隐一点，一眼看出来没到头 */
+  .dlg-body.scrollable{
+    padding-bottom:12px;
+    -webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 15px),rgba(0,0,0,.12) 100%);
+    mask-image:linear-gradient(to bottom,#000 calc(100% - 15px),rgba(0,0,0,.12) 100%);
+  }
+  .dlg-body.at-end{-webkit-mask-image:none;mask-image:none}
+  .dlg-acts{display:flex;gap:8px;justify-content:flex-end;margin-top:18px;flex:none}
   .dlg input[type=text]{
     width:100%;height:42px;border-radius:12px;border:1px solid var(--line);background:var(--card-2);
     color:var(--text);font:inherit;font-size:14px;padding:0 13px;margin-top:14px;outline:0;
@@ -445,12 +459,13 @@
     .dlg-mask{align-items:flex-end;padding:0}
     .dlg{
       max-width:none;border-radius:20px 20px 0 0;
-      padding:20px 18px calc(18px + env(safe-area-inset-bottom));
+      padding:18px 18px calc(14px + env(safe-area-inset-bottom));
+      max-height:88vh;max-height:88dvh;
       animation:up .26s cubic-bezier(.2,.8,.3,1);
     }
     @keyframes up{from{transform:translateY(100%)}to{transform:none}}
-    .dlg-acts{flex-direction:column-reverse}
-    .dlg-acts .btn{width:100%;justify-content:center;height:44px;font-size:14px}
+    .dlg-acts{flex-direction:row;margin-top:14px}
+    .dlg-acts .btn{flex:1;justify-content:center;height:44px;font-size:14px}
   }
 
   /* 开关 */
@@ -653,10 +668,10 @@
   .qr-tip{font-size:11.5px;color:var(--faint);text-align:center;line-height:1.65;max-width:280px}
 
   /* ---- 输入区：文字块 / 附件块，可任意交替 ---- */
-  .blocks{display:flex;flex-direction:column;gap:1px;min-height:38px}
+  .blocks{display:flex;flex-direction:column;gap:1px;min-height:48px}
   .blk-tx{
-    width:100%;min-height:26px;max-height:40vh;resize:none;border:0;outline:0;overflow-y:auto;
-    background:transparent;color:var(--text);font:inherit;line-height:1.62;padding:5px 6px;display:block;
+    width:100%;min-height:48px;max-height:40vh;resize:none;border:0;outline:0;overflow-y:auto;
+    background:transparent;color:var(--text);font:inherit;line-height:1.62;padding:8px 6px;display:block;
   }
   .blk-tx::placeholder{color:var(--faint)}
   .blk-tx:disabled{cursor:not-allowed;opacity:.75}
@@ -707,6 +722,30 @@
   .tool i{font-style:normal;font-weight:800;font-size:11.5px;letter-spacing:.2px}
   .tool.mono i{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:10.5px}
   .tool.emoji span{font-size:15px;line-height:1}
+  /* 小屏把 9 个格式按钮收进「格式」面板，工具条只留 4 个动作 */
+  .tool.fmt-btn{display:none}
+  .fmt-pop{
+    position:fixed;z-index:160;left:0;right:0;bottom:0;display:none;
+    background:var(--card);border-top:1px solid var(--line);
+    border-radius:16px 16px 0 0;padding:12px 12px calc(12px + env(safe-area-inset-bottom));
+    box-shadow:0 -12px 40px -12px rgba(16,24,40,.45);
+  }
+  .fmt-pop.on{display:block;animation:sheetUp .2s cubic-bezier(.2,.8,.3,1)}
+  .fmt-head{display:flex;align-items:center;justify-content:space-between;margin:0 2px 9px}
+  .fmt-head b{font-size:12.5px;font-weight:650;color:var(--sub)}
+  .fmt-close{
+    width:26px;height:26px;border:0;border-radius:8px;background:transparent;color:var(--faint);
+    font-size:16px;line-height:1;cursor:pointer;
+  }
+  .fmt-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+  .fmt-grid button{
+    height:42px;border:1px solid var(--line);border-radius:11px;background:var(--card-2);
+    color:var(--text);font:inherit;font-size:12.5px;font-weight:550;cursor:pointer;
+    display:inline-flex;align-items:center;justify-content:center;gap:5px;
+  }
+  .fmt-grid button:active{background:var(--accent-soft);border-color:rgba(76,110,245,.4);color:var(--accent)}
+  .fmt-grid button i{font-style:normal;font-weight:800;font-size:12px}
+  .fmt-grid button.mono i{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:10.5px}
 
   .emoji-pop{
     position:fixed;z-index:160;width:min(330px,92vw);background:var(--card);border:1px solid var(--line);
@@ -734,15 +773,18 @@
     }
     .emoji-pop.on{animation:sheetUp .22s cubic-bezier(.2,.8,.3,1)}
     .emoji-grid{grid-template-columns:repeat(8,1fr);max-height:36vh}
-    .mtools{
-      -webkit-mask-image:linear-gradient(to right,#000 90%,rgba(0,0,0,.2));
-      mask-image:linear-gradient(to right,#000 90%,rgba(0,0,0,.2));
-    }
   }
   @keyframes sheetUp{from{transform:translateY(14px);opacity:.6}to{transform:none;opacity:1}}
 
+  /* 窄屏：工具条放不下 9 个格式按钮，收进「格式」面板，保证不横向溢出 */
+  @media (max-width:560px){
+    .mtools .mf{display:none}
+    .mtools .fmt-btn{display:inline-flex}
+    .mtools{gap:2px}
+  }
+
   /* ---- 输入区预览模式 ---- */
-  .mdp{display:none;padding:2px 4px 0;min-height:44px}
+  .mdp{display:none;padding:2px 4px 0;min-height:56px}
   .composer.prev-on .blocks{display:none}
   .composer.prev-on .mdp{display:block}
   .mdp-empty{color:var(--faint);font-size:13px;padding:8px 2px}
@@ -800,15 +842,18 @@
       <div class="mtools-wrap" id="mtoolsWrap">
         <div class="mtools" id="mtools">
           <button type="button" class="tool emoji" data-tool="emoji" title="插入表情"><span>😊</span></button>
-          <button type="button" class="tool" data-tool="hr" title="插入分隔符">— 分隔</button>
-          <button type="button" class="tool" data-tool="h" title="标题"><i>H</i></button>
-          <button type="button" class="tool" data-tool="bold" title="加粗"><i>B</i></button>
-          <button type="button" class="tool" data-tool="italic" title="斜体"><i style="font-style:italic">I</i></button>
-          <button type="button" class="tool mono" data-tool="code" title="行内代码"><i>&lt;/&gt;</i></button>
-          <button type="button" class="tool mono" data-tool="block" title="代码块"><i>{ }</i></button>
-          <button type="button" class="tool" data-tool="quote" title="引用">❝</button>
-          <button type="button" class="tool" data-tool="list" title="列表">• 列表</button>
-          <button type="button" class="tool" data-tool="link" title="链接">🔗 链接</button>
+          <button type="button" class="tool fmt-btn" data-tool="fmt" title="更多格式">
+            <i>Aa</i><span>格式</span>
+          </button>
+          <button type="button" class="tool mf" data-tool="hr" title="插入分隔符">— 分隔</button>
+          <button type="button" class="tool mf" data-tool="h" title="标题"><i>H</i></button>
+          <button type="button" class="tool mf" data-tool="bold" title="加粗"><i>B</i></button>
+          <button type="button" class="tool mf" data-tool="italic" title="斜体"><i style="font-style:italic">I</i></button>
+          <button type="button" class="tool mf mono" data-tool="code" title="行内代码"><i>&lt;/&gt;</i></button>
+          <button type="button" class="tool mf mono" data-tool="block" title="代码块"><i>{ }</i></button>
+          <button type="button" class="tool mf" data-tool="quote" title="引用">❝</button>
+          <button type="button" class="tool mf" data-tool="list" title="列表">• 列表</button>
+          <button type="button" class="tool mf" data-tool="link" title="链接">🔗 链接</button>
         </div>
         <button type="button" class="tool pvbtn" data-tool="preview" id="previewBtn" title="预览 Markdown 效果">预览</button>
         <button type="button" class="tool mdbtn" data-tool="tomd" id="mdBtn" title="把当前内容打包成 .md 文件，作为一条文件消息发送（图片会内联进文件）">
@@ -1152,7 +1197,11 @@
           p.textContent = opt.desc;
           card.appendChild(p);
         }
-        if (opt.body) card.appendChild(opt.body);
+        // 内容多的时候只滚这一块，标题和底部按钮不动
+        var box = document.createElement('div');
+        box.className = 'dlg-body';
+        if (opt.body) box.appendChild(opt.body);
+        card.appendChild(box);
 
         var bar = document.createElement('div');
         bar.className = 'dlg-acts';
@@ -1168,6 +1217,15 @@
         card.appendChild(bar);
         mask.appendChild(card);
         document.body.appendChild(mask);
+
+        // 内容超出时给底部一点渐隐，提示「还能往下滚」
+        function syncFade() {
+          var can = box.scrollHeight > box.clientHeight + 2;
+          box.classList.toggle('scrollable', can);
+          box.classList.toggle('at-end', can && box.scrollTop + box.clientHeight >= box.scrollHeight - 4);
+        }
+        box.addEventListener('scroll', syncFade, { passive: true });
+        setTimeout(syncFade, 60);
 
         var closed = false;
         function finish(val) {
@@ -1189,7 +1247,13 @@
         mask.addEventListener('mousedown', function (e) { if (e.target === mask) finish(null); });
 
         var focusEl = card.querySelector('input[type=text]') || actionEls[actionEls.length - 1];
-        if (focusEl) setTimeout(function () { try { focusEl.focus(); if (focusEl.select) focusEl.select(); } catch (err) {} }, 40);
+        if (focusEl) setTimeout(function () {
+          try {
+            // preventScroll：长弹窗里别为了聚焦输入框把内容滚到中间
+            focusEl.focus({ preventScroll: true });
+            if (focusEl.select) focusEl.select();
+          } catch (err) {}
+        }, 40);
         if (opt.onReady) opt.onReady({ close: finish });
       });
     }
@@ -1268,7 +1332,7 @@
       if (d) info = d;
       if (!info) return;
       var bits = [];
-      if (info.ip) bits.push('本机 IP <code>' + esc(info.ip) + '</code>');
+      if (info.ip) bits.push('你的 IP <code>' + esc(info.ip) + '</code>');
       if (info.host) bits.push('主设备 <code>' + esc(info.host) + '</code>');
       metaEl.innerHTML = bits.join(' · ');
     }
@@ -1276,11 +1340,16 @@
       titleEl.textContent = title;
       descEl.textContent = desc;
     }
+    function isLoopIp(ip) { return ip === '127.0.0.1' || ip === '::1'; }
 
     /* 输入密码 */
     function form(errMsg) {
       stopPoll();
-      shell('需要接入许可', '这是同一 Wi-Fi 下的互传服务。输入接入密码后，还要等主设备同意。');
+      var desc = '这是同一 Wi-Fi 下的互传服务。输入接入密码后，还要等主设备同意。';
+      if (info && isLoopIp(info.ip)) {
+        desc += '如果你就是运行服务这台电脑，改用启动窗口里带 ?host= 的地址（或 localhost）打开就能直接管理。';
+      }
+      shell('需要接入许可', desc);
       bodyEl.innerHTML = '';
 
       var wrap = document.createElement('div');
@@ -2644,6 +2713,7 @@
     var b, v, lead;
 
     if (name === 'emoji') { toggleEmoji(); return; }
+    if (name === 'fmt') { toggleFmt(); return; }
     if (name === 'preview') { togglePreview(); return; }
     if (name === 'tomd') { sendAsMarkdown(); return; }
 
@@ -2756,6 +2826,7 @@
     var btn = document.querySelector('[data-tool="emoji"]');
     var pop = buildEmojiPop();
     if (emojiOpen) { closeEmoji(); return; }
+    closeFmt();
     pop.classList.add('on');
     emojiOpen = true;
     btn.classList.add('on');
@@ -2767,6 +2838,90 @@
     if (top < 8) top = r.bottom + 10;
     pop.style.left = Math.round(left) + 'px';
     pop.style.top = Math.round(top) + 'px';
+  }
+
+  /* ---- 格式面板：小屏把 9 个格式动作收进底部抽屉 ---- */
+  var FMT_ITEMS = [
+    ['hr', '分隔线', '—', ''],
+    ['h', '标题', 'H', ''],
+    ['bold', '加粗', 'B', ''],
+    ['italic', '斜体', 'I', ''],
+    ['code', '行内代码', '</>', 'mono'],
+    ['block', '代码块', '{ }', 'mono'],
+    ['quote', '引用', '❝', ''],
+    ['list', '列表', '•', ''],
+    ['link', '链接', '🔗', '']
+  ];
+  var fmtPop = null, fmtOpen = false;
+
+  function closeFmt() {
+    if (!fmtPop) return;
+    fmtPop.classList.remove('on');
+    fmtOpen = false;
+    var btn = document.querySelector('[data-tool="fmt"]');
+    if (btn) btn.classList.remove('on');
+  }
+
+  function buildFmtPop() {
+    if (fmtPop) return fmtPop;
+    var pop = document.createElement('div');
+    pop.className = 'fmt-pop';
+
+    var head = document.createElement('div');
+    head.className = 'fmt-head';
+    var title = document.createElement('b');
+    title.textContent = '插入格式';
+    var closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'fmt-close';
+    closeBtn.textContent = '×';
+    closeBtn.setAttribute('aria-label', '关闭');
+    closeBtn.onclick = closeFmt;
+    head.appendChild(title);
+    head.appendChild(closeBtn);
+
+    var grid = document.createElement('div');
+    grid.className = 'fmt-grid';
+    FMT_ITEMS.forEach(function (it) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      if (it[3]) b.className = it[3];
+      var ico = document.createElement('i');
+      ico.textContent = it[2];
+      var lab = document.createElement('span');
+      lab.textContent = it[1];
+      b.appendChild(ico);
+      b.appendChild(lab);
+      b.onclick = function () { runTool(it[0]); closeFmt(); };
+      grid.appendChild(b);
+    });
+
+    pop.appendChild(head);
+    pop.appendChild(grid);
+    document.body.appendChild(pop);
+    fmtPop = pop;
+
+    document.addEventListener('pointerdown', function (e) {
+      if (!fmtOpen) return;
+      var t = e.target;
+      if (pop.contains(t)) return;
+      if (t && t.closest && t.closest('[data-tool="fmt"]')) return;
+      closeFmt();
+    });
+    document.addEventListener('keydown', function (e) {
+      if (fmtOpen && e.key === 'Escape') closeFmt();
+    });
+    return pop;
+  }
+
+  function toggleFmt() {
+    if (fmtOpen) { closeFmt(); return; }
+    closeEmoji();
+    var pop = buildFmtPop();
+    pop.classList.add('on');
+    fmtOpen = true;
+    var btn = document.querySelector('[data-tool="fmt"]');
+    if (btn) btn.classList.add('on');
   }
 
   /* ---- Markdown 预览 ---- */
@@ -2791,6 +2946,7 @@
   function togglePreview(force) {
     previewOn = force == null ? !previewOn : !!force;
     $('composer').classList.toggle('prev-on', previewOn);
+    if (previewOn) { closeFmt(); closeEmoji(); }
     var pb = $('previewBtn');
     if (!pb) return;
     pb.classList.toggle('on', previewOn);
@@ -3380,6 +3536,12 @@
     var addr = $('addr');
     addr.textContent = location.host;
 
+    // 主设备令牌：服务端已经种下 cookie，地址栏里的 ?host= 立刻抹掉
+    var asHost = /[?&]host=/.test(location.search);
+    if (asHost) {
+      try { history.replaceState(null, '', location.pathname + location.hash); } catch (e) {}
+    }
+
     var info = null;
     try {
       info = await fetch('/api/info', { cache: 'no-store' }).then(function (r) { return r.json(); });
@@ -3414,6 +3576,7 @@
       }
     }
     launch(d);
+    if (asHost && state.admin) toast('已把这台浏览器记为主设备');
   })();
 })();
 </script>
