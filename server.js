@@ -634,7 +634,7 @@ const MIME = {
   '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime', '.m4v': 'video/mp4',
   '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.m4a': 'audio/mp4', '.aac': 'audio/aac',
   '.pdf': 'application/pdf',
-  '.txt': 'text/plain; charset=utf-8', '.md': 'text/plain; charset=utf-8',
+  '.txt': 'text/plain; charset=utf-8', '.md': 'text/markdown; charset=utf-8',
   '.json': 'application/json; charset=utf-8', '.csv': 'text/plain; charset=utf-8',
   '.zip': 'application/zip', '.html': 'text/plain; charset=utf-8',
 };

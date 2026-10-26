@@ -644,6 +644,14 @@
   .mtools::-webkit-scrollbar{display:none}
   .composer.prev-on .mtools{display:none}
   .pvbtn{flex:none;margin-left:auto}
+  /* 存为 .md：工具条右侧的显式动作，跟「预览」并排 */
+  .tool.mdbtn{
+    flex:none;color:var(--accent);background:var(--accent-soft);
+    border-color:rgba(76,110,245,.26);font-weight:650;
+  }
+  .tool.mdbtn:hover{color:var(--accent);background:var(--accent-soft);border-color:rgba(76,110,245,.5)}
+  .tool.mdbtn:disabled{opacity:.4}
+  .tool svg{width:12.5px;height:12.5px;flex:none}
   .tool{
     flex:none;height:27px;padding:0 8px;border:1px solid transparent;border-radius:8px;background:transparent;
     color:var(--sub);font:inherit;font-size:12.2px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;
@@ -758,6 +766,10 @@
           <button type="button" class="tool" data-tool="link" title="链接">🔗 链接</button>
         </div>
         <button type="button" class="tool pvbtn" data-tool="preview" id="previewBtn" title="预览 Markdown 效果">预览</button>
+        <button type="button" class="tool mdbtn" data-tool="tomd" id="mdBtn" title="把当前内容打包成 .md 文件，作为一条文件消息发送（图片会内联进文件）">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5v11.5"/><path d="M7.5 10.5L12 15l4.5-4.5"/><path d="M4.5 19.5h15"/></svg>
+          <span>.md</span>
+        </button>
       </div>
       <div class="bar">
         <button class="to-chip" id="toBtn" title="选择发送对象">
@@ -825,6 +837,7 @@
   var feed = $('feed'), sendBtn = $('send'), fileInput = $('file');
   var pickBtn = $('pick'), countEl = $('count'), peerRow = $('peerRow'), peerCountEl = $('peerCount');
   var peersBtn = $('peersBtn'), peersPop = $('peersPop'), pstack = $('pstack');
+  var mdBtn = $('mdBtn'), mdBusy = false;
   var clearBtn = $('clear'), hintEl = $('hint'), lockedEl = $('locked');
 
   function esc(s) {
@@ -2136,6 +2149,7 @@
   function syncSend() {
     var allowed = canSend('text') || canSend('image') || canSend('file');
     sendBtn.disabled = !allowed || !hasContent();
+    if (mdBtn) mdBtn.disabled = mdBusy || !canSend('file') || !hasContent();
 
     var n = compose.filter(function (b) { return b.type === 'media'; }).length;
     if (n) {
@@ -2187,6 +2201,149 @@
     } catch (e) {
       toast(e.message || '发送失败');
     } finally {
+      syncSend();
+    }
+  }
+
+  /* ============================================================ 存为 .md */
+  /**
+   * 把输入区的内容打包成一个 .md 文件发出去。
+   * 图片以 data URI 内联进文件（单文件自包含，Typora / Obsidian / VSCode 都能看）；
+   * 其余附件原样作为同一条消息的片段一起发，md 里只留一处引用。
+   */
+  var MD_INLINE_BUDGET = 8 * 1024 * 1024; // 内联图片的总预算，超了改走附件
+
+  function readAsDataURL(file) {
+    return new Promise(function (resolve, reject) {
+      var r = new FileReader();
+      r.onload = function () { resolve(String(r.result || '')); };
+      r.onerror = function () { reject(new Error('读取图片失败')); };
+      r.readAsDataURL(file);
+    });
+  }
+
+  /** 文件名取第一行有效文字，取不到就用时间戳 */
+  function mdFileName(text) {
+    var first = '';
+    String(text || '').split('\n').some(function (l) {
+      var t = l.trim();
+      if (!t || /^([-=*_])\1{2,}$/.test(t)) return false;
+      first = t;
+      return true;
+    });
+    var stem = first
+      .replace(/^#{1,6}\s*/, '')
+      .replace(/[*_`>~|]/g, '')
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+      .replace(/[\\/:*?"<>]/g, '')
+      .trim()
+      .slice(0, 40)
+      .replace(/[.\s]+$/, '');
+
+    if (!stem) {
+      var d = new Date(), p = function (n) { return (n < 10 ? '0' : '') + n; };
+      stem = 'XiaoMao-笔记-' + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) +
+        '-' + p(d.getHours()) + p(d.getMinutes());
+    }
+    return stem + '.md';
+  }
+
+  /** 按输入区顺序拼 md，返回正文 + 需要额外跟发的附件 fid */
+  async function buildMarkdown() {
+    var chunks = [], attach = [], used = 0;
+
+    for (var i = 0; i < compose.length; i++) {
+      var b = compose[i];
+      if (b.type === 'text') {
+        var t = b.el.value.replace(/^\n+/, '').replace(/\s+$/, '');
+        if (t.trim()) chunks.push(t);
+        continue;
+      }
+      if (!b.fid) continue;
+
+      if (b.kind === 'image' && b.file) {
+        var alt = String(b.name || '图片').replace(/[\[\]]/g, '');
+        var url = await readAsDataURL(b.file);
+        if (used + url.length <= MD_INLINE_BUDGET) {
+          used += url.length;
+          chunks.push('![' + alt + '](' + url + ')');
+        } else {
+          // 装不下就退回附件，md 里留相对引用（下载后放同目录即可显示）
+          attach.push(b.fid);
+          chunks.push('![' + alt + '](' + alt + ')');
+        }
+      } else {
+        attach.push(b.fid);
+        chunks.push('> 附件：' + (b.name || '文件') +
+          (b.size ? '（' + fmtSize(b.size) + '）' : '') + '，随本条消息一起发送');
+      }
+    }
+
+    return { text: chunks.join('\n\n') + '\n', attach: attach };
+  }
+
+  function uploadBlob(file) {
+    return new Promise(function (resolve, reject) {
+      var xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/upload?name=' + encodeURIComponent(file.name) +
+        '&type=' + encodeURIComponent(file.type || '') +
+        '&cid=' + encodeURIComponent(state.cid));
+      xhr.onload = function () {
+        var d = {};
+        try { d = JSON.parse(xhr.responseText); } catch (e) {}
+        if (xhr.status === 200 && d.part) resolve(d.part);
+        else reject(new Error(d.error || '上传失败'));
+      };
+      xhr.onerror = function () { reject(new Error('上传失败')); };
+      xhr.send(file);
+    });
+  }
+
+  async function sendAsMarkdown() {
+    if (!hasContent()) { toast('先写点内容'); return; }
+    if (!canSend('file')) { toast('主设备已关闭文件发送'); return; }
+    if (mdBtn.disabled) return;
+    mdBusy = true;
+    mdBtn.disabled = true;
+
+    // 上传中的附件先等完，别让 md 里少东西
+    if (compose.some(function (b) { return b.done; })) {
+      await Promise.all(compose.map(function (b) { return b.done || null; }));
+    }
+
+    var bad = compose.filter(function (b) { return b.type === 'media' && !b.fid; });
+    if (bad.length) {
+      mdBusy = false;
+      syncSend();
+      toast('有 ' + bad.length + ' 个附件没上传成功，移除后重试');
+      return;
+    }
+
+    try {
+      var built = await buildMarkdown();
+      if (!built.text.trim()) { toast('没有可导出的内容'); return; }
+
+      var name = mdFileName(built.text);
+      var file = new File([built.text], name, { type: 'text/markdown' });
+      var part = await uploadBlob(file);
+
+      var parts = [{ type: 'file', fid: part.fid }];
+      built.attach.forEach(function (fid) { parts.push({ type: 'file', fid: fid }); });
+
+      await api('/api/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cid: state.cid, to: state.toCid, parts: parts })
+      });
+
+      resetCompose();
+      poll(true);
+      toast('已作为 ' + name + ' 发出');
+    } catch (e) {
+      // 失败时输入区原样保留，能直接重试
+      toast(e.message || '打包失败');
+    } finally {
+      mdBusy = false;
       syncSend();
     }
   }
@@ -2301,6 +2458,7 @@
 
     if (name === 'emoji') { toggleEmoji(); return; }
     if (name === 'preview') { togglePreview(); return; }
+    if (name === 'tomd') { sendAsMarkdown(); return; }
 
     if (name === 'hr') {
       b = textTarget(); v = b.el.value;
