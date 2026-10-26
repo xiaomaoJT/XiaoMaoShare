@@ -187,6 +187,27 @@
   .to-chip.private{color:var(--brand);border-color:rgba(232,86,47,.42);background:rgba(232,86,47,.08)}
   @media (max-width:430px){ .to-chip{max-width:96px} }
 
+  /* Telegram 同步开关 */
+  .tg-chip{
+    display:inline-flex;align-items:center;gap:5px;height:34px;padding:0 9px;border-radius:10px;flex:none;
+    background:var(--card-2);border:1px solid var(--line);color:var(--faint);
+    font:inherit;font-size:11.5px;font-weight:700;letter-spacing:.3px;cursor:pointer;transition:.15s;
+  }
+  .tg-chip svg{width:14px;height:14px;flex:none}
+  .tg-chip:hover{color:var(--text);border-color:var(--faint)}
+  .tg-chip.tg-lock{border-style:dashed;color:var(--sub)}
+  .tg-chip.on{color:#1a86c8;border-color:rgba(26,134,200,.42);background:rgba(26,134,200,.1)}
+  :root[data-theme="dark"] .tg-chip.on{color:#7cc4f0;background:rgba(26,134,200,.18)}
+  .tg-chip.busy{opacity:.55;pointer-events:none}
+  @media (max-width:430px){ .tg-chip{padding:0 8px} .tg-chip span{display:none} }
+
+  /* 卡片上的「已同步」小标记 */
+  .tg-tag{
+    font-size:9.5px;font-weight:700;color:#1a86c8;background:rgba(26,134,200,.12);
+    padding:1.5px 5px;border-radius:5px;flex:none;letter-spacing:.2px;
+  }
+  :root[data-theme="dark"] .tg-tag{color:#7cc4f0;background:rgba(26,134,200,.2)}
+
   /* 私聊标记 */
   .pv{
     font-size:9.5px;font-weight:700;color:var(--brand);background:rgba(232,86,47,.12);
@@ -588,6 +609,30 @@
   .dev-empty{font-size:12px;color:var(--faint);padding:9px 0}
   .dev-hint{font-size:11.5px;color:var(--faint);line-height:1.6;margin-top:8px}
 
+  /* ---- Telegram 配置 ---- */
+  .tg-form{display:flex;flex-direction:column;gap:9px;margin-top:10px}
+  .tg-field{display:flex;flex-direction:column;gap:4px}
+  .tg-field label{font-size:11.5px;font-weight:600;color:var(--sub)}
+  .tg-field input{
+    height:34px;padding:0 10px;border-radius:9px;border:1px solid var(--line);background:var(--card-2);
+    color:var(--text);font:inherit;font-size:12.5px;outline:0;width:100%;
+  }
+  .tg-field input:focus{border-color:var(--accent)}
+  .tg-field input::placeholder{color:var(--faint)}
+  .tg-field small{font-size:11px;color:var(--faint);line-height:1.5}
+  .tg-state{
+    display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--faint);
+    padding:7px 9px;border-radius:9px;background:var(--card-2);line-height:1.5;
+  }
+  .tg-state b{color:var(--text);font-weight:600}
+  .tg-state .dotb{width:7px;height:7px;border-radius:50%;background:var(--faint);flex:none}
+  .tg-state.ok .dotb{background:#22a06b}
+  .tg-state.ok{color:var(--sub)}
+  .tg-state.err{color:#c2410c;background:rgba(232,86,47,.09)}
+  :root[data-theme="dark"] .tg-state.err{color:#ffb08a;background:rgba(232,86,47,.14)}
+  .tg-state.err .dotb{background:var(--danger)}
+  .tg-acts{display:flex;gap:6px;flex-wrap:wrap}
+
   /* ---- 二维码 ---- */
   .qr-wrap{display:flex;flex-direction:column;align-items:center;gap:12px;margin-top:16px}
   .qr-box{
@@ -772,6 +817,11 @@
         </button>
       </div>
       <div class="bar">
+        <button class="tg-chip" id="tgBtn" type="button" hidden
+          title="输入密码解锁后，消息可以同步到 Telegram">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4Z"/></svg>
+          <span id="tgLabel">TG</span>
+        </button>
         <button class="to-chip" id="toBtn" title="选择发送对象">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s7-4.5 7-10V6l-7-3-7 3v5c0 5.5 7 10 7 10z"/></svg>
           <span id="toName">所有人</span>
@@ -838,6 +888,7 @@
   var pickBtn = $('pick'), countEl = $('count'), peerRow = $('peerRow'), peerCountEl = $('peerCount');
   var peersBtn = $('peersBtn'), peersPop = $('peersPop'), pstack = $('pstack');
   var mdBtn = $('mdBtn'), mdBusy = false;
+  var tgBtn = $('tgBtn'), tgLabel = $('tgLabel'), tgBusy = false;
   var clearBtn = $('clear'), hintEl = $('hint'), lockedEl = $('locked');
 
   function esc(s) {
@@ -1178,6 +1229,8 @@
     cid: localStorage.getItem('xm.cid') || '',
     me: null,
     settings: { allowSend: true, allowText: true, allowImage: true, allowFile: true },
+    tg: { ready: false, enabled: false, configured: false, unlocked: false, bot: '', target: '' },
+    tgOn: localStorage.getItem('xm.tg') === '1',
     peers: [],
     admin: false,
     pending: 0,
@@ -1561,10 +1614,126 @@
     clearBtn.hidden = !state.admin;
   }
 
+  /* ============================================================ Telegram 同步 */
+  /**
+   * 能力由主设备配置（Bot Token + 接收人），各端**输入密码解锁**后才能用。
+   * 网关在服务端：没解锁的设备调 /api/tg/push 会被 403 挡回来，前端藏按钮只是顺手。
+   */
+  function renderTg() {
+    var t = state.tg || {};
+    // 没配好机器人时不打扰其他设备；主设备留个入口，点了直接去配置
+    if (!t.ready && !state.admin) { tgBtn.hidden = true; return; }
+    tgBtn.hidden = false;
+
+    var on = !!(t.ready && t.unlocked && state.tgOn);
+    tgBtn.classList.toggle('on', on);
+    tgBtn.classList.toggle('tg-lock', !(t.ready && t.unlocked));
+
+    if (!t.ready) {
+      tgBtn.title = '主设备还没配置 Telegram 机器人 · 点这里去设置';
+    } else if (!t.unlocked) {
+      tgBtn.title = '输入密码解锁 Telegram 远程发送';
+    } else if (on) {
+      tgBtn.title = '已开启：发送的消息会同步到 ' + (t.bot || 'Telegram') + ' · 点击关闭';
+    } else {
+      tgBtn.title = '点击开启：把消息同步到 ' + (t.bot || 'Telegram');
+    }
+  }
+
+  /** 未解锁：要一次密码；错了带着提示重来 */
+  function unlockTg(err) {
+    var wrap = document.createElement('div');
+    wrap.className = 'tg-form';
+    var f = document.createElement('div');
+    f.className = 'tg-field';
+    var lb = document.createElement('label');
+    lb.textContent = '接入密码';
+    var inp = document.createElement('input');
+    inp.type = 'password';
+    inp.placeholder = '输入密码';
+    inp.autocomplete = 'off';
+    var sm = document.createElement('small');
+    sm.textContent = '解锁后，这台设备发的消息可以同步到 ' + (state.tg.bot || '主设备配置的 Telegram');
+    f.appendChild(lb); f.appendChild(inp); f.appendChild(sm);
+    wrap.appendChild(f);
+
+    Dialog.open({
+      title: '解锁 Telegram 远程发送',
+      desc: err || '主设备已经配好机器人，输入密码后这台设备也能往外发。',
+      body: wrap,
+      actions: [
+        { label: '取消', value: null },
+        { label: '解锁', value: 'ok', kind: 'primary' }
+      ]
+    }).then(function (v) {
+      if (v !== 'ok') return;
+      var pwd = inp.value.trim();
+      if (!pwd) return;
+      api('/api/tg/unlock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cid: state.cid, password: pwd })
+      }).then(function (d) {
+        if (d.tg) state.tg = d.tg;
+        state.tgOn = true;
+        localStorage.setItem('xm.tg', '1');
+        renderTg();
+        toast('已解锁，发送时会同步到 Telegram');
+      }).catch(function (e) {
+        unlockTg(e.message || '密码不正确');
+      });
+    });
+  }
+
+  tgBtn.addEventListener('click', function () {
+    if (tgBusy) return;
+    if (!state.tg.ready) {
+      if (state.admin) openSettings();
+      else toast('主设备还没配置 Telegram 机器人');
+      return;
+    }
+    if (!state.tg.unlocked) { unlockTg(''); return; }
+    state.tgOn = !state.tgOn;
+    localStorage.setItem('xm.tg', state.tgOn ? '1' : '0');
+    renderTg();
+    toast(state.tgOn ? '已开启：消息将同步到 Telegram' : '已关闭 Telegram 同步');
+  });
+
+  /** 本地已发出去之后再同步，失败也不影响本机消息 */
+  function pushTg(itemId) {
+    var t = state.tg || {};
+    if (!itemId || !t.ready || !t.unlocked || !state.tgOn) return;
+    tgBusy = true;
+    tgBtn.classList.add('busy');
+    api('/api/tg/push', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cid: state.cid, id: itemId })
+    }).then(function (d) {
+      if (d.sent > 0) {
+        var extra = '';
+        if (d.failed && d.failed.length) extra = '（' + d.failed.length + ' 个附件没传上去）';
+        else if (d.skipped && d.skipped.length) extra = '（' + d.skipped[0] + '）';
+        toast('已同步到 Telegram' + extra);
+        poll(true);
+      } else if (d.dup) {
+        toast('这条已经同步过了');
+      } else {
+        toast('Telegram 没发出去：' + ((d.failed && d.failed[0]) || d.error || '未知原因'));
+      }
+    }).catch(function (e) {
+      toast('Telegram 发送失败：' + (e.message || '网络错误'));
+    }).then(function () {
+      tgBusy = false;
+      tgBtn.classList.remove('busy');
+    });
+  }
+
   /* ============================================================ 卡片 */
   function makeCard(it) {
     var el = document.createElement('article');
     el.className = 'card';
+    el.dataset.tg = it.tgAt ? '1' : '';
 
     var meta = document.createElement('div');
     meta.className = 'meta';
@@ -1611,9 +1780,15 @@
       pv.title = '只有你和「' + other + '」能看到';
       meta.appendChild(pv);
     }
+    if (it.tgAt) {
+      var ttag = document.createElement('span');
+      ttag.className = 'tg-tag';
+      ttag.textContent = 'TG';
+      ttag.title = '已同步到 Telegram';
+      meta.appendChild(ttag);
+    }
     meta.appendChild(time); meta.appendChild(acts);
     el.appendChild(meta);
-
     // 片段按顺序铺开：文字段、图片组、文件行
     var run = [];
     function flushImages() {
@@ -1745,6 +1920,14 @@
     var frag = document.createDocumentFragment();
     items.forEach(function (it) {
       var el = nodes.get(it.id);
+      // Telegram 同步状态变了要重画：卡片按 id 缓存，不重画就永远看不到那个标记
+      if (el && (el.dataset.tg === '1') !== !!it.tgAt) {
+        var re = makeCard(it);
+        el.replaceWith(re);
+        nodes.set(it.id, re);
+        el = re;
+        fresh.push(re);
+      }
       if (!el) { el = makeCard(it); nodes.set(it.id, el); fresh.push(el); }
       frag.appendChild(el);
       seen.add(it.id);
@@ -1817,8 +2000,10 @@
     if (typeof d.admin === 'boolean') state.admin = d.admin;
     if (typeof d.pending === 'number') state.pending = d.pending;
     if (d.settings) state.settings = d.settings;
+    if (d.tg) state.tg = d.tg;
     if (d.peers) { state.peers = d.peers; renderPeers(d.peers); }
     applyPermissions();
+    renderTg();
     syncWho();
   }
 
@@ -2189,7 +2374,7 @@
       var parts = composeParts();
       if (!parts.length) return;
 
-      await api('/api/send', {
+      var r = await api('/api/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ cid: state.cid, to: state.toCid, parts: parts })
@@ -2198,6 +2383,7 @@
       resetCompose();
       poll(true);
       toast(parts.length > 1 ? '已合并发送' : '已发送');
+      pushTg(r && r.item && r.item.id);
     } catch (e) {
       toast(e.message || '发送失败');
     } finally {
@@ -2330,7 +2516,7 @@
       var parts = [{ type: 'file', fid: part.fid }];
       built.attach.forEach(function (fid) { parts.push({ type: 'file', fid: fid }); });
 
-      await api('/api/send', {
+      var sent = await api('/api/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ cid: state.cid, to: state.toCid, parts: parts })
@@ -2339,6 +2525,7 @@
       resetCompose();
       poll(true);
       toast('已作为 ' + name + ' 发出');
+      pushTg(sent && sent.item && sent.item.id);
     } catch (e) {
       // 失败时输入区原样保留，能直接重试
       toast(e.message || '打包失败');
@@ -2744,6 +2931,172 @@
   }
 
   /* ============================================================ 设置 / 外观 */
+  /** 主设备配置 Telegram：Token + 接收人，配好后各端用密码解锁才用得上 */
+  function buildTgSection() {
+    var box = document.createElement('div');
+    box.className = 'dev-sec';
+
+    var head = document.createElement('div');
+    head.className = 'dev-head';
+    var htxt = document.createElement('span');
+    htxt.textContent = 'Telegram 远程';
+    head.appendChild(htxt);
+    box.appendChild(head);
+
+    var form = document.createElement('div');
+    form.className = 'tg-form';
+
+    /* 总开关 */
+    var sw = document.createElement('label');
+    sw.className = 'sw';
+    var cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = state.tg.enabled !== false;
+    var track = document.createElement('span');
+    track.className = 'track';
+    var stxt = document.createElement('span');
+    stxt.className = 'txt';
+    stxt.textContent = '启用 Telegram 转发';
+    var ssub = document.createElement('small');
+    ssub.textContent = '关掉后所有设备都用不了，配置会保留';
+    stxt.appendChild(ssub);
+    sw.appendChild(cb); sw.appendChild(track); sw.appendChild(stxt);
+    form.appendChild(sw);
+
+    function field(labelText, hintText, placeholder, value, isPwd) {
+      var f = document.createElement('div');
+      f.className = 'tg-field';
+      var lb = document.createElement('label');
+      lb.textContent = labelText;
+      var inp = document.createElement('input');
+      inp.type = isPwd ? 'password' : 'text';
+      inp.placeholder = placeholder || '';
+      inp.value = value || '';
+      inp.autocomplete = 'off';
+      inp.spellcheck = false;
+      var sm = document.createElement('small');
+      sm.textContent = hintText || '';
+      f.appendChild(lb); f.appendChild(inp); f.appendChild(sm);
+      form.appendChild(f);
+      return inp;
+    }
+
+    var tkInp = field('Bot Token',
+      '向 @BotFather 申请，形如 123456789:AAH…；已配置时留空表示不改',
+      state.tg.tokenMask ? '已配置 ' + state.tg.tokenMask : '123456789:AAH...', '', true);
+    var chatInp = field('接收人 ID',
+      '你自己的数字 id（给 @userinfobot 发条消息就能看到），也可填 @频道名',
+      '例如 123456789', state.tg.target || '', false);
+
+    var stateEl = document.createElement('div');
+    stateEl.className = 'tg-state';
+    var dot = document.createElement('span');
+    dot.className = 'dotb';
+    var stx = document.createElement('span');
+    stateEl.appendChild(dot); stateEl.appendChild(stx);
+    form.appendChild(stateEl);
+
+    function setState(kind, text) {
+      stateEl.className = 'tg-state' + (kind ? ' ' + kind : '');
+      stx.innerHTML = text;
+    }
+    if (state.tg.ready) {
+      setState('ok', '已连接 <b>' + esc(state.tg.bot || '机器人') + '</b> · 目标 ' + esc(state.tg.target || '未填'));
+    } else if (state.tg.configured) {
+      setState('', 'Token 已配置，但还没填接收人 ID');
+    } else {
+      setState('', '还没配置，填好 Token 和接收人后点保存');
+    }
+
+    var acts = document.createElement('div');
+    acts.className = 'tg-acts';
+    var saveBtn = document.createElement('button');
+    saveBtn.className = 'mini ok';
+    saveBtn.textContent = '保存配置';
+    var testBtn = document.createElement('button');
+    testBtn.className = 'mini';
+    testBtn.textContent = '发送测试';
+    var clearBtn2 = document.createElement('button');
+    clearBtn2.className = 'mini bad';
+    clearBtn2.textContent = '清空';
+    acts.appendChild(saveBtn); acts.appendChild(testBtn); acts.appendChild(clearBtn2);
+    form.appendChild(acts);
+
+    box.appendChild(form);
+
+    function busy(on) {
+      [saveBtn, testBtn, clearBtn2].forEach(function (b) { b.disabled = on; });
+    }
+
+    saveBtn.onclick = function () {
+      var payload = { enabled: cb.checked, chatId: chatInp.value.trim() };
+      var tk = tkInp.value.trim();
+      if (tk) payload.token = tk;
+      busy(true);
+      setState('', '正在验证 Token…');
+      api('/api/tg/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }).then(function (d) {
+        var info = d.tg || {};
+        tkInp.value = '';
+        if (info.tokenMask) tkInp.placeholder = '已配置 ' + info.tokenMask;
+        if (info.ready) {
+          setState('ok', '已连接 <b>' + esc(info.bot || '机器人') + '</b> · 目标 ' + esc(info.chatId || '未填'));
+          toast('Telegram 配置已保存');
+        } else {
+          setState('', 'Token 已保存，还差接收人 ID');
+          toast('已保存，记得填接收人 ID');
+        }
+        poll(true);
+      }).catch(function (e) {
+        setState('err', esc(e.message || '保存失败'));
+      }).then(function () { busy(false); });
+    };
+
+    testBtn.onclick = function () {
+      busy(true);
+      setState('', '正在发送测试消息…');
+      api('/api/tg/test', { method: 'POST' })
+        .then(function () {
+          setState('ok', '测试消息已发出，去 Telegram 看看');
+        })
+        .catch(function (e) {
+          setState('err', esc(e.message || '发送失败'));
+        })
+        .then(function () { busy(false); });
+    };
+
+    clearBtn2.onclick = function () {
+      Dialog.confirm({
+        title: '清空 Telegram 配置？',
+        desc: 'Token 和接收人会一起删掉，所有设备立刻用不了。',
+        ok: '清空', danger: true
+      }).then(function (ok) {
+        if (!ok) return;
+        busy(true);
+        api('/api/tg/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: '', chatId: '', enabled: false })
+        }).then(function () {
+          tkInp.value = '';
+          tkInp.placeholder = '123456789:AAH...';
+          chatInp.value = '';
+          cb.checked = false;
+          setState('', '已清空');
+          toast('Telegram 配置已清空');
+          poll(true);
+        }).catch(function (e) {
+          setState('err', esc(e.message || '清空失败'));
+        }).then(function () { busy(false); });
+      });
+    };
+
+    return { el: box };
+  }
+
   function openSettings() {
     var wrapEl = document.createElement('div');
     var rows = [
@@ -2786,6 +3139,9 @@
 
     var devSec = buildDeviceSection();
     wrapEl.appendChild(devSec.el);
+
+    var tgSec = buildTgSection();
+    wrapEl.appendChild(tgSec.el);
 
     Dialog.open({
       title: '主设备设置',

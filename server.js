@@ -7,6 +7,7 @@
  */
 
 const http = require('http');
+const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -124,6 +125,257 @@ try {
 
 function saveSettings() {
   fs.writeFile(SETTINGS_FILE, JSON.stringify(settings, null, 2), () => {});
+}
+
+/* ------------------------------------------------------ Telegram 远程 */
+
+const TG_FILE = path.join(DATA_DIR, 'telegram.json');
+const TG_MAX_UPLOAD = 48 * 1024 * 1024; // Bot API 单文件上限 50MB，留点余量
+const TG_TIMEOUT = 12000;
+const TG_MAX_MEDIA = 6;                  // 一条消息最多转发几个附件，防刷屏
+const TG_TRY_LIMIT = 5;                  // 密码错几次就锁一会儿
+const TG_TRY_WINDOW = 10 * 60e3;
+
+// token 单独存一个文件：settings 会随 /api/list 发给每台设备，绝不能混进去
+let tg = { token: '', chatId: '', botUser: '', enabled: true };
+try {
+  const saved = JSON.parse(fs.readFileSync(TG_FILE, 'utf8'));
+  if (typeof saved.token === 'string') tg.token = saved.token.trim();
+  if (typeof saved.chatId === 'string') tg.chatId = saved.chatId.trim();
+  if (typeof saved.botUser === 'string') tg.botUser = saved.botUser;
+  if (typeof saved.enabled === 'boolean') tg.enabled = saved.enabled;
+} catch {
+  /* 没配置过 */
+}
+
+function saveTg() {
+  fs.writeFile(TG_FILE, JSON.stringify(tg, null, 2), { mode: 0o600 }, () => {});
+}
+
+const tgReady = () => !!(tg.enabled && tg.token && tg.chatId);
+
+const maskToken = (t) => (!t ? '' : t.length <= 12 ? '••••••' : t.slice(0, 6) + '••••' + t.slice(-4));
+
+/**
+ * 对外状态。token 和接收人 id 只回给主设备，其他设备只知道「能不能用、是哪个 bot」。
+ * unlocked 是本机是否已用密码解锁（主设备天然解锁）。
+ */
+function publicTg(c) {
+  const admin = !!(c && c.admin);
+  return {
+    ready: tgReady(),
+    enabled: !!tg.enabled,
+    configured: !!tg.token,
+    bot: tg.botUser || '',
+    unlocked: !!(c && (admin || c.tgUnlocked)),
+    target: admin ? tg.chatId : '',
+    tokenMask: admin ? maskToken(tg.token) : '',
+  };
+}
+
+const tgTries = new Map(); // ip -> { n, until }
+function tgTryBlocked(ip) {
+  const t = tgTries.get(ip);
+  if (!t) return false;
+  if (Date.now() > t.until) { tgTries.delete(ip); return false; }
+  return t.n >= TG_TRY_LIMIT;
+}
+function tgTryFail(ip) {
+  const t = tgTries.get(ip) || { n: 0, until: 0 };
+  t.n += 1;
+  t.until = Date.now() + TG_TRY_WINDOW;
+  tgTries.set(ip, t);
+}
+
+/** 网络错误翻译成人话——大概率是没代理 */
+function tgFriendly(e) {
+  const code = (e && e.code) || '';
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') return '域名解析失败，检查网络或代理';
+  if (code === 'ECONNREFUSED' || code === 'ECONNRESET' || code === 'EPIPE') return '连不上 api.telegram.org，可能需要代理';
+  if (code === 'ETIMEDOUT') return '连接超时，可能需要代理';
+  if (code === 'CERT_HAS_EXPIRED') return '证书过期，检查系统时间';
+  return (e && e.message) || '网络错误';
+}
+
+/** Telegram 的英文错误翻成人话——这些提示用户是要看着自己动手改的 */
+function tgExplain(desc) {
+  const d = String(desc || '');
+  if (/chat not found/i.test(d)) return '接收人 ID 不对，或对方还没跟机器人说过话';
+  if (/Unauthorized|invalid token/i.test(d)) return 'Token 无效，或已被 BotFather 重置';
+  if (/blocked by the user/i.test(d)) return '对方把机器人拉黑了';
+  if (/initiate conversation|bot can't initiate/i.test(d)) return '接收人要先打开机器人会话发一句 /start';
+  if (/user is deactivated/i.test(d)) return '接收人账号已注销';
+  if (/message is too long/i.test(d)) return '内容超过 Telegram 的长度上限';
+  if (/Too Many Requests/i.test(d)) return '请求太频繁，被 Telegram 限流了';
+  if (/Butterfly|wrong file/i.test(d)) return '这个文件 Telegram 不收';
+  return d;
+}
+
+/** 走系统里配的代理（Node 自己不认这些环境变量，这里手动开隧道） */
+function tgProxy() {
+  const raw = process.env.HTTPS_PROXY || process.env.https_proxy ||
+    process.env.HTTP_PROXY || process.env.http_proxy || '';
+  if (!raw) return null;
+  try { return new URL(raw); } catch { return null; }
+}
+
+function tgRequest(apiPath, headers, body) {
+  return new Promise((resolve, reject) => {
+    const opts = {
+      hostname: 'api.telegram.org',
+      port: 443,
+      path: apiPath,
+      method: 'POST',
+      headers,
+      timeout: TG_TIMEOUT,
+    };
+
+    const onRes = (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => {
+        let d = null;
+        try { d = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch {}
+        if (d && d.ok) return resolve(d.result);
+        reject(new Error(tgExplain((d && d.description) || ('Telegram 返回 HTTP ' + res.statusCode))));
+      });
+    };
+
+    const send = (req) => {
+      req.setTimeout(TG_TIMEOUT, () => req.destroy(Object.assign(new Error('timeout'), { code: 'ETIMEDOUT' })));
+      req.on('error', (e) => reject(new Error(tgFriendly(e))));
+      req.end(body);
+    };
+
+    const proxy = tgProxy();
+    if (!proxy) return send(https.request(opts, onRes));
+
+    const auth = proxy.username
+      ? {
+        'Proxy-Authorization': 'Basic ' + Buffer.from(
+          decodeURIComponent(proxy.username) + ':' + decodeURIComponent(proxy.password || '')
+        ).toString('base64'),
+      }
+      : {};
+
+    const tun = http.request({
+      host: proxy.hostname,
+      port: Number(proxy.port) || 80,
+      method: 'CONNECT',
+      path: 'api.telegram.org:443',
+      headers: Object.assign({ host: 'api.telegram.org:443' }, auth),
+      timeout: TG_TIMEOUT,
+    });
+
+    tun.on('connect', (res, socket) => {
+      if (res.statusCode !== 200) {
+        socket.destroy();
+        return reject(new Error('代理拒绝了连接（HTTP ' + res.statusCode + '）'));
+      }
+      send(https.request(Object.assign({}, opts, {
+        socket,
+        agent: false,
+        servername: 'api.telegram.org',
+      }), onRes));
+    });
+    tun.on('timeout', () => tun.destroy(Object.assign(new Error('timeout'), { code: 'ETIMEDOUT' })));
+    tun.on('error', (e) => {
+      const why = e && (e.code === 'ECONNREFUSED' || e.code === 'ENOTFOUND')
+        ? '地址或端口不对'
+        : String(tgExplain(e && e.message));
+      reject(new Error('代理连不上：' + why));
+    });
+    tun.end();
+  });
+}
+
+function tgCall(method, params) {
+  const body = Buffer.from(JSON.stringify(params || {}));
+  return tgRequest(`/bot${tg.token}/${method}`, {
+    'Content-Type': 'application/json',
+    'Content-Length': body.length,
+  }, body);
+}
+
+/** 带文件的上传（sendPhoto / sendDocument）：手搓 multipart，零依赖 */
+function tgUpload(method, fields, field, filePath, fileName, mime) {
+  let st;
+  try { st = fs.statSync(filePath); } catch { return Promise.reject(new Error('文件不在磁盘上了')); }
+  if (st.size > TG_MAX_UPLOAD) return Promise.reject(new Error('超过 48MB，Telegram 传不了'));
+
+  const boundary = '----XiaoMao' + crypto.randomBytes(12).toString('hex');
+  const chunks = [];
+  for (const k of Object.keys(fields || {})) {
+    chunks.push(Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${fields[k]}\r\n`
+    ));
+  }
+  const safe = String(fileName || 'file').replace(/["\r\n\\]/g, '_');
+  chunks.push(Buffer.from(
+    `--${boundary}\r\nContent-Disposition: form-data; name="${field}"; filename="${safe}"\r\n` +
+    `Content-Type: ${mime || 'application/octet-stream'}\r\n\r\n`
+  ));
+  chunks.push(fs.readFileSync(filePath));
+  chunks.push(Buffer.from(`\r\n--${boundary}--\r\n`));
+  const body = Buffer.concat(chunks);
+
+  return tgRequest(`/bot${tg.token}/${method}`, {
+    'Content-Type': 'multipart/form-data; boundary=' + boundary,
+    'Content-Length': body.length,
+  }, body);
+}
+
+/**
+ * 把一条消息转发到 Telegram：文字走 sendMessage，图片走 sendPhoto，其他文件走 sendDocument。
+ * 文字先发，保证在会话里的顺序不乱；文字发不出去说明网络/配置有问题，直接停，不再一个个试。
+ */
+async function tgSendItem(item) {
+  const parts = Array.isArray(item.parts) ? item.parts : [];
+  const texts = parts.filter((p) => p.kind === 'text' && p.text).map((p) => p.text);
+  const media = parts.filter((p) => p.kind !== 'text' && p.file);
+  const failed = [];
+  let sent = 0;
+
+  const text = texts.join('\n\n').trim();
+  if (text) {
+    const head = '📨 ' + (item.from || '设备') +
+      (item.to ? '（仅 ' + (item.toName || '对方') + ' 可见）' : '');
+    // 上限 4096，留出前缀和截断标记的余量
+    const body = text.length > 3600 ? text.slice(0, 3600) + '\n\n…（内容过长，已截断）' : text;
+    try {
+      await tgCall('sendMessage', {
+        chat_id: tg.chatId,
+        text: head + '\n\n' + body,
+        disable_web_page_preview: true,
+      });
+      sent++;
+    } catch (e) {
+      failed.push('文字：' + e.message);
+      return { sent, failed, skipped: [] };
+    }
+  }
+
+  const skipped = [];
+  for (let i = 0; i < media.length && i < TG_MAX_MEDIA; i++) {
+    const p = media[i];
+    try {
+      await tgUpload(
+        p.kind === 'image' ? 'sendPhoto' : 'sendDocument',
+        { chat_id: tg.chatId },
+        p.kind === 'image' ? 'photo' : 'document',
+        path.join(FILES_DIR, p.file), p.name || p.file, p.mime
+      );
+      sent++;
+    } catch (e) {
+      failed.push((p.name || '附件') + '：' + e.message);
+    }
+  }
+  if (media.length > TG_MAX_MEDIA) {
+    skipped.push(`另有 ${media.length - TG_MAX_MEDIA} 个附件没转发（单条最多 ${TG_MAX_MEDIA} 个）`);
+  }
+
+  if (!sent && !failed.length) failed.push('没有可发送的内容');
+  return { sent, failed, skipped };
 }
 
 const PRESENCE_TTL = 8000;        // 超过这么久没心跳算离线
@@ -833,6 +1085,7 @@ const server = http.createServer((req, res) => {
           me: publicClient(c),
           peers: peersPayload(),
           settings,
+          tg: publicTg(c),
           admin: c.admin,
           pending: host ? pendingList().length : 0,
         });
@@ -977,6 +1230,7 @@ const server = http.createServer((req, res) => {
       count: visible.length,
       peers: peersPayload(),
       settings,
+      tg: publicTg(me),
       me: me ? publicClient(me) : null,
       admin: host,
       pending: host ? pendingList().length : 0,
@@ -1152,6 +1406,139 @@ const server = http.createServer((req, res) => {
         reindexFiles();
         saveIndex();
         json(res, 200, { item });
+      })
+      .catch(() => json(res, 400, { error: 'bad request' }));
+    return;
+  }
+
+  /* ---------------- Telegram 远程（主设备配置，各端密码解锁） ---------------- */
+
+  // 主设备：读写 Bot 配置（token 只回掩码，留空表示不改）
+  if (method === 'POST' && pathname === '/api/tg/config') {
+    if (!isHostRequest(req)) return json(res, 403, { error: '只有主设备可以配置 Telegram' });
+    readBody(req, 8192)
+      .then(async (raw) => {
+        let body = {};
+        try { body = JSON.parse(raw || '{}'); } catch {}
+        const prev = tg.token;
+
+        if (typeof body.token === 'string') {
+          const t = body.token.trim();
+          if (!t) {
+            tg.token = '';
+            tg.botUser = '';
+          } else if (t !== prev) {
+            if (!/^\d{5,}:[\w-]{20,}$/.test(t)) {
+              return json(res, 400, { error: 'Token 格式不对，应该像 123456789:AAH... 这样' });
+            }
+            tg.token = t;
+            try {
+              const me = await tgCall('getMe');
+              tg.botUser = me && me.username ? '@' + me.username : '';
+            } catch (e) {
+              tg.token = prev; // 验不过就不落盘，别把好配置弄坏
+              return json(res, 400, { error: 'Token 验证失败：' + e.message });
+            }
+          }
+        }
+
+        if (typeof body.chatId === 'string') {
+          const id = body.chatId.trim();
+          if (id && !/^(-?\d{1,20}|@[A-Za-z0-9_]{4,64})$/.test(id)) {
+            return json(res, 400, { error: '接收人 ID 应是数字（如 123456789）或 @频道名' });
+          }
+          tg.chatId = id;
+        }
+        if (typeof body.enabled === 'boolean') tg.enabled = body.enabled;
+
+        saveTg();
+        json(res, 200, { tg: Object.assign(publicTg({ admin: true }), {
+          chatId: tg.chatId,
+          tokenMask: maskToken(tg.token),
+        }) });
+      })
+      .catch(() => json(res, 400, { error: 'bad request' }));
+    return;
+  }
+
+  // 主设备：发一条测试消息，确认握手成功
+  if (method === 'POST' && pathname === '/api/tg/test') {
+    if (!isHostRequest(req)) return json(res, 403, { error: '只有主设备可以测试' });
+    if (!tgReady()) return json(res, 400, { error: '还没配置好 Token 或接收人' });
+    tgCall('sendMessage', {
+      chat_id: tg.chatId,
+      text: '🤖 XiaoMao 互传 · 测试消息\n\n配置已生效。之后在任意设备输入密码解锁，就能把消息同步到这里。',
+      disable_web_page_preview: true,
+    })
+      .then(() => json(res, 200, { ok: true }))
+      .catch((e) => json(res, 400, { error: e.message }));
+    return;
+  }
+
+  // 各端：输入密码解锁本机的 Telegram 发送能力
+  if (method === 'POST' && pathname === '/api/tg/unlock') {
+    const ip = clientIp(req);
+    if (!tgReady()) return json(res, 400, { error: '主设备还没配置 Telegram 机器人' });
+    if (tgTryBlocked(ip)) return json(res, 429, { error: '密码错太多次了，过 10 分钟再试' });
+
+    readBody(req, 4096)
+      .then((raw) => {
+        let body = {};
+        try { body = JSON.parse(raw || '{}'); } catch {}
+        if (String(body.password || '').trim() !== GATE_PASSWORD) {
+          tgTryFail(ip);
+          return json(res, 403, { error: '密码不正确' });
+        }
+        tgTries.delete(ip);
+        const c = touchClient(req, body.cid, '');
+        c.tgUnlocked = true;
+        console.log(`  ${displayName(c)} 解锁了 Telegram 远程发送`);
+        json(res, 200, { ok: true, tg: publicTg(c) });
+      })
+      .catch(() => json(res, 400, { error: 'bad request' }));
+    return;
+  }
+
+  // 各端：关掉本机的解锁状态
+  if (method === 'POST' && pathname === '/api/tg/lock') {
+    readBody(req, 4096)
+      .then((raw) => {
+        let body = {};
+        try { body = JSON.parse(raw || '{}'); } catch {}
+        const c = touchClient(req, body.cid, '');
+        c.tgUnlocked = false;
+        json(res, 200, { ok: true, tg: publicTg(c) });
+      })
+      .catch(() => json(res, 400, { error: 'bad request' }));
+    return;
+  }
+
+  // 把某条消息转发到 Telegram（本地已经发完，这一步只是同步出去）
+  if (method === 'POST' && pathname === '/api/tg/push') {
+    readBody(req, 4096)
+      .then(async (raw) => {
+        let body = {};
+        try { body = JSON.parse(raw || '{}'); } catch {}
+        if (!tgReady()) return json(res, 400, { error: '主设备还没配置 Telegram' });
+
+        const c = touchClient(req, body.cid, '');
+        if (!c.admin && !c.tgUnlocked) return json(res, 403, { error: '请先输入密码解锁 Telegram 发送' });
+
+        const item = items.find((x) => x.id === String(body.id || ''));
+        if (!item) return json(res, 404, { error: '消息不存在' });
+        if (item.owner !== c.cid && !c.admin) return json(res, 403, { error: '只能同步自己发的消息' });
+        if (item.tgAt) return json(res, 200, { ok: true, sent: 0, dup: true });
+
+        try {
+          const r = await tgSendItem(item);
+          if (r.sent > 0 && !item.tgAt) {
+            item.tgAt = Date.now();
+            saveIndex();
+          }
+          json(res, 200, { ok: r.sent > 0, sent: r.sent, failed: r.failed, skipped: r.skipped });
+        } catch (e) {
+          json(res, 502, { error: e.message });
+        }
       })
       .catch(() => json(res, 400, { error: 'bad request' }));
     return;
