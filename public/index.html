@@ -717,19 +717,60 @@
   }
   .lightbox{
     position:fixed;inset:0;z-index:90;display:none;place-items:center;
-    background:rgba(8,10,14,.9);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);padding:20px;
+    background:rgba(8,10,14,.94);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);padding:0;
   }
   .lightbox.on{display:grid}
-  .lightbox img{max-width:100%;max-height:92vh;border-radius:8px;box-shadow:0 24px 60px rgba(0,0,0,.6)}
+  .lb-stage{
+    position:absolute;inset:0;display:grid;place-items:center;
+    touch-action:none;overflow:hidden;padding:54px 72px 88px;
+  }
+  .lightbox img{
+    max-width:100%;max-height:100%;width:auto;height:auto;
+    border-radius:6px;box-shadow:0 24px 60px rgba(0,0,0,.6);
+    transform-origin:center center;will-change:transform;
+    transition:transform .14s ease;user-select:none;-webkit-user-drag:none;
+  }
+  .lightbox img.no-anim{transition:none}
+  .lightbox.grab .lb-stage{cursor:grab}
+  .lightbox.grabbing .lb-stage{cursor:grabbing}
   .lb-close{
-    position:absolute;top:calc(16px + env(safe-area-inset-top));right:16px;
+    position:absolute;top:calc(16px + env(safe-area-inset-top));right:16px;z-index:3;
     width:38px;height:38px;border-radius:50%;border:0;background:rgba(255,255,255,.14);color:#fff;
     font-size:19px;cursor:pointer;display:grid;place-items:center;
   }
-  .lb-open{
-    position:absolute;bottom:calc(24px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);
-    color:#fff;font-size:13px;text-decoration:none;background:rgba(255,255,255,.14);
-    padding:8px 16px;border-radius:99px;
+  .lb-close:hover{background:rgba(255,255,255,.26)}
+  .lb-nav{
+    position:absolute;top:50%;transform:translateY(-50%);z-index:3;
+    width:44px;height:44px;border-radius:50%;border:0;background:rgba(255,255,255,.14);color:#fff;
+    cursor:pointer;display:grid;place-items:center;transition:background .15s;
+  }
+  .lb-nav:hover{background:rgba(255,255,255,.26)}
+  .lb-nav svg{width:22px;height:22px;display:block}
+  .lb-prev{left:calc(14px + env(safe-area-inset-left))}
+  .lb-next{right:calc(14px + env(safe-area-inset-right))}
+  .lb-nav[hidden]{display:none}
+  .lb-bar{
+    position:absolute;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:3;
+    display:flex;align-items:center;gap:6px;padding:7px 10px;border-radius:99px;
+    background:rgba(20,22,28,.72);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);
+    box-shadow:0 8px 30px rgba(0,0,0,.45);color:#fff;
+  }
+  .lb-act{
+    width:34px;height:34px;border:0;background:transparent;color:#fff;cursor:pointer;
+    border-radius:50%;display:grid;place-items:center;font-size:20px;line-height:1;transition:background .15s;
+  }
+  .lb-act:hover{background:rgba(255,255,255,.16)}
+  .lb-act svg{width:19px;height:19px;display:block}
+  .lb-zoom{font-size:12.5px;min-width:42px;text-align:center;color:rgba(255,255,255,.85);font-variant-numeric:tabular-nums}
+  .lb-sep{width:1px;height:18px;background:rgba(255,255,255,.18);margin:0 2px}
+  .lb-count{font-size:12.5px;min-width:46px;text-align:center;color:rgba(255,255,255,.85);font-variant-numeric:tabular-nums}
+  @media (max-width:560px){
+    .lb-stage{padding:48px 46px 76px}
+    .lb-nav{width:40px;height:40px}
+    .lb-nav svg{width:20px;height:20px}
+    .lb-prev{left:6px}.lb-next{right:6px}
+    .lb-bar{bottom:calc(14px + env(safe-area-inset-bottom));gap:4px;padding:6px 8px}
+    .lb-act{width:32px;height:32px;font-size:18px}
   }
   .toasts{
     position:fixed;left:50%;transform:translateX(-50%);
@@ -1228,9 +1269,30 @@
 
 <div class="drop" id="drop"><div class="drop-in">松开即可发送</div></div>
 <div class="lightbox" id="lb">
-  <button class="lb-close" id="lbClose">✕</button>
-  <img id="lbImg" alt="">
-  <a class="lb-open" id="lbOpen" target="_blank" rel="noopener">查看原图</a>
+  <button class="lb-close" id="lbClose" title="关闭 (Esc)" aria-label="关闭">✕</button>
+  <button class="lb-nav lb-prev" id="lbPrev" title="上一张 (←)" aria-label="上一张">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
+  </button>
+  <button class="lb-nav lb-next" id="lbNext" title="下一张 (→)" aria-label="下一张">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+  </button>
+  <div class="lb-stage" id="lbStage">
+    <img id="lbImg" alt="">
+  </div>
+  <div class="lb-bar" id="lbBar">
+    <button class="lb-act" id="lbZoomOut" title="缩小 (-)" aria-label="缩小">−</button>
+    <span class="lb-zoom" id="lbZoom">100%</span>
+    <button class="lb-act" id="lbZoomIn" title="放大 (+)" aria-label="放大">+</button>
+    <span class="lb-sep"></span>
+    <button class="lb-act" id="lbDl" title="下载这张" aria-label="下载">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v10m0 0l-4-4m4 4l4-4"/><path d="M5 19h14"/></svg>
+    </button>
+    <a class="lb-act" id="lbOpen" target="_blank" rel="noopener" title="查看原图 / 新标签打开" aria-label="查看原图">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V5a1 1 0 0 1 1-1h4M20 9V5a1 1 0 0 0-1-1h-4M4 15v4a1 1 0 0 0 1 1h4M20 15v4a1 1 0 0 1-1 1h-4"/></svg>
+    </a>
+    <span class="lb-sep"></span>
+    <span class="lb-count" id="lbCount">1 / 1</span>
+  </div>
 </div>
 <div class="toasts" id="toasts"></div>
 
@@ -2379,6 +2441,7 @@
       ? it.parts
       : (it.text ? [{ kind: 'text', text: it.text }] : []);
     var texts = parts.filter(function (p) { return p.kind === 'text'; }).map(function (p) { return p.text; });
+    var imgParts = parts.filter(function (p) { return p.kind === 'image'; });
 
     if (texts.length) {
       var cbtn = document.createElement('button');
@@ -2432,7 +2495,7 @@
         img.src = '/f/' + p.fid + '?cid=' + encodeURIComponent(state.cid);
         img.alt = p.name || '图片';
         img.title = (p.name || '图片') + ' · ' + fmtSize(p.size);
-        img.onclick = function () { openLb('/f/' + p.fid + '?cid=' + encodeURIComponent(state.cid)); };
+        img.onclick = function () { openLb(it, imgParts.indexOf(p)); };
         img.onerror = function () {
           img.remove();
           if (!grid.querySelector('img')) {
@@ -4765,16 +4828,138 @@
     });
   });
 
-  // 灯箱
+  // 灯箱 / 画廊查看器
   var lb = $('lb');
-  function openLb(src) {
-    $('lbImg').src = src;
-    $('lbOpen').href = src;
+  var lbList = [];        // [{ src, name }]
+  var lbIndex = 0, lbMax = 1;
+  var scale = 1, tx = 0, ty = 0;
+  var MINZ = 0.5, MAXZ = 8;
+  var pointers = new Map(), lastPt = null, pinch = null, lbMoved = false;
+
+  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+  function lbImg() { return $('lbImg'); }
+  function applyZoom() {
+    lbImg().style.transform = 'translate(' + tx + 'px,' + ty + 'px) scale(' + scale + ')';
+    $('lbZoom').textContent = Math.round(scale * 100) + '%';
+  }
+  function resetZoom() { scale = 1; tx = 0; ty = 0; applyZoom(); }
+  function zoomAt(ns, cx, cy) {
+    ns = clamp(ns, MINZ, MAXZ);
+    if (ns === scale) return;
+    var r = lbImg().getBoundingClientRect();
+    var cxRel = cx - (r.left + r.width / 2);
+    var cyRel = cy - (r.top + r.height / 2);
+    tx += cxRel * (1 - ns / scale);
+    ty += cyRel * (1 - ns / scale);
+    scale = ns;
+    applyZoom();
+  }
+  function lbCenter() { return [window.innerWidth / 2, window.innerHeight / 2]; }
+  function updateLbUI() {
+    var multi = lbMax > 1;
+    $('lbPrev').hidden = !multi;
+    $('lbNext').hidden = !multi;
+    $('lbCount').textContent = (lbIndex + 1) + ' / ' + lbMax;
+    lb.classList.toggle('grab', scale > 1);
+  }
+  function showLb(i) {
+    lbIndex = (i % lbMax + lbMax) % lbMax;
+    var g = lbList[lbIndex];
+    if (!g) return;
+    var img = lbImg();
+    img.classList.remove('no-anim');
+    img.style.transition = '';
+    img.src = g.src;
+    $('lbOpen').href = g.src;
+    $('lbOpen').setAttribute('download', g.name || 'image');
+    resetZoom();
+    updateLbUI();
     lb.classList.add('on');
   }
-  $('lbClose').onclick = function () { lb.classList.remove('on'); };
-  lb.addEventListener('click', function (e) { if (e.target === lb) lb.classList.remove('on'); });
-  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') lb.classList.remove('on'); });
+  function openLb(it, index) {
+    var parts = (it && it.parts) || [];
+    lbList = parts.filter(function (p) { return p.kind === 'image'; }).map(function (p) {
+      return { src: '/f/' + p.fid + '?cid=' + encodeURIComponent(state.cid), name: p.name || '图片' };
+    });
+    if (!lbList.length) return;
+    lbMax = lbList.length;
+    showLb(index || 0);
+  }
+  function closeLb() {
+    lb.classList.remove('on', 'grab', 'grabbing');
+    lbList = []; lbMax = 1; lbIndex = 0;
+    pointers.clear(); lastPt = null; pinch = null; lbMoved = false;
+  }
+  function navLb(d) { if (lbMax > 1) showLb(lbIndex + d); }
+
+  $('lbClose').onclick = closeLb;
+  lb.addEventListener('click', function (e) {
+    if (lbMoved) { lbMoved = false; return; }
+    if (e.target === lb || e.target.id === 'lbStage') closeLb();
+  });
+  $('lbPrev').onclick = function () { navLb(-1); };
+  $('lbNext').onclick = function () { navLb(1); };
+  $('lbZoomIn').onclick = function () { var c = lbCenter(); zoomAt(scale * 1.4, c[0], c[1]); };
+  $('lbZoomOut').onclick = function () { var c = lbCenter(); zoomAt(scale / 1.4, c[0], c[1]); };
+  $('lbDl').onclick = function () {
+    var g = lbList[lbIndex]; if (!g) return;
+    var a = document.createElement('a'); a.href = g.src; a.download = g.name || 'image';
+    document.body.appendChild(a); a.click(); a.remove();
+  };
+  lbImg().addEventListener('dblclick', function (e) {
+    if (scale > 1.05) resetZoom(); else zoomAt(2.5, e.clientX, e.clientY);
+  });
+  // 滚轮缩放（桌面）
+  $('lbStage').addEventListener('wheel', function (e) {
+    if (!lb.classList.contains('on')) return;
+    e.preventDefault();
+    var f = e.deltaY < 0 ? 1.25 : 1 / 1.25;
+    zoomAt(scale * f, e.clientX, e.clientY);
+  }, { passive: false });
+  // 指针：单指拖动平移 / 双指捏合缩放
+  function dist2(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+  $('lbStage').addEventListener('pointerdown', function (e) {
+    if (!lb.classList.contains('on')) return;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.size === 1) { lastPt = { x: e.clientX, y: e.clientY }; }
+    else if (pointers.size === 2) {
+      var p = [].slice.call(pointers.values());
+      pinch = { d: dist2(p[0], p[1]), s: scale }; lastPt = null;
+      lb.classList.add('grabbing'); lbImg().classList.add('no-anim');
+    }
+  });
+  $('lbStage').addEventListener('pointermove', function (e) {
+    if (!pointers.has(e.pointerId)) return;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.size === 2 && pinch) {
+      lbMoved = true;
+      var p = [].slice.call(pointers.values());
+      zoomAt(pinch.s * (dist2(p[0], p[1]) / pinch.d), (p[0].x + p[1].x) / 2, (p[0].y + p[1].y) / 2);
+    } else if (pointers.size === 1 && scale > 1 && lastPt) {
+      lbMoved = true;
+      tx += e.clientX - lastPt.x; ty += e.clientY - lastPt.y;
+      lastPt = { x: e.clientX, y: e.clientY };
+      lbImg().classList.add('no-anim'); applyZoom();
+    }
+  });
+  function endPtr(e) {
+    pointers.delete(e.pointerId);
+    if (pointers.size < 2) { pinch = null; lb.classList.remove('grabbing'); }
+    if (pointers.size === 1) { var p = [].slice.call(pointers.values())[0]; lastPt = { x: p.x, y: p.y }; }
+    else if (pointers.size === 0) { lastPt = null; }
+    setTimeout(function () { lbImg().classList.remove('no-anim'); }, 0);
+  }
+  $('lbStage').addEventListener('pointerup', endPtr);
+  $('lbStage').addEventListener('pointercancel', endPtr);
+
+  document.addEventListener('keydown', function (e) {
+    if (!lb.classList.contains('on')) return;
+    if (e.key === 'Escape') closeLb();
+    else if (e.key === 'ArrowLeft') navLb(-1);
+    else if (e.key === 'ArrowRight') navLb(1);
+    else if (e.key === '+' || e.key === '=') { var c = lbCenter(); zoomAt(scale * 1.4, c[0], c[1]); }
+    else if (e.key === '-' || e.key === '_') { var c2 = lbCenter(); zoomAt(scale / 1.4, c2[0], c2[1]); }
+  });
 
   /* ============================================================ 启动 */
   function launch(d) {
