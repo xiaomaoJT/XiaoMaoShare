@@ -430,7 +430,8 @@
     .count{flex:none;white-space:nowrap}
     .filters{flex:0 1 auto;min-width:0;overflow-x:auto;scrollbar-width:none}
     .filters::-webkit-scrollbar{display:none}
-    .search{flex:1;min-width:0}
+    /* 搜索框不拉满整行：窄屏时占满剩余空间，稍宽时封顶，避免长长一条 */
+    .search{flex:1 1 160px;min-width:0;max-width:220px}
     .search input{flex:1;width:auto;min-width:0}
     .toolbar-actions{flex:none}
   }
