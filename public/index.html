@@ -434,7 +434,8 @@
   @media (max-width:720px){
     .toolbar{flex-direction:column;flex-wrap:nowrap;align-items:stretch;gap:8px}
     .tb-r1,.tb-r2{display:flex;align-items:center;gap:8px;min-width:0}
-    .tb-r1{justify-content:space-between}
+    .tb-r1{justify-content:space-between;flex-wrap:wrap}
+    .sender-filter{flex:0 1 auto;min-width:0}
     .count{flex:none;white-space:nowrap}
     .filters{flex:0 1 auto;min-width:0;overflow-x:auto;scrollbar-width:none}
     .filters::-webkit-scrollbar{display:none}
@@ -1296,6 +1297,9 @@
       <select id="senderFilter" class="sender-filter" aria-label="按发送人筛选">
         <option value="">全部发送人</option>
       </select>
+      <select id="dateFilter" class="sender-filter" aria-label="按日期筛选">
+        <option value="">全部日期</option>
+      </select>
     </div>
     <div class="tb-r2">
       <div class="search" id="search">
@@ -1846,7 +1850,7 @@
   /* 列表筛选 / 分页：内容攒多了不能一次性全铺到 DOM 里 */
   var allItems = [];
   var pageLimit = 20;          // 当前渲染多少条，滚到底再 +20
-  var view = { q: '', filter: 'all', sender: '' };
+  var view = { q: '', filter: 'all', sender: '', date: '' };
   var netFail = 0;             // 连续失败次数，攒够就提示断线
 
   /** 设备指纹：授权要靠它认设备（只看 IP 会让换了设备的同一个 IP 白嫖授权） */
@@ -2847,8 +2851,19 @@
     if (!view.sender) return true;
     return it.owner === view.sender;
   }
+  /** 本地日期 YYYY-MM-DD；供日期筛选与「仅可选有数据的日期」聚合使用 */
+  function dateKey(ts) {
+    var d = new Date(ts || Date.now());
+    var m = ('0' + (d.getMonth() + 1)).slice(-2);
+    var day = ('0' + d.getDate()).slice(-2);
+    return d.getFullYear() + '-' + m + '-' + day;
+  }
+  function matchDate(it) {
+    if (!view.date) return true;
+    return it.time && dateKey(it.time) === view.date;
+  }
   function visibleItems() {
-    return allItems.filter(function (it) { return matchFilter(it) && matchSender(it) && matchQuery(it); });
+    return allItems.filter(function (it) { return matchFilter(it) && matchSender(it) && matchDate(it) && matchQuery(it); });
   }
 
   // 从当前消息聚合「发送人」下拉项（owner -> 展示名），仅在有变化时重建
@@ -2867,6 +2882,29 @@
     sel.innerHTML = html;
     sel.value = cur;
     view.sender = cur;
+  }
+
+  // 从当前消息聚合「日期」下拉项（仅出现过数据的日期，降序、带周几），仅在有变化时重建
+  function refreshDates() {
+    var sel = $('dateFilter');
+    if (!sel) return;
+    var map = {};
+    allItems.forEach(function (it) { if (it.time) { var k = dateKey(it.time); if (!map[k]) map[k] = it.time; } });
+    var keys = Object.keys(map);
+    if (keys.length === 0) { sel.innerHTML = '<option value="">全部日期</option>'; sel.value = ''; view.date = ''; return; }
+    keys.sort();                       // 字符串定宽，字典序即时间序
+    keys.reverse();                    // 最近的日期排在最前
+    var cur = view.date;
+    if (cur && keys.indexOf(cur) === -1) cur = '';   // 若所选日期已无数据则回退
+    var wd = ['日', '一', '二', '三', '四', '五', '六'];
+    var html = '<option value="">全部日期</option>';
+    keys.forEach(function (k) {
+      var w = wd[new Date(map[k]).getDay()];
+      html += '<option value="' + k + '">' + k + ' 周' + w + '</option>';
+    });
+    sel.innerHTML = html;
+    sel.value = cur;
+    view.date = cur;
   }
 
   var moreIO = null;
@@ -2933,7 +2971,7 @@
       s.textContent = fmtTime(Number(s.dataset.ts));
     });
 
-    if (view.q || view.filter !== 'all' || view.sender) {
+    if (view.q || view.filter !== 'all' || view.sender || view.date) {
       countEl.textContent = '筛出 ' + list.length + ' 条 · 共 ' + allItems.length + ' 条';
     } else {
       countEl.textContent = allItems.length ? ('共 ' + allItems.length + ' 条内容') : '还没有内容';
@@ -3033,6 +3071,7 @@
       if (!force && sig === lastSig) { tickTimes(); return; }
       lastSig = sig;
       refreshSenders();
+      refreshDates();
       render();
     }).catch(function (e) {
       if (e && e.message === 'unauthorized') return;
@@ -4963,6 +5002,9 @@
   // 按发送人筛选
   var senderSel = $('senderFilter');
   if (senderSel) senderSel.addEventListener('change', function () { view.sender = this.value; pageLimit = 20; render(); });
+  // 按日期筛选
+  var dateSel = $('dateFilter');
+  if (dateSel) dateSel.addEventListener('change', function () { view.date = this.value; pageLimit = 20; render(); });
 
   sendBtn.addEventListener('click', sendAll);
 
