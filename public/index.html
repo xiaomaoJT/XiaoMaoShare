@@ -275,6 +275,14 @@
     max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   }
 
+  /* 已读回执标签 */
+  .read-pill{
+    display:inline-flex;align-items:center;gap:3px;flex:none;
+    font-size:11px;line-height:1;color:var(--faint);background:var(--line-soft);
+    padding:3px 7px;border-radius:99px;white-space:nowrap;
+  }
+  .card[data-tg="1"] .read-pill, .read-pill{} /* 保持与 tg 标签视觉层级一致 */
+
   /* 选择对象的列表 */
   .pick-list{margin-top:14px;display:flex;flex-direction:column;gap:2px;max-height:52vh;overflow:auto;margin-right:-6px;padding-right:6px}
   .pick-row{
@@ -1775,7 +1783,8 @@
     deviceList: [],          // 已授权设备清单（精简版），供选接收人
     _dl: 0,                  // 上次拉取 devices-lite 的时间戳（节流）
     pickMode: false,         // 批量选择模式
-    picked: new Set()        // 勾中的消息 id
+    picked: new Set(),       // 勾中的消息 id
+    readReported: new Set()  // 本次会话已上报过已读的消息 id（避免重复请求）
   };
   var textOverLimit = false;   // 文字超上限：发送按钮要锁掉，避免内容被静默截断
   var nodes = new Map();
@@ -2412,6 +2421,7 @@
     var el = document.createElement('article');
     el.className = 'card';
     el.dataset.tg = it.tgAt ? '1' : '';
+    el.dataset.id = it.id;
 
     // 批量选择的勾：平时藏起来，进入选择模式才出现
     var dot = document.createElement('span');
@@ -2446,7 +2456,7 @@
     if (texts.length) {
       var cbtn = document.createElement('button');
       cbtn.className = 'icon'; cbtn.innerHTML = ICOPY; cbtn.title = '复制文字';
-      cbtn.onclick = function () { copyText(texts.join('\n\n')); };
+      cbtn.onclick = function () { copyText(texts.join('\n\n')); markRead(it); };
       acts.appendChild(cbtn);
     }
     if (canDelete(it)) {
@@ -2480,6 +2490,15 @@
       ttag.title = '已同步到 Telegram';
       meta.appendChild(ttag);
     }
+    // 已读回执：仅展示有「其他授权设备读过」的消息（不含发送者本人，按设备去重）
+    var rb = (it.readBy || []).filter(function (c) { return c && c !== it.owner; }).length;
+    if (rb > 0) {
+      var rpill = document.createElement('span');
+      rpill.className = 'read-pill';
+      rpill.textContent = '👁 ' + rb + ' 已读';
+      rpill.title = '已读设备数（不含发送者，按设备去重）';
+      meta.appendChild(rpill);
+    }
     meta.appendChild(time); meta.appendChild(acts);
     el.appendChild(meta);
     // 片段按顺序铺开：文字段、图片组、文件行
@@ -2495,7 +2514,7 @@
         img.src = '/f/' + p.fid + '?cid=' + encodeURIComponent(state.cid);
         img.alt = p.name || '图片';
         img.title = (p.name || '图片') + ' · ' + fmtSize(p.size);
-        img.onclick = function () { openLb(it, imgParts.indexOf(p)); };
+        img.onclick = function () { openLb(it, imgParts.indexOf(p)); markRead(it); };
         img.onerror = function () {
           img.remove();
           if (!grid.querySelector('img')) {
@@ -2523,7 +2542,7 @@
         run.push(p);
       } else {
         flushImages();
-        el.appendChild(fileRow(p));
+        el.appendChild(fileRow(it, p));
       }
     });
     flushImages();
@@ -2587,7 +2606,7 @@
     }
   }
 
-  function fileRow(p) {
+  function fileRow(it, p) {
     var row = document.createElement('div');
     row.className = 'file';
     var nm = String(p.name || '未命名文件');
@@ -2610,6 +2629,7 @@
     dl.href = '/f/' + p.fid + '?dl=1&cid=' + encodeURIComponent(state.cid);
     dl.setAttribute('download', nm);
     dl.innerHTML = IDL + '<span>下载</span>';
+    dl.onclick = function () { markRead(it); };   // 下载即算读过
     row.appendChild(fico);
     row.appendChild(info);
     row.appendChild(dl);
@@ -2647,6 +2667,38 @@
     try { document.execCommand('copy'); toast('已复制'); }
     catch (e) { toast('复制失败，请长按选择'); }
     ta.remove();
+  }
+
+  /** 已读回执：同一条消息只上报一次、且上报设备不算发送者本人 */
+  function markRead(it) {
+    if (!it || !it.id) return;
+    if (it.owner === state.cid) return;             // 自己发的自己读，不计入回执
+    if (state.readReported.has(it.id)) return;      // 本次会话已上报，避免重复请求
+    state.readReported.add(it.id);
+    api('/api/item/read', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: it.id, cid: state.cid })
+    }).then(function (d) {
+      if (d && typeof d.read === 'number') updateReadBadge(it.id, d.read);
+    }).catch(function () { state.readReported.delete(it.id); });  // 失败下次还能补报
+  }
+  /** 把服务端返回的已读数同步到卡片上的小标签 */
+  function updateReadBadge(id, n) {
+    var el = nodes.get(id);
+    if (!el) return;
+    var pill = el.querySelector('.read-pill');
+    if (!pill) {
+      pill = document.createElement('span');
+      pill.className = 'read-pill';
+      var meta = el.querySelector('.meta');
+      var time = el.querySelector('.when');
+      if (meta && time) meta.insertBefore(pill, time);
+      else if (meta) meta.appendChild(pill);
+    }
+    pill.textContent = '👁 ' + n + ' 已读';
+    pill.title = '已读设备数（不含发送者，按设备去重）';
+    pill.hidden = n <= 0;
   }
 
   async function removeItem(it) {
@@ -3890,6 +3942,15 @@
       var box = btn.closest('.code');
       var code = box && box.querySelector('code');
       if (code) copyText(code.textContent);
+      // 在消息列表（feed）里复制代码块，也算这条消息被读过
+      if (id === 'feed') {
+        var card = btn.closest('.card');
+        var cid_ = card && card.dataset.id;
+        if (cid_) {
+          var it = allItems.find(function (x) { return x.id === cid_; });
+          if (it) markRead(it);
+        }
+      }
     });
   });
 

@@ -93,6 +93,8 @@ function migrateItem(it) {
   // 旧版 to 是单个字符串，统一成数组，可见性规则才好写
   it.to = asToArray(it.to);
   if (it.to.length && !it.toName) it.toName = '';
+  // 已读回执：哪些授权设备读过（复制 / 下载 / 看图都算），按设备去重
+  if (!Array.isArray(it.readBy)) it.readBy = [];
   return it;
 }
 
@@ -1709,6 +1711,30 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // 已读回执：任意授权设备对这条消息做了「复制 / 下载 / 看图」之一即记为已读，按设备去重。
+  // 主设备用空 cid 访问，不计入回执；同一设备重复阅读不会让计数增加。
+  if (method === 'POST' && pathname === '/api/item/read') {
+    readBody(req, 4096).then((raw) => {
+      let body = {};
+      try { body = JSON.parse(raw || '{}'); } catch {}
+      const id = String(body.id || '');
+      const idx = items.findIndex((it) => it.id === id);
+      if (idx === -1) return json(res, 404, { error: '消息不存在' });
+      const it = items[idx];
+      if (cid) {
+        if (!Array.isArray(it.readBy)) it.readBy = [];
+        if (!it.readBy.includes(cid)) {
+          it.readBy.push(cid);
+          saveIndex();
+        }
+      }
+      // 已读数 = 去重后的设备数，且不计发送者本人
+      const read = (it.readBy || []).filter((c) => c && c !== it.owner).length;
+      json(res, 200, { ok: true, read });
+    }).catch(() => json(res, 400, { error: 'bad request' }));
+    return;
+  }
+
   // 管理设备 / 权限（主设备，或用专属密码提过权的设备）
   if (pathname === '/api/devices') {
     if (!manage) return json(res, 403, { error: '没有管理权限' });
@@ -2072,6 +2098,7 @@ const server = http.createServer((req, res) => {
           owner: c.cid,
           to: toArr,
           toName,
+          readBy: [],
         };
         items.unshift(item);
         saveIndex();
@@ -2235,6 +2262,7 @@ const server = http.createServer((req, res) => {
           owner: owner.cid,
           to,
           toName,
+          readBy: [],
         };
         items.unshift(item);
         reindexFiles();
