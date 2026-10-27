@@ -2489,7 +2489,10 @@
 
   /* ---------------- 筛选 / 分页 ---------------- */
   function isImagePart(p) {
-    return !!p && p.kind === 'file' && /^image\//i.test(p.type || '');
+    if (!p) return false;
+    if (p.kind === 'image') return true;
+    if (p.kind === 'file') return /^image\//i.test(p.type || p.mime || '');
+    return false;
   }
   function matchFilter(it) {
     var f = view.filter;
