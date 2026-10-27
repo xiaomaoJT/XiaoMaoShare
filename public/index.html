@@ -1155,6 +1155,52 @@
   .perm-chip.off{color:var(--danger);border-color:rgba(229,72,77,.38);background:rgba(229,72,77,.07)}
   :root[data-theme="dark"] .perm-chip.on{color:#4ade9b}
   .perm-note{font-size:11.5px;color:var(--faint);line-height:1.6;margin:0 0 4px}
+  /* 已读 pill：主设备 / 提权设备可点击查看名单 */
+  .read-pill.detail{cursor:pointer;color:var(--muted)}
+  .read-pill.detail::after{content:"";width:0;height:0;margin-left:3px;border-left:4px solid transparent;border-right:4px solid transparent;border-top:5px solid currentColor;opacity:.9}
+  .read-pill.detail:hover{background:var(--brand-soft);color:var(--brand)}
+  .read-pop{
+    position:fixed;z-index:120;min-width:160px;max-width:280px;
+    background:var(--card);border:1px solid var(--line);border-radius:14px;
+    box-shadow:0 18px 44px rgba(0,0,0,.22);padding:10px 12px;
+  }
+  .read-pop-h{font-size:12px;font-weight:700;color:var(--text);margin-bottom:6px}
+  .read-pop-list{display:flex;flex-direction:column;gap:3px;max-height:50vh;overflow:auto}
+  .read-pop-i{font-size:13px;color:var(--muted);padding:2px 0;border-top:1px solid var(--line-soft)}
+  .read-pop-i:first-child{border-top:0}
+
+  /* 双击头像收起：只留元信息行 */
+  .card.collapsed .text-body,
+  .card.collapsed .shots,
+  .card.collapsed .file,
+  .card.collapsed .more{display:none}
+  .card.collapsed .ava{outline:2px solid var(--line);outline-offset:-2px}
+
+  /* 按发送人筛选下拉 */
+  .sender-filter{
+    flex:none;max-width:150px;min-width:0;font:inherit;font-size:12.5px;color:var(--muted);
+    background:var(--card);border:1px solid var(--line);border-radius:99px;padding:4px 22px 4px 10px;
+    appearance:none;-webkit-appearance:none;cursor:pointer;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='3'><path d='M6 9l6 6 6-6'/></svg>");
+    background-repeat:no-repeat;background-position:right 8px center;background-size:10px;
+  }
+  .sender-filter:focus{outline:none;border-color:var(--brand)}
+
+  /* 回到顶部悬浮按钮 */
+  .to-top{
+    position:fixed;right:18px;bottom:calc(20px + env(safe-area-inset-bottom));z-index:70;
+    width:44px;height:44px;border-radius:50%;border:1px solid var(--line);
+    background:var(--card);color:var(--text);font-size:20px;line-height:1;cursor:pointer;
+    box-shadow:0 10px 28px rgba(0,0,0,.18);display:grid;place-items:center;
+    transition:transform .15s,opacity .15s;
+  }
+  .to-top:hover{transform:translateY(-2px);border-color:var(--brand);color:var(--brand)}
+  .to-top[hidden]{display:none}
+
+  @media (max-width:720px){
+    .sender-filter{max-width:130px}
+    .to-top{width:40px;height:40px;right:12px}
+  }
 </style>
 </head>
 <body>
@@ -1247,6 +1293,9 @@
         <button class="fchip" data-f="file" type="button">文件</button>
         <button class="fchip" data-f="private" type="button">私聊</button>
       </div>
+      <select id="senderFilter" class="sender-filter" aria-label="按发送人筛选">
+        <option value="">全部发送人</option>
+      </select>
     </div>
     <div class="tb-r2">
       <div class="search" id="search">
@@ -1269,6 +1318,7 @@
   </div>
 
   <section class="feed" id="feed"></section>
+  <button id="toTop" class="to-top" hidden type="button" aria-label="回到顶部" title="回到顶部">↑</button>
 </main>
 
 <footer class="foot">
@@ -1276,6 +1326,7 @@
 </footer>
 
 <div class="drop" id="drop"><div class="drop-in">松开即可发送</div></div>
+<div class="read-pop" id="readPop" hidden></div>
 <div class="lightbox" id="lb">
   <button class="lb-close" id="lbClose" title="关闭 (Esc)" aria-label="关闭">✕</button>
   <button class="lb-nav lb-prev" id="lbPrev" title="上一张 (←)" aria-label="上一张">
@@ -1795,7 +1846,7 @@
   /* 列表筛选 / 分页：内容攒多了不能一次性全铺到 DOM 里 */
   var allItems = [];
   var pageLimit = 20;          // 当前渲染多少条，滚到底再 +20
-  var view = { q: '', filter: 'all' };
+  var view = { q: '', filter: 'all', sender: '' };
   var netFail = 0;             // 连续失败次数，攒够就提示断线
 
   /** 设备指纹：授权要靠它认设备（只看 IP 会让换了设备的同一个 IP 白嫖授权） */
@@ -2473,6 +2524,11 @@
       acts.appendChild(vbtn);
     }
 
+    ava.title = '双击收起 / 展开这条消息';
+    ava.addEventListener('dblclick', function (e) {
+      e.preventDefault();
+      el.classList.toggle('collapsed');
+    });
     meta.appendChild(ava); meta.appendChild(who);
     if (it.to && it.to.length) {
       var pv = document.createElement('span');
@@ -2490,15 +2546,9 @@
       ttag.title = '已同步到 Telegram';
       meta.appendChild(ttag);
     }
-    // 已读回执：仅展示有「其他授权设备读过」的消息（不含发送者本人，按设备去重）
-    var rb = (it.readBy || []).filter(function (c) { return c && c !== it.owner; }).length;
-    if (rb > 0) {
-      var rpill = document.createElement('span');
-      rpill.className = 'read-pill';
-      rpill.textContent = '👁 ' + rb + ' 已读';
-      rpill.title = '已读设备数（不含发送者，按设备去重）';
-      meta.appendChild(rpill);
-    }
+    // 已读回执：含发送者本人，按设备去重；主设备 / 提权设备可点击查看是谁
+    var rpill = buildReadPill(it);
+    if (rpill) meta.appendChild(rpill);
     meta.appendChild(time); meta.appendChild(acts);
     el.appendChild(meta);
     // 片段按顺序铺开：文字段、图片组、文件行
@@ -2670,9 +2720,58 @@
   }
 
   /** 已读回执：同一条消息只上报一次、且上报设备不算发送者本人 */
+  // 已读计数：去重后的设备数，含发送者本人
+  function readCount(it) {
+    var s = new Set((it.readBy || []).filter(Boolean));
+    if (it.owner) s.add(it.owner);
+    return s.size;
+  }
+  /** 构建「已读」小标签；主设备 / 临时提权设备可点击展开「谁已读」 */
+  function buildReadPill(it) {
+    var n = readCount(it);
+    // 计数含发送者本人；但只有「除发送者外还有人读过」才挂标签，避免每条都顶着个“1 已读”
+    if (n <= 1) return null;
+    var pill = document.createElement('span');
+    pill.className = 'read-pill';
+    pill.textContent = '👁 ' + n + ' 已读';
+    if (state.hostAdmin || state.elevated) {
+      pill.classList.add('detail');
+      pill.title = '点击查看谁已读';
+      pill.addEventListener('click', function (e) {
+        e.stopPropagation();
+        openReadPop(it, pill);
+      });
+    } else {
+      pill.title = '已读设备数（含发送者，按设备去重）';
+    }
+    return pill;
+  }
+  // 主设备 / 提权设备：弹出已读名单
+  var readPop = $('readPop');
+  function openReadPop(it, anchor) {
+    if (!readPop) return;
+    var cids = (it.readBy || []).filter(Boolean);
+    if (it.owner && cids.indexOf(it.owner) === -1) cids = cids.concat(it.owner);
+    var seen = {}, names = [];
+    cids.forEach(function (c) { if (!seen[c]) { seen[c] = 1; names.push(nameOfCidLocal(c) || ('设备' + c.slice(-4))); } });
+    readPop.innerHTML = '<div class="read-pop-h">谁已读（' + names.length + '）</div>' +
+      '<div class="read-pop-list">' + names.map(function (n) { return '<div class="read-pop-i">' + esc(n) + '</div>'; }).join('') + '</div>';
+    readPop.hidden = false;
+    var r = anchor.getBoundingClientRect();
+    var left = Math.min(r.left, window.innerWidth - readPop.offsetWidth - 10);
+    readPop.style.top = (r.bottom + 8) + 'px';
+    readPop.style.left = Math.max(8, left) + 'px';
+    setTimeout(function () { document.addEventListener('click', closeReadPopOnce); }, 0);
+  }
+  function closeReadPopOnce(e) {
+    if (readPop && !readPop.contains(e.target) && !(e.target.classList && e.target.classList.contains('read-pill'))) {
+      readPop.hidden = true;
+      document.removeEventListener('click', closeReadPopOnce);
+    }
+  }
+
   function markRead(it) {
     if (!it || !it.id) return;
-    if (it.owner === state.cid) return;             // 自己发的自己读，不计入回执
     if (state.readReported.has(it.id)) return;      // 本次会话已上报，避免重复请求
     state.readReported.add(it.id);
     api('/api/item/read', {
@@ -2680,25 +2779,25 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: it.id, cid: state.cid })
     }).then(function (d) {
-      if (d && typeof d.read === 'number') updateReadBadge(it.id, d.read);
+      if (d && typeof d.read === 'number') updateReadBadge(it.id);
     }).catch(function () { state.readReported.delete(it.id); });  // 失败下次还能补报
   }
-  /** 把服务端返回的已读数同步到卡片上的小标签 */
-  function updateReadBadge(id, n) {
+  /** 把已读数同步到卡片上的小标签 */
+  function updateReadBadge(id) {
     var el = nodes.get(id);
     if (!el) return;
-    var pill = el.querySelector('.read-pill');
-    if (!pill) {
-      pill = document.createElement('span');
-      pill.className = 'read-pill';
+    var it = null;
+    for (var i = 0; i < allItems.length; i++) if (allItems[i].id === id) { it = allItems[i]; break; }
+    if (!it) return;
+    var old = el.querySelector('.read-pill');
+    var np = buildReadPill(it);
+    if (old) { if (np) old.replaceWith(np); else old.remove(); }
+    else if (np) {
       var meta = el.querySelector('.meta');
       var time = el.querySelector('.when');
-      if (meta && time) meta.insertBefore(pill, time);
-      else if (meta) meta.appendChild(pill);
+      if (meta && time) meta.insertBefore(np, time);
+      else if (meta) meta.appendChild(np);
     }
-    pill.textContent = '👁 ' + n + ' 已读';
-    pill.title = '已读设备数（不含发送者，按设备去重）';
-    pill.hidden = n <= 0;
   }
 
   async function removeItem(it) {
@@ -2744,8 +2843,30 @@
     }
     return false;
   }
+  function matchSender(it) {
+    if (!view.sender) return true;
+    return it.owner === view.sender;
+  }
   function visibleItems() {
-    return allItems.filter(function (it) { return matchFilter(it) && matchQuery(it); });
+    return allItems.filter(function (it) { return matchFilter(it) && matchSender(it) && matchQuery(it); });
+  }
+
+  // 从当前消息聚合「发送人」下拉项（owner -> 展示名），仅在有变化时重建
+  function refreshSenders() {
+    var sel = $('senderFilter');
+    if (!sel) return;
+    var map = {};
+    allItems.forEach(function (it) { if (it.owner) map[it.owner] = it.from || '匿名设备'; });
+    var cids = Object.keys(map);
+    if (cids.length === 0) { sel.innerHTML = '<option value="">全部发送人</option>'; sel.value = ''; view.sender = ''; return; }
+    var cur = view.sender;
+    if (cur && cids.indexOf(cur) === -1) cur = '';
+    cids.sort(function (a, b) { return String(map[a]).localeCompare(String(map[b]), 'zh'); });
+    var html = '<option value="">全部发送人</option>';
+    cids.forEach(function (c) { html += '<option value="' + esc(c) + '">' + esc(map[c]) + '</option>'; });
+    sel.innerHTML = html;
+    sel.value = cur;
+    view.sender = cur;
   }
 
   var moreIO = null;
@@ -2812,7 +2933,7 @@
       s.textContent = fmtTime(Number(s.dataset.ts));
     });
 
-    if (view.q || view.filter !== 'all') {
+    if (view.q || view.filter !== 'all' || view.sender) {
       countEl.textContent = '筛出 ' + list.length + ' 条 · 共 ' + allItems.length + ' 条';
     } else {
       countEl.textContent = allItems.length ? ('共 ' + allItems.length + ' 条内容') : '还没有内容';
@@ -2911,6 +3032,7 @@
       var sig = allItems.map(function (x) { return x.id; }).join(',');
       if (!force && sig === lastSig) { tickTimes(); return; }
       lastSig = sig;
+      refreshSenders();
       render();
     }).catch(function (e) {
       if (e && e.message === 'unauthorized') return;
@@ -4826,13 +4948,21 @@
   });
   window.addEventListener('online', function () { poll(true); });
 
-  // 输入条吸顶：滚动后加分隔线与投影
+  // 输入条吸顶 + 回到顶部按钮显隐
   var composerBar = $('composerBar');
+  var toTop = $('toTop');
   function onScroll() {
-    composerBar.classList.toggle('stuck', (window.scrollY || window.pageYOffset || 0) > 56);
+    var y = window.scrollY || window.pageYOffset || 0;
+    if (composerBar) composerBar.classList.toggle('stuck', y > 56);
+    if (toTop) toTop.hidden = y < 600;
   }
   window.addEventListener('scroll', onScroll, { passive: true });
+  if (toTop) toTop.addEventListener('click', function () { window.scrollTo({ top: 0, behavior: 'smooth' }); });
   onScroll();
+
+  // 按发送人筛选
+  var senderSel = $('senderFilter');
+  if (senderSel) senderSel.addEventListener('change', function () { view.sender = this.value; pageLimit = 20; render(); });
 
   sendBtn.addEventListener('click', sendAll);
 

@@ -1728,9 +1728,10 @@ const server = http.createServer((req, res) => {
           saveIndex();
         }
       }
-      // 已读数 = 去重后的设备数，且不计发送者本人
-      const read = (it.readBy || []).filter((c) => c && c !== it.owner).length;
-      json(res, 200, { ok: true, read });
+      // 已读数 = 去重后的设备数，且含发送者本人（发送者必然读过自己发出去的内容）
+      const seen = new Set((it.readBy || []).filter(Boolean));
+      if (it.owner) seen.add(it.owner);
+      json(res, 200, { ok: true, read: seen.size });
     }).catch(() => json(res, 400, { error: 'bad request' }));
     return;
   }
