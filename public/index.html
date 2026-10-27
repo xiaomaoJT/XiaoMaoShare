@@ -381,18 +381,55 @@
   }
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
 
+  /* ---- 色相工具类：--t 是 RGB 三元组（拼 rgba 用），--ti 是浅底上的彩色文字 ---- */
+  .t-blue{--t:76,110,245;--ti:#3b55d9}
+  .t-violet{--t:124,92,245;--ti:#6742e0}
+  .t-pink{--t:236,72,153;--ti:#bd2a70}
+  .t-amber{--t:232,145,12;--ti:#9a6405}
+  .t-green{--t:18,184,134;--ti:#0b8f68}
+  .t-indigo{--t:99,102,241;--ti:#4b4fd6}
+  .t-teal{--t:13,148,136;--ti:#0a7d70}
+  .t-sky{--t:14,165,233;--ti:#0a7cb0}
+  .t-rose{--t:229,72,77;--ti:#c53036}
+  .t-slate{--t:100,116,139;--ti:#475569}
+  :root[data-theme="dark"] .t-blue{--ti:#a9bbff}
+  :root[data-theme="dark"] .t-violet{--ti:#c3aeff}
+  :root[data-theme="dark"] .t-pink{--ti:#ffa6d2}
+  :root[data-theme="dark"] .t-amber{--ti:#f3c06a}
+  :root[data-theme="dark"] .t-green{--ti:#6ee0b6}
+  :root[data-theme="dark"] .t-indigo{--ti:#b3b5ff}
+  :root[data-theme="dark"] .t-teal{--ti:#5fd8c9}
+  :root[data-theme="dark"] .t-sky{--ti:#84d4f8}
+  :root[data-theme="dark"] .t-rose{--ti:#ff9a9e}
+  :root[data-theme="dark"] .t-slate{--ti:#a9b6c8}
+
   /* 筛选 + 搜索 */
+  /* 筛选 Tag：每个 chip 一个色相的小圆点，选中时整颗胶囊染上同色 */
   .filters{
     display:flex;gap:2px;padding:3px;border-radius:999px;
     background:var(--fill);border:1px solid var(--line);box-shadow:var(--shadow-sm);
   }
   .fchip{
-    height:23px;padding:0 10px;border:0;border-radius:999px;background:transparent;
+    display:inline-flex;align-items:center;gap:5px;
+    height:23px;padding:0 9px;border:0;border-radius:999px;background:transparent;
     color:var(--sub);font-family:inherit;font-size:12px;font-weight:550;cursor:pointer;
-    white-space:nowrap;transition:color .15s ease,background .15s ease,box-shadow .15s ease;
+    white-space:nowrap;
+    transition:color .15s ease,background .15s ease,box-shadow .15s ease;
   }
-  .fchip:hover{color:var(--text)}
-  .fchip.on{background:var(--card);color:var(--text);box-shadow:var(--shadow-sm)}
+  .fchip::before{
+    content:"";width:5px;height:5px;border-radius:50%;flex:none;
+    background:rgb(var(--t,100,116,139));opacity:.55;
+    transition:opacity .15s ease,transform .15s ease;
+  }
+  .fchip[data-f="all"]::before,.keep-seg .fchip::before{display:none}
+  .fchip:hover{color:var(--text);background:rgba(var(--t,100,116,139),.09)}
+  .fchip:hover::before{opacity:.85}
+  .fchip.on{
+    background:rgba(var(--t,100,116,139),.16);color:var(--ti,var(--text));font-weight:650;
+    box-shadow:inset 0 0 0 1px rgba(var(--t,100,116,139),.38);
+  }
+  .fchip.on::before{opacity:1;transform:scale(1.1)}
+  .fchip:focus-visible{outline:2px solid rgba(var(--t,76,110,245),.85);outline-offset:1px}
   .keep-seg{display:flex;gap:6px;flex-wrap:wrap;margin:2px 0 6px}
   .search{
     display:flex;align-items:center;gap:6px;height:29px;padding:0 9px;
@@ -424,17 +461,25 @@
   .link:hover{color:var(--danger);background:var(--card-2)}
   /* 右侧操作组：批量选择 + 清空全部，始终靠右并成组 */
   .toolbar-actions{display:inline-flex;align-items:center;gap:6px;margin-left:auto}
-  /* 发送人 / 日期：图标按钮，点击弹出面板 */
+  /* 发送人 / 日期 / 批量选择 / 清空全部：同一套彩色胶囊，宽屏图标+文字，窄屏只留图标 */
   .filter-btns{display:inline-flex;align-items:center;gap:6px;flex:none}
   .fbtn{
     display:inline-flex;align-items:center;gap:6px;height:29px;padding:0 11px 0 9px;
-    border-radius:999px;background:var(--card);border:1px solid var(--line);color:var(--sub);
+    border-radius:999px;color:var(--sub);
+    background:rgba(var(--t,100,116,139),.10);
+    border:1px solid rgba(var(--t,100,116,139),.32);
     font-family:inherit;font-size:12.5px;font-weight:550;cursor:pointer;box-shadow:var(--shadow-sm);
-    white-space:nowrap;transition:color .16s ease,border-color .16s ease,background .16s ease,box-shadow .16s ease;
+    white-space:nowrap;transition:color .16s ease,border-color .16s ease,background .16s ease,box-shadow .16s ease,transform .12s ease;
   }
-  .fbtn:hover{color:var(--text);border-color:var(--line-soft)}
-  .fbtn svg{width:14px;height:14px;flex:none}
-  .fbtn.on{color:var(--accent);border-color:var(--accent);background:var(--accent-soft);box-shadow:none}
+  .fbtn svg{width:14px;height:14px;flex:none;color:rgb(var(--t,100,116,139))}
+  .fbtn:hover{color:var(--text);border-color:rgba(var(--t,100,116,139),.5);background:rgba(var(--t,100,116,139),.17)}
+  .fbtn.on{
+    color:var(--ti,var(--text));border-color:rgba(var(--t,100,116,139),.62);
+    background:rgba(var(--t,100,116,139),.20);font-weight:650;box-shadow:none;
+  }
+  .fbtn.on svg{color:currentColor}
+  .fbtn:active{transform:scale(.96)}
+  .fbtn:focus-visible{outline:2px solid rgba(var(--t,76,110,245),.85);outline-offset:2px}
   .fbtn .fbtn-txt{max-width:112px;overflow:hidden;text-overflow:ellipsis}
 
   /* 小屏：筛选 tag 可横向滚动；第二行允许换行，图标按钮只留图标 */
@@ -449,32 +494,22 @@
     .search input{flex:1;width:auto;min-width:0}
     .toolbar-actions{flex:none;margin-left:auto}
   }
+  /* 动作类按钮（批量选择 / 清空全部）收得比筛选项更早，给搜索框腾位置 */
+  @media (max-width:640px){
+    .fbtn.act{padding:0;width:29px;justify-content:center;gap:0}
+    .fbtn.act .fbtn-txt{display:none}
+    /* 只剩图标时靠底色加深来体现「已进入选择模式」 */
+    .fbtn.act.on{background:rgba(var(--t,100,116,139),.3);border-color:rgba(var(--t,100,116,139),.8)}
+  }
   @media (max-width:560px){
     /* 未选中的按钮收成纯图标，选中时保留文字，一眼能看出已筛选 */
-    .fbtn:not(.on){padding:0;width:29px;justify-content:center}
+    .fbtn:not(.on){padding:0;width:29px;justify-content:center;gap:0}
     .fbtn:not(.on) .fbtn-txt{display:none}
     .fbtn.on .fbtn-txt{max-width:76px}
   }
   @media (max-width:400px){
     .fchip{padding:0 7px}
   }
-
-  /* 批量选择 / 清空全部：圆形图标按钮 */
-  .ibtn{
-    display:inline-flex;align-items:center;justify-content:center;flex:none;
-    width:29px;height:29px;padding:0;border-radius:50%;
-    background:var(--card);border:1px solid var(--line);color:var(--sub);
-    cursor:pointer;box-shadow:var(--shadow-sm);
-    transition:color .16s ease,border-color .16s ease,background .16s ease,box-shadow .16s ease,transform .12s ease;
-  }
-  .ibtn svg{width:15px;height:15px;flex:none}
-  /* display:inline-flex 会盖掉 hidden 属性的 UA 样式，必须显式关掉 */
-  .ibtn[hidden]{display:none}
-  .ibtn:hover{color:var(--text);border-color:var(--line-soft);background:var(--card-2)}
-  .ibtn.on{color:var(--accent);border-color:var(--accent);background:var(--accent-soft);box-shadow:none}
-  .ibtn.danger:hover{color:var(--danger);border-color:rgba(229,72,77,.38);background:rgba(229,72,77,.07)}
-  .ibtn:active{transform:scale(.94)}
-  .ibtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
   /* 批量选择：卡片左上角一个勾，点整张卡切换 */
   .pick-dot{
@@ -1365,11 +1400,11 @@
     <div class="tb-row tb-top">
       <span class="count" id="count">载入中…</span>
       <div class="filters" id="filters" role="tablist" aria-label="内容筛选">
-        <button class="fchip on" data-f="all" type="button">全部</button>
-        <button class="fchip" data-f="text" type="button">文字</button>
-        <button class="fchip" data-f="image" type="button">图片</button>
-        <button class="fchip" data-f="file" type="button">文件</button>
-        <button class="fchip" data-f="private" type="button">私聊</button>
+        <button class="fchip t-indigo on" data-f="all" type="button">全部</button>
+        <button class="fchip t-sky" data-f="text" type="button">文字</button>
+        <button class="fchip t-violet" data-f="image" type="button">图片</button>
+        <button class="fchip t-amber" data-f="file" type="button">文件</button>
+        <button class="fchip t-pink" data-f="private" type="button">私聊</button>
       </div>
     </div>
     <div class="tb-row tb-bot">
@@ -1379,28 +1414,30 @@
         <button class="q-clear" id="qClear" type="button" hidden aria-label="清除搜索">✕</button>
       </div>
       <div class="filter-btns">
-        <button class="fbtn" id="senderBtn" type="button" aria-haspopup="dialog" aria-expanded="false" title="按发送人筛选">
+        <button class="fbtn t-violet" id="senderBtn" type="button" aria-haspopup="dialog" aria-expanded="false" title="按发送人筛选">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.6"/><path d="M4.6 20a7.4 7.4 0 0 1 14.8 0"/></svg>
           <span class="fbtn-txt" id="senderBtnTxt">发送人</span>
         </button>
-        <button class="fbtn" id="dateBtn" type="button" aria-haspopup="dialog" aria-expanded="false" title="按日期筛选">
+        <button class="fbtn t-teal" id="dateBtn" type="button" aria-haspopup="dialog" aria-expanded="false" title="按日期筛选">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4.8" width="17" height="16" rx="3.2"/><path d="M8 2.8v4M16 2.8v4M3.5 10h17"/><circle cx="12" cy="14.6" r="1.25" fill="currentColor" stroke="none"/></svg>
           <span class="fbtn-txt" id="dateBtnTxt">日期</span>
         </button>
       </div>
       <div class="toolbar-actions">
-        <button class="ibtn" id="selBtn" type="button" title="批量选择" aria-label="批量选择">
+        <button class="fbtn t-sky act" id="selBtn" type="button" title="批量选择" aria-label="批量选择" aria-pressed="false">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <rect x="3.6" y="3.6" width="16.8" height="16.8" rx="4.2"/>
             <path d="M8.2 12.3l2.6 2.6 5-5.4"/>
           </svg>
+          <span class="fbtn-txt" id="selBtnTxt">批量选择</span>
         </button>
-        <button class="ibtn danger" id="clear" type="button" hidden title="清空全部" aria-label="清空全部">
+        <button class="fbtn t-rose act" id="clear" type="button" hidden title="清空全部" aria-label="清空全部">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
             <path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"/>
             <path d="M10 11v6M14 11v6"/>
           </svg>
+          <span class="fbtn-txt" id="clearTxt">清空全部</span>
         </button>
       </div>
     </div>
@@ -2619,6 +2656,8 @@
     ava.addEventListener('dblclick', function (e) {
       e.preventDefault();
       e.stopPropagation();
+      // 收起 / 展开都把长文本打回「默认折叠」，免得展开后突然铺满一屏
+      resetClamp(el);
       el.classList.toggle('collapsed');
     });
     meta.appendChild(ava); meta.appendChild(who);
@@ -2708,6 +2747,7 @@
       + '<span>已收起' + (bits.length ? '（' + bits.join('、') + '）' : '') + ' · 点击展开</span>';
     note.addEventListener('click', function (e) {
       e.stopPropagation();
+      resetClamp(el);
       el.classList.remove('collapsed');
     });
     el.appendChild(note);
@@ -2731,6 +2771,9 @@
     document.body.classList.toggle('picking', on);
     selBar.hidden = !on;
     selBtn.classList.toggle('on', on);
+    selBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    var selTxt = $('selBtnTxt');
+    if (selTxt) selTxt.textContent = on ? '退出选择' : '批量选择';
     selBtn.title = on ? '退出选择' : '批量选择';
     selBtn.setAttribute('aria-label', on ? '退出选择' : '批量选择');
     render();
@@ -2818,7 +2861,19 @@
         body.classList.toggle('clamp', !open);
         btn.textContent = open ? '收起' : '展开全文';
       };
+      // 卡片收起 / 展开时调用：把这段正文打回默认折叠状态，按钮文案一起复位
+      body._resetClamp = function () {
+        open = false;
+        body.classList.add('clamp');
+        btn.textContent = '展开全文';
+      };
       body.insertAdjacentElement('afterend', btn);
+    });
+  }
+  /** 把卡片里被「展开全文」撑开的正文，全部恢复成默认的折叠态 */
+  function resetClamp(el) {
+    el.querySelectorAll('.text-body').forEach(function (b) {
+      if (b._resetClamp) b._resetClamp();
     });
   }
 
