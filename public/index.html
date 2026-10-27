@@ -361,8 +361,12 @@
   .peers-empty{padding:14px 6px;text-align:center;font-size:12px;color:var(--faint)}
 
   /* ---------------- 工具条 / 卡片 ---------------- */
-  .toolbar{display:flex;align-items:center;gap:8px;margin:6px 2px 10px;flex-wrap:wrap}
-  .count{font-size:12.5px;color:var(--sub);font-weight:500}
+  /* 两行：① 共N条内容 ………… 筛选Tag；② 搜索 发送人 日期 …… 批量选择 清空全部 */
+  .toolbar{display:flex;flex-direction:column;gap:8px;margin:6px 2px 10px}
+  .tb-row{display:flex;align-items:center;gap:8px;min-width:0}
+  .tb-top{justify-content:space-between}
+  .tb-bot{justify-content:flex-start}
+  .count{font-size:12.5px;color:var(--sub);font-weight:500;flex:none;white-space:nowrap}
 
   /* 断线提示：轮询连续失败才出现，恢复了自动收起 */
   .net-bar{
@@ -420,52 +424,57 @@
   .link:hover{color:var(--danger);background:var(--card-2)}
   /* 右侧操作组：批量选择 + 清空全部，始终靠右并成组 */
   .toolbar-actions{display:inline-flex;align-items:center;gap:6px;margin-left:auto}
-  /* 工具栏分两个「行容器」。宽屏用 display:contents 摊平，视觉上仍是原来的一行：
-     共 N 条 · 搜索 · 筛选 · ………… · 批量选择 · 清空全部 */
-  .tb-r1,.tb-r2{display:contents}
-  .count{order:1}
-  .search{order:2}
-  .filters{order:3}
-  .toolbar-actions{order:4}
+  /* 发送人 / 日期：图标按钮，点击弹出面板 */
+  .filter-btns{display:inline-flex;align-items:center;gap:6px;flex:none}
+  .fbtn{
+    display:inline-flex;align-items:center;gap:6px;height:29px;padding:0 11px 0 9px;
+    border-radius:999px;background:var(--card);border:1px solid var(--line);color:var(--sub);
+    font-family:inherit;font-size:12.5px;font-weight:550;cursor:pointer;box-shadow:var(--shadow-sm);
+    white-space:nowrap;transition:color .16s ease,border-color .16s ease,background .16s ease,box-shadow .16s ease;
+  }
+  .fbtn:hover{color:var(--text);border-color:var(--line-soft)}
+  .fbtn svg{width:14px;height:14px;flex:none}
+  .fbtn.on{color:var(--accent);border-color:var(--accent);background:var(--accent-soft);box-shadow:none}
+  .fbtn .fbtn-txt{max-width:112px;overflow:hidden;text-overflow:ellipsis}
 
-  /* 小屏两行：
-     共 1 条内容                    tag 筛选
-     搜索框                 批量选择 清空全部 */
+  /* 小屏：筛选 tag 可横向滚动；第二行允许换行，图标按钮只留图标 */
   @media (max-width:720px){
     .toolbar{flex-direction:column;flex-wrap:nowrap;align-items:stretch;gap:8px}
-    .tb-r1,.tb-r2{display:flex;align-items:center;gap:8px;min-width:0}
-    .tb-r1{justify-content:space-between;flex-wrap:wrap}
-    .sender-filter{flex:0 1 auto;min-width:0}
-    .count{flex:none;white-space:nowrap}
+    .tb-row{flex-wrap:wrap}
+    .tb-top{flex-wrap:nowrap}
     .filters{flex:0 1 auto;min-width:0;overflow-x:auto;scrollbar-width:none}
     .filters::-webkit-scrollbar{display:none}
     /* 搜索框不拉满整行：窄屏时占满剩余空间，稍宽时封顶，避免长长一条 */
-    .search{flex:1 1 160px;min-width:0;max-width:220px}
+    .search{flex:1 1 140px;min-width:0;max-width:220px}
     .search input{flex:1;width:auto;min-width:0}
-    .toolbar-actions{flex:none}
+    .toolbar-actions{flex:none;margin-left:auto}
+  }
+  @media (max-width:560px){
+    /* 未选中的按钮收成纯图标，选中时保留文字，一眼能看出已筛选 */
+    .fbtn:not(.on){padding:0;width:29px;justify-content:center}
+    .fbtn:not(.on) .fbtn-txt{display:none}
+    .fbtn.on .fbtn-txt{max-width:76px}
   }
   @media (max-width:400px){
     .fchip{padding:0 7px}
   }
 
-  /* 清空全部：低调的小药丸，悬停才露出危险色 */
-  .clear-btn{
-    display:inline-flex;align-items:center;gap:5px;height:29px;padding:0 11px 0 9px;
-    border-radius:999px;background:var(--card);border:1px solid var(--line);
-    color:var(--sub);font-family:inherit;font-size:12px;font-weight:550;letter-spacing:.1px;
+  /* 批量选择 / 清空全部：圆形图标按钮 */
+  .ibtn{
+    display:inline-flex;align-items:center;justify-content:center;flex:none;
+    width:29px;height:29px;padding:0;border-radius:50%;
+    background:var(--card);border:1px solid var(--line);color:var(--sub);
     cursor:pointer;box-shadow:var(--shadow-sm);
     transition:color .16s ease,border-color .16s ease,background .16s ease,box-shadow .16s ease,transform .12s ease;
   }
-  .clear-btn svg{width:13px;height:13px;flex:none;opacity:.9;transition:transform .18s ease}
+  .ibtn svg{width:15px;height:15px;flex:none}
   /* display:inline-flex 会盖掉 hidden 属性的 UA 样式，必须显式关掉 */
-  .clear-btn[hidden]{display:none}
-  .clear-btn:hover{
-    color:var(--danger);border-color:rgba(229,72,77,.38);
-    background:rgba(229,72,77,.07);box-shadow:0 2px 10px -4px rgba(229,72,77,.45);
-  }
-  .clear-btn:hover svg{transform:translateY(-1px) rotate(-6deg)}
-  .clear-btn:active{transform:scale(.96)}
-  .clear-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .ibtn[hidden]{display:none}
+  .ibtn:hover{color:var(--text);border-color:var(--line-soft);background:var(--card-2)}
+  .ibtn.on{color:var(--accent);border-color:var(--accent);background:var(--accent-soft);box-shadow:none}
+  .ibtn.danger:hover{color:var(--danger);border-color:rgba(229,72,77,.38);background:rgba(229,72,77,.07)}
+  .ibtn:active{transform:scale(.94)}
+  .ibtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
   /* 批量选择：卡片左上角一个勾，点整张卡切换 */
   .pick-dot{
@@ -503,6 +512,7 @@
   .ava{
     width:20px;height:20px;border-radius:7px;flex:none;display:grid;place-items:center;
     font-size:10.5px;font-weight:700;color:#fff;
+    cursor:pointer;user-select:none;-webkit-user-select:none;
   }
   .who{color:var(--sub);font-weight:600;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:0 1 auto}
   .when{flex:none;white-space:nowrap}
@@ -1170,22 +1180,90 @@
   .read-pop-i{font-size:13px;color:var(--muted);padding:2px 0;border-top:1px solid var(--line-soft)}
   .read-pop-i:first-child{border-top:0}
 
-  /* 双击头像收起：只留元信息行 */
-  .card.collapsed .text-body,
+  /* 双击头像收起：保留元信息 + 一行文字预览 + 「点击展开」入口 */
   .card.collapsed .shots,
   .card.collapsed .file,
   .card.collapsed .more{display:none}
-  .card.collapsed .ava{outline:2px solid var(--line);outline-offset:-2px}
-
-  /* 按发送人筛选下拉 */
-  .sender-filter{
-    flex:none;max-width:150px;min-width:0;font:inherit;font-size:12.5px;color:var(--muted);
-    background:var(--card);border:1px solid var(--line);border-radius:99px;padding:4px 22px 4px 10px;
-    appearance:none;-webkit-appearance:none;cursor:pointer;
-    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='3'><path d='M6 9l6 6 6-6'/></svg>");
-    background-repeat:no-repeat;background-position:right 8px center;background-size:10px;
+  .card.collapsed .text-body{
+    max-height:1.66em;overflow:hidden;
+    -webkit-mask-image:linear-gradient(to right,#000 76%,transparent);
+    mask-image:linear-gradient(to right,#000 76%,transparent);
   }
-  .sender-filter:focus{outline:none;border-color:var(--brand)}
+  .card.collapsed .ava{outline:2px solid var(--line);outline-offset:-2px}
+  /* 只有收起态才出现的说明按钮：明确告诉用户「内容被折叠了」 */
+  .collapsed-note{display:none}
+  .card.collapsed .collapsed-note{
+    display:inline-flex;align-items:center;gap:5px;margin-top:7px;
+    padding:3px 10px;border-radius:999px;border:1px solid var(--line);
+    background:var(--card-2);color:var(--sub);
+    font-family:inherit;font-size:11.5px;font-weight:550;line-height:1.5;cursor:pointer;
+  }
+  .collapsed-note svg{width:11px;height:11px;flex:none}
+  .collapsed-note:hover{color:var(--accent);border-color:var(--accent);background:var(--accent-soft)}
+
+  /* 发送人 / 日期 弹出面板 */
+  .fpop{
+    position:fixed;z-index:130;background:var(--card);border:1px solid var(--line);
+    border-radius:16px;box-shadow:0 20px 48px rgba(0,0,0,.22);padding:8px;
+    animation:fpopIn .14s ease both;
+  }
+  @keyframes fpopIn{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:none}}
+  .fpop[hidden]{display:none}
+  .fpop-h{font-size:10.5px;font-weight:700;color:var(--faint);letter-spacing:.5px;padding:3px 8px 6px}
+  .fpop-list{display:flex;flex-direction:column;gap:2px;max-height:min(56vh,340px);overflow:auto}
+  .fpop-i{
+    display:flex;align-items:center;gap:9px;width:100%;padding:7px 9px;border:0;border-radius:10px;
+    background:none;font-family:inherit;font-size:13px;color:var(--text);text-align:left;cursor:pointer;
+  }
+  .fpop-i:hover{background:var(--card-2)}
+  .fpop-i.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+  .fpop-ava{
+    width:22px;height:22px;border-radius:50%;flex:none;display:grid;place-items:center;
+    color:#fff;font-size:10.5px;font-weight:700;
+  }
+  .fpop-nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .fpop-ck{width:14px;height:14px;flex:none;opacity:0}
+  .fpop-i.on .fpop-ck{opacity:1}
+
+  /* 日历视图 */
+  .fpop.cal{width:286px;max-width:calc(100vw - 20px);padding:10px 10px 8px}
+  .cal-h{display:flex;align-items:center;gap:4px;margin-bottom:6px}
+  .cal-t{flex:1;text-align:center;font-size:13px;font-weight:700;color:var(--text);letter-spacing:.2px}
+  .cal-nav{
+    width:28px;height:28px;border:0;border-radius:8px;background:none;color:var(--sub);
+    cursor:pointer;display:grid;place-items:center;flex:none;
+  }
+  .cal-nav:hover:enabled{background:var(--card-2);color:var(--text)}
+  .cal-nav:disabled{opacity:.25;cursor:default}
+  .cal-nav svg{width:15px;height:15px}
+  .cal-wd,.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}
+  .cal-wd span{text-align:center;font-size:10.5px;font-weight:700;color:var(--faint);padding:2px 0}
+  .cal-grid{align-items:center}
+  .cal-d{
+    position:relative;height:32px;border:0;border-radius:9px;background:none;
+    font-family:inherit;font-size:12.5px;color:var(--text);cursor:pointer;padding:0;
+  }
+  .cal-d:hover:enabled{background:var(--card-2)}
+  .cal-d.off{color:var(--faint);opacity:.35;cursor:default}
+  .cal-d.today{box-shadow:inset 0 0 0 1px var(--line)}
+  .cal-d.sel{background:var(--accent);color:#fff;font-weight:700}
+  .cal-d.sel:hover:enabled{background:var(--accent)}
+  .cal-d .cal-dot{
+    position:absolute;left:50%;bottom:4px;transform:translateX(-50%);
+    width:4px;height:4px;border-radius:50%;background:var(--accent);
+  }
+  .cal-d.sel .cal-dot{background:#fff}
+  .cal-foot{
+    display:flex;align-items:center;justify-content:space-between;gap:8px;
+    margin-top:7px;padding-top:7px;border-top:1px solid var(--line-soft);
+  }
+  .cal-clear{
+    height:27px;padding:0 12px;border-radius:999px;border:1px solid var(--line);background:var(--card);
+    color:var(--sub);font-family:inherit;font-size:12px;font-weight:550;cursor:pointer;
+  }
+  .cal-clear:hover:enabled{color:var(--accent);border-color:var(--accent)}
+  .cal-clear:disabled{opacity:.4;cursor:default}
+  .cal-meta{font-size:11px;color:var(--faint)}
 
   /* 回到顶部悬浮按钮 */
   .to-top{
@@ -1199,7 +1277,6 @@
   .to-top[hidden]{display:none}
 
   @media (max-width:720px){
-    .sender-filter{max-width:130px}
     .to-top{width:40px;height:40px;right:12px}
   }
 </style>
@@ -1285,7 +1362,7 @@
     <span id="netMsg">连不上服务了，正在重试…</span>
   </div>
   <div class="toolbar">
-    <div class="tb-r1">
+    <div class="tb-row tb-top">
       <span class="count" id="count">载入中…</span>
       <div class="filters" id="filters" role="tablist" aria-label="内容筛选">
         <button class="fchip on" data-f="all" type="button">全部</button>
@@ -1294,32 +1371,42 @@
         <button class="fchip" data-f="file" type="button">文件</button>
         <button class="fchip" data-f="private" type="button">私聊</button>
       </div>
-      <select id="senderFilter" class="sender-filter" aria-label="按发送人筛选">
-        <option value="">全部发送人</option>
-      </select>
-      <select id="dateFilter" class="sender-filter" aria-label="按日期筛选">
-        <option value="">全部日期</option>
-      </select>
     </div>
-    <div class="tb-r2">
+    <div class="tb-row tb-bot">
       <div class="search" id="search">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
         <input id="q" type="search" placeholder="搜内容 / 文件名" autocomplete="off" aria-label="搜索内容">
         <button class="q-clear" id="qClear" type="button" hidden aria-label="清除搜索">✕</button>
       </div>
+      <div class="filter-btns">
+        <button class="fbtn" id="senderBtn" type="button" aria-haspopup="dialog" aria-expanded="false" title="按发送人筛选">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.6"/><path d="M4.6 20a7.4 7.4 0 0 1 14.8 0"/></svg>
+          <span class="fbtn-txt" id="senderBtnTxt">发送人</span>
+        </button>
+        <button class="fbtn" id="dateBtn" type="button" aria-haspopup="dialog" aria-expanded="false" title="按日期筛选">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4.8" width="17" height="16" rx="3.2"/><path d="M8 2.8v4M16 2.8v4M3.5 10h17"/><circle cx="12" cy="14.6" r="1.25" fill="currentColor" stroke="none"/></svg>
+          <span class="fbtn-txt" id="dateBtnTxt">日期</span>
+        </button>
+      </div>
       <div class="toolbar-actions">
-        <button class="link" id="selBtn" type="button" title="勾选多条内容，打包成一个 zip 下载">批量选择</button>
-        <button class="clear-btn" id="clear" hidden title="删除全部内容">
+        <button class="ibtn" id="selBtn" type="button" title="批量选择" aria-label="批量选择">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3.6" y="3.6" width="16.8" height="16.8" rx="4.2"/>
+            <path d="M8.2 12.3l2.6 2.6 5-5.4"/>
+          </svg>
+        </button>
+        <button class="ibtn danger" id="clear" type="button" hidden title="清空全部" aria-label="清空全部">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
             <path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"/>
             <path d="M10 11v6M14 11v6"/>
           </svg>
-          <span>清空全部</span>
         </button>
       </div>
     </div>
   </div>
+  <div class="fpop" id="senderPop" hidden></div>
+  <div class="fpop cal" id="datePop" hidden></div>
 
   <section class="feed" id="feed"></section>
   <button id="toTop" class="to-top" hidden type="button" aria-label="回到顶部" title="回到顶部">↑</button>
@@ -2531,6 +2618,7 @@
     ava.title = '双击收起 / 展开这条消息';
     ava.addEventListener('dblclick', function (e) {
       e.preventDefault();
+      e.stopPropagation();
       el.classList.toggle('collapsed');
     });
     meta.appendChild(ava); meta.appendChild(who);
@@ -2565,6 +2653,7 @@
         var img = document.createElement('img');
         img.className = 'thumb';
         img.loading = 'lazy';
+        img.decoding = 'async';
         img.src = '/f/' + p.fid + '?cid=' + encodeURIComponent(state.cid);
         img.alt = p.name || '图片';
         img.title = (p.name || '图片') + ' · ' + fmtSize(p.size);
@@ -2601,6 +2690,28 @@
     });
     flushImages();
 
+    // 收起态的说明条：告诉用户内容只是被折叠了，并给一个明确的「展开」入口
+    var nImg = 0, nFile = 0;
+    parts.forEach(function (p) {
+      if (p.kind === 'image') nImg++;
+      else if (p.kind !== 'text') nFile++;
+    });
+    var bits = [];
+    if (texts.length) bits.push('文字');
+    if (nImg) bits.push(nImg + ' 张图片');
+    if (nFile) bits.push(nFile + ' 个文件');
+    var note = document.createElement('button');
+    note.type = 'button';
+    note.className = 'collapsed-note';
+    note.title = '展开这条消息';
+    note.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>'
+      + '<span>已收起' + (bits.length ? '（' + bits.join('、') + '）' : '') + ' · 点击展开</span>';
+    note.addEventListener('click', function (e) {
+      e.stopPropagation();
+      el.classList.remove('collapsed');
+    });
+    el.appendChild(note);
+
     // 选择模式下点整张卡切换选中；卡片里本来就有按钮/链接，那些照旧各干各的
     el.addEventListener('click', function (e) {
       if (!state.pickMode) return;
@@ -2619,7 +2730,9 @@
     state.picked.clear();
     document.body.classList.toggle('picking', on);
     selBar.hidden = !on;
-    selBtn.textContent = on ? '退出选择' : '批量选择';
+    selBtn.classList.toggle('on', on);
+    selBtn.title = on ? '退出选择' : '批量选择';
+    selBtn.setAttribute('aria-label', on ? '退出选择' : '批量选择');
     render();
     updateSelBar();
   }
@@ -2866,45 +2979,167 @@
     return allItems.filter(function (it) { return matchFilter(it) && matchSender(it) && matchDate(it) && matchQuery(it); });
   }
 
-  // 从当前消息聚合「发送人」下拉项（owner -> 展示名），仅在有变化时重建
-  function refreshSenders() {
-    var sel = $('senderFilter');
-    if (!sel) return;
-    var map = {};
-    allItems.forEach(function (it) { if (it.owner) map[it.owner] = it.from || '匿名设备'; });
-    var cids = Object.keys(map);
-    if (cids.length === 0) { sel.innerHTML = '<option value="">全部发送人</option>'; sel.value = ''; view.sender = ''; return; }
-    var cur = view.sender;
-    if (cur && cids.indexOf(cur) === -1) cur = '';
-    cids.sort(function (a, b) { return String(map[a]).localeCompare(String(map[b]), 'zh'); });
-    var html = '<option value="">全部发送人</option>';
-    cids.forEach(function (c) { html += '<option value="' + esc(c) + '">' + esc(map[c]) + '</option>'; });
-    sel.innerHTML = html;
-    sel.value = cur;
-    view.sender = cur;
+  /* ---------------- 发送人 / 日期筛选（图标按钮 + 弹出面板） ---------------- */
+  var senderPop = $('senderPop'), datePop = $('datePop');
+  var senderMap = {}, senderCids = [];
+  var dateCounts = {}, dateKeys = [], dateMax = '';
+  var calY = 0, calM = 0, calReady = false;
+
+  function firstChar(s) {
+    s = String(s || '?').trim();
+    return s ? s.charAt(0).toUpperCase() : '?';
   }
 
-  // 从当前消息聚合「日期」下拉项（仅出现过数据的日期，降序、带周几），仅在有变化时重建
-  function refreshDates() {
-    var sel = $('dateFilter');
-    if (!sel) return;
+  // 从当前消息聚合「发送人」列表（owner -> 展示名）
+  function refreshSenders() {
     var map = {};
-    allItems.forEach(function (it) { if (it.time) { var k = dateKey(it.time); if (!map[k]) map[k] = it.time; } });
-    var keys = Object.keys(map);
-    if (keys.length === 0) { sel.innerHTML = '<option value="">全部日期</option>'; sel.value = ''; view.date = ''; return; }
-    keys.sort();                       // 字符串定宽，字典序即时间序
-    keys.reverse();                    // 最近的日期排在最前
-    var cur = view.date;
-    if (cur && keys.indexOf(cur) === -1) cur = '';   // 若所选日期已无数据则回退
-    var wd = ['日', '一', '二', '三', '四', '五', '六'];
-    var html = '<option value="">全部日期</option>';
-    keys.forEach(function (k) {
-      var w = wd[new Date(map[k]).getDay()];
-      html += '<option value="' + k + '">' + k + ' 周' + w + '</option>';
+    allItems.forEach(function (it) { if (it.owner) map[it.owner] = it.from || '匿名设备'; });
+    senderMap = map;
+    senderCids = Object.keys(map).sort(function (a, b) {
+      return String(map[a]).localeCompare(String(map[b]), 'zh');
     });
-    sel.innerHTML = html;
-    sel.value = cur;
-    view.date = cur;
+    if (view.sender && !map[view.sender]) view.sender = '';   // 该发送人已无内容则回退
+    updateSenderBtn();
+    if (senderPop && !senderPop.hidden) renderSenderPop();
+  }
+
+  function updateSenderBtn() {
+    var btn = $('senderBtn'), txt = $('senderBtnTxt');
+    if (!btn) return;
+    var on = !!view.sender;
+    btn.classList.toggle('on', on);
+    txt.textContent = on ? (senderMap[view.sender] || '发送人') : '发送人';
+    btn.title = on ? ('发送人：' + txt.textContent + '（点击更换）') : '按发送人筛选';
+  }
+
+  function senderRow(cid, name, on, color) {
+    return '<button class="fpop-i' + (on ? ' on' : '') + '" type="button" role="option" aria-selected="' + on + '" data-cid="' + esc(cid) + '">' +
+      '<span class="fpop-ava" style="background:' + (color || 'var(--faint)') + '">' + esc(firstChar(name)) + '</span>' +
+      '<span class="fpop-nm">' + esc(name) + '</span>' +
+      '<svg class="fpop-ck" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>' +
+      '</button>';
+  }
+  function renderSenderPop() {
+    if (!senderPop) return;
+    var h = '<div class="fpop-h">按发送人筛选</div><div class="fpop-list" role="listbox">';
+    h += senderRow('', '全部发送人', view.sender === '', '');
+    senderCids.forEach(function (c) {
+      var nm = senderMap[c] || '匿名设备';
+      h += senderRow(c, nm, view.sender === c, colorOf(nm));
+    });
+    h += '</div>';
+    senderPop.innerHTML = h;
+  }
+
+  // 从当前消息聚合「日期」：计数 + 可选日期集合（只有出现过内容的日期能点）
+  function refreshDates() {
+    var counts = {};
+    allItems.forEach(function (it) {
+      if (!it.time) return;
+      var k = dateKey(it.time);
+      counts[k] = (counts[k] || 0) + 1;
+    });
+    dateCounts = counts;
+    dateKeys = Object.keys(counts).sort();
+    dateMax = dateKeys.length ? dateKeys[dateKeys.length - 1] : '';
+    if (view.date && !counts[view.date]) view.date = '';
+    if (!calReady) {
+      var base = view.date || dateMax || dateKey(Date.now());
+      calY = Number(base.slice(0, 4));
+      calM = Number(base.slice(5, 7)) - 1;
+      calReady = true;
+    }
+    updateDateBtn();
+    if (datePop && !datePop.hidden) renderCalendar();
+  }
+
+  function shortDate(k) {
+    var p = String(k).split('-');
+    return p.length === 3 ? (Number(p[1]) + '/' + Number(p[2])) : String(k);
+  }
+  function updateDateBtn() {
+    var btn = $('dateBtn'), txt = $('dateBtnTxt');
+    if (!btn) return;
+    var on = !!view.date;
+    btn.classList.toggle('on', on);
+    txt.textContent = on ? shortDate(view.date) : '日期';
+    btn.title = on ? (view.date + '（点击更换）') : '按日期筛选';
+  }
+
+  function ymOf(y, m) {
+    var d = new Date(y, m, 1);
+    return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2);
+  }
+  function hasMonth(y, m) {
+    if (!dateKeys.length) return false;
+    var p = ymOf(y, m);
+    for (var i = 0; i < dateKeys.length; i++) if (dateKeys[i].slice(0, 7) === p) return true;
+    return false;
+  }
+
+  function renderCalendar() {
+    if (!datePop) return;
+    var y = calY, m = calM;
+    var firstOff = (new Date(y, m, 1).getDay() + 6) % 7;   // 周一为一周起点
+    var days = new Date(y, m + 1, 0).getDate();
+    var todayK = dateKey(Date.now());
+    var h = '<div class="cal-h">' +
+      '<button class="cal-nav" type="button" data-nav="-1" aria-label="上个月"' + (hasMonth(y, m - 1) ? '' : ' disabled') + '>' +
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button>' +
+      '<div class="cal-t">' + y + ' 年 ' + (m + 1) + ' 月</div>' +
+      '<button class="cal-nav" type="button" data-nav="1" aria-label="下个月"' + (hasMonth(y, m + 1) ? '' : ' disabled') + '>' +
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg></button>' +
+      '</div><div class="cal-wd"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span></div><div class="cal-grid">';
+    for (var i = 0; i < firstOff; i++) h += '<span></span>';
+    for (var d = 1; d <= days; d++) {
+      var k = y + '-' + ('0' + (m + 1)).slice(-2) + '-' + ('0' + d).slice(-2);
+      var cnt = dateCounts[k] || 0;
+      var cls = 'cal-d' + (cnt ? '' : ' off') + (k === view.date ? ' sel' : '') + (k === todayK ? ' today' : '');
+      h += '<button class="' + cls + '" type="button" data-d="' + k + '"' + (cnt ? '' : ' disabled') +
+        ' title="' + k + (cnt ? (' · ' + cnt + ' 条') : ' · 无内容') + '">' + d + (cnt ? '<i class="cal-dot"></i>' : '') + '</button>';
+    }
+    h += '</div><div class="cal-foot"><button class="cal-clear" type="button" data-clear="1"' + (view.date ? '' : ' disabled') + '>全部日期</button>' +
+      '<span class="cal-meta">' + dateKeys.length + ' 天有内容</span></div>';
+    datePop.innerHTML = h;
+  }
+
+  /* ---------------- 面板定位 / 开关 ---------------- */
+  function placePop(pop, anchor) {
+    pop.hidden = false;
+    var r = anchor.getBoundingClientRect();
+    var w = pop.offsetWidth, h = pop.offsetHeight;
+    var left = Math.max(10, Math.min(r.left, window.innerWidth - w - 10));
+    var top = r.bottom + 8;
+    if (top + h > window.innerHeight - 10) top = Math.max(10, r.top - h - 8);
+    pop.style.left = left + 'px';
+    pop.style.top = top + 'px';
+  }
+  function closePops() {
+    if (senderPop && !senderPop.hidden) senderPop.hidden = true;
+    if (datePop && !datePop.hidden) datePop.hidden = true;
+    var sb = $('senderBtn'), db = $('dateBtn');
+    if (sb) sb.setAttribute('aria-expanded', 'false');
+    if (db) db.setAttribute('aria-expanded', 'false');
+  }
+  function toggleSenderPop(btn) {
+    if (!senderPop) return;
+    if (!senderPop.hidden) { closePops(); return; }
+    closePops();
+    renderSenderPop();
+    placePop(senderPop, btn);
+    btn.setAttribute('aria-expanded', 'true');
+  }
+  function toggleDatePop(btn) {
+    if (!datePop) return;
+    if (!datePop.hidden) { closePops(); return; }
+    closePops();
+    var base = view.date || dateMax || dateKey(Date.now());
+    calY = Number(base.slice(0, 4));
+    calM = Number(base.slice(5, 7)) - 1;
+    calReady = true;
+    renderCalendar();
+    placePop(datePop, btn);
+    btn.setAttribute('aria-expanded', 'true');
   }
 
   var moreIO = null;
@@ -2939,9 +3174,20 @@
     }
   }
 
-  function render() {
+  // 渲染快照：内容 / 筛选 / 选中态都没变时直接跳过，避免整片卡片被搬来搬去
+  var lastRenderKey = '';
+  function render(force) {
     var list = visibleItems();
     var shown = list.slice(0, pageLimit);
+    var pk = [];
+    state.picked.forEach(function (id) { pk.push(id); });
+    pk.sort();
+    var key = allItems.length + '|' + shown.length + '|' + pageLimit + '|' + view.filter + '|' + view.sender + '|' + view.date + '|' + view.q + '|' +
+      (state.pickMode ? '1' : '0') + '|' + pk.join(',') + '|' +
+      shown.map(function (it) { return it.id + (it.tgAt ? 't' : ''); }).join(',');
+    if (!force && key === lastRenderKey && nodes.size) return;
+    lastRenderKey = key;
+
     var seen = new Set();
     var fresh = [];
     var frag = document.createDocumentFragment();
@@ -4963,12 +5209,24 @@
     if (b) setFilter(b.dataset.f);
   });
   var qEl = $('q');
-  qEl.addEventListener('input', function () { setQuery(qEl.value); });
+  var qTimer = null;
+  function flushQuery() {
+    clearTimeout(qTimer);
+    qTimer = null;
+    setQuery(qEl.value);
+  }
+  // 输入防抖：连续敲字时不必每个字符都重排整片列表
+  qEl.addEventListener('input', function () {
+    $('qClear').hidden = !qEl.value;
+    clearTimeout(qTimer);
+    qTimer = setTimeout(function () { qTimer = null; setQuery(qEl.value); }, 120);
+  });
   qEl.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape') { qEl.value = ''; setQuery(''); qEl.blur(); }
+    if (e.key === 'Enter') { flushQuery(); return; }
+    if (e.key === 'Escape') { qEl.value = ''; flushQuery(); qEl.blur(); }
   });
   $('qClear').addEventListener('click', function () {
-    qEl.value = ''; setQuery(''); qEl.focus();
+    qEl.value = ''; flushQuery(); qEl.focus();
   });
 
   // 批量选择
@@ -4999,12 +5257,58 @@
   if (toTop) toTop.addEventListener('click', function () { window.scrollTo({ top: 0, behavior: 'smooth' }); });
   onScroll();
 
-  // 按发送人筛选
-  var senderSel = $('senderFilter');
-  if (senderSel) senderSel.addEventListener('change', function () { view.sender = this.value; pageLimit = 20; render(); });
-  // 按日期筛选
-  var dateSel = $('dateFilter');
-  if (dateSel) dateSel.addEventListener('change', function () { view.date = this.value; pageLimit = 20; render(); });
+  // 按发送人筛选（图标按钮 + 弹出面板）
+  var senderBtn = $('senderBtn');
+  if (senderBtn) senderBtn.addEventListener('click', function (e) { e.stopPropagation(); toggleSenderPop(this); });
+  if (senderPop) senderPop.addEventListener('click', function (e) {
+    var row = e.target.closest ? e.target.closest('.fpop-i') : null;
+    if (!row) return;
+    view.sender = row.dataset.cid || '';
+    pageLimit = 20;
+    closePops();
+    render();
+  });
+
+  // 按日期筛选（图标按钮 + 日历视图）
+  var dateBtn = $('dateBtn');
+  if (dateBtn) dateBtn.addEventListener('click', function (e) { e.stopPropagation(); toggleDatePop(this); });
+  if (datePop) datePop.addEventListener('click', function (e) {
+    var nav = e.target.closest ? e.target.closest('.cal-nav') : null;
+    if (nav) {
+      var d = new Date(calY, calM + Number(nav.dataset.nav), 1);
+      calY = d.getFullYear(); calM = d.getMonth();
+      renderCalendar();
+      return;
+    }
+    if (e.target.closest && e.target.closest('[data-clear]')) {
+      view.date = '';
+      pageLimit = 20;
+      closePops();
+      render();
+      return;
+    }
+    var cell = e.target.closest ? e.target.closest('.cal-d') : null;
+    if (cell && !cell.disabled && cell.dataset.d) {
+      view.date = cell.dataset.d;
+      pageLimit = 20;
+      closePops();
+      render();
+    }
+  });
+
+  // 点面板外部 / Esc / 滚动 / 缩放 → 收起
+  document.addEventListener('click', function (e) {
+    if (!senderPop || !datePop) return;
+    if (senderPop.hidden && datePop.hidden) return;
+    if (senderPop.contains(e.target) || datePop.contains(e.target)) return;
+    if (e.target.closest && (e.target.closest('#senderBtn') || e.target.closest('#dateBtn'))) return;
+    closePops();
+  });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closePops(); });
+  window.addEventListener('scroll', function () {
+    if ((senderPop && !senderPop.hidden) || (datePop && !datePop.hidden)) closePops();
+  }, { passive: true });
+  window.addEventListener('resize', closePops);
 
   sendBtn.addEventListener('click', sendAll);
 
