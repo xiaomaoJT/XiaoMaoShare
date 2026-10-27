@@ -1737,6 +1737,43 @@ const server = http.createServer((req, res) => {
         console.log(`  主设备撤销了全部设备授权（${n} 台，其中 ${m} 台的提权同时失效）`);
         return json(res, 200, { ok: true, removed: n });
       }
+      // ?dupes=1 同一 IP 只保留最新的一台，其余视为历史遗留
+      // （清过浏览器数据 / 换过浏览器 / 重装过，都会在同一 IP 上堆出不再回来的旧指纹）
+      if (url.searchParams.get('dupes') === '1') {
+        const selfCid = cidOf(req, url.searchParams.get('cid') || undefined);
+        const stamp = (v) => Number(v.lastSeen || v.approvedAt || v.firstSeen || 0);
+        const byIp = new Map();
+        for (const v of Object.values(devices)) {
+          const ip = String(v.ip || '');
+          if (!ip) continue;                      // 没有 IP 的不参与分组
+          if (!byIp.has(ip)) byIp.set(ip, []);
+          byIp.get(ip).push(v);
+        }
+        const removed = [];
+        const kept = [];
+        for (const [ip, list] of byIp) {
+          if (list.length < 2) continue;
+          // 正在操作的那台永远保留，避免把管理端自己清掉
+          list.sort((a, b) => {
+            if (a.cid === selfCid) return -1;
+            if (b.cid === selfCid) return 1;
+            return stamp(b) - stamp(a);
+          });
+          kept.push({ ip, cid: list[0].cid, name: list[0].name || '' });
+          for (let i = 1; i < list.length; i++) {
+            const v = list[i];
+            delete devices[v.cid];
+            if (elevated[v.cid]) delete elevated[v.cid];
+            removed.push({ ip, cid: v.cid, name: v.name || '' });
+          }
+        }
+        if (removed.length) {
+          saveDevices();
+          saveElevated();
+          console.log(`  主设备移除了 ${removed.length} 台同 IP 的历史设备（每个 IP 保留最新一台）`);
+        }
+        return json(res, 200, { ok: true, removed: removed.length, kept, list: removed });
+      }
       const cidKey = String(url.searchParams.get('cid') || '').slice(0, 64);
       if (devices[cidKey]) {
         const nm = devices[cidKey].name || devices[cidKey].ip || cidKey;

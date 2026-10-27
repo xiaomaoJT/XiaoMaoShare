@@ -412,7 +412,31 @@
   .link:hover{color:var(--danger);background:var(--card-2)}
   /* 右侧操作组：批量选择 + 清空全部，始终靠右并成组 */
   .toolbar-actions{display:inline-flex;align-items:center;gap:6px;margin-left:auto}
-  @media (max-width:600px){ .search input{width:96px} }
+  /* 工具栏分两个「行容器」。宽屏用 display:contents 摊平，视觉上仍是原来的一行：
+     共 N 条 · 搜索 · 筛选 · ………… · 批量选择 · 清空全部 */
+  .tb-r1,.tb-r2{display:contents}
+  .count{order:1}
+  .search{order:2}
+  .filters{order:3}
+  .toolbar-actions{order:4}
+
+  /* 小屏两行：
+     共 1 条内容                    tag 筛选
+     搜索框                 批量选择 清空全部 */
+  @media (max-width:720px){
+    .toolbar{flex-direction:column;flex-wrap:nowrap;align-items:stretch;gap:8px}
+    .tb-r1,.tb-r2{display:flex;align-items:center;gap:8px;min-width:0}
+    .tb-r1{justify-content:space-between}
+    .count{flex:none;white-space:nowrap}
+    .filters{flex:0 1 auto;min-width:0;overflow-x:auto;scrollbar-width:none}
+    .filters::-webkit-scrollbar{display:none}
+    .search{flex:1;min-width:0}
+    .search input{flex:1;width:auto;min-width:0}
+    .toolbar-actions{flex:none}
+  }
+  @media (max-width:400px){
+    .fchip{padding:0 7px}
+  }
 
   /* 清空全部：低调的小药丸，悬停才露出危险色 */
   .clear-btn{
@@ -771,7 +795,9 @@
   .dev-head{
     display:flex;align-items:center;gap:7px;font-size:12px;font-weight:650;
     letter-spacing:.3px;color:var(--sub);text-transform:uppercase;margin-bottom:2px;
+    flex-wrap:wrap;
   }
+  .dev-head-acts{display:flex;align-items:center;gap:6px;margin-left:auto}
   .dev-head .tag{
     font-size:10.5px;font-weight:600;letter-spacing:0;text-transform:none;
     padding:1px 7px;border-radius:99px;background:var(--accent-soft);color:var(--accent);
@@ -1162,30 +1188,33 @@
     <span id="netMsg">连不上服务了，正在重试…</span>
   </div>
   <div class="toolbar">
-    <span class="count" id="count">载入中…</span>
-    <div class="search" id="search">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
-      <input id="q" type="search" placeholder="搜内容 / 文件名" autocomplete="off" aria-label="搜索内容">
-      <button class="q-clear" id="qClear" type="button" hidden aria-label="清除搜索">✕</button>
+    <div class="tb-r1">
+      <span class="count" id="count">载入中…</span>
+      <div class="filters" id="filters" role="tablist" aria-label="内容筛选">
+        <button class="fchip on" data-f="all" type="button">全部</button>
+        <button class="fchip" data-f="text" type="button">文字</button>
+        <button class="fchip" data-f="image" type="button">图片</button>
+        <button class="fchip" data-f="file" type="button">文件</button>
+        <button class="fchip" data-f="private" type="button">私聊</button>
+      </div>
     </div>
-    <div class="filters" id="filters" role="tablist" aria-label="内容筛选">
-      <button class="fchip on" data-f="all" type="button">全部</button>
-      <button class="fchip" data-f="text" type="button">文字</button>
-      <button class="fchip" data-f="image" type="button">图片</button>
-      <button class="fchip" data-f="file" type="button">文件</button>
-      <button class="fchip" data-f="private" type="button">私聊</button>
-    </div>
-    <div class="spacer"></div>
-    <div class="toolbar-actions">
-      <button class="link" id="selBtn" type="button" title="勾选多条内容，打包成一个 zip 下载">批量选择</button>
-      <button class="clear-btn" id="clear" hidden title="删除全部内容">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
-          <path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"/>
-          <path d="M10 11v6M14 11v6"/>
-        </svg>
-        <span>清空全部</span>
-      </button>
+    <div class="tb-r2">
+      <div class="search" id="search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+        <input id="q" type="search" placeholder="搜内容 / 文件名" autocomplete="off" aria-label="搜索内容">
+        <button class="q-clear" id="qClear" type="button" hidden aria-label="清除搜索">✕</button>
+      </div>
+      <div class="toolbar-actions">
+        <button class="link" id="selBtn" type="button" title="勾选多条内容，打包成一个 zip 下载">批量选择</button>
+        <button class="clear-btn" id="clear" hidden title="删除全部内容">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+            <path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"/>
+            <path d="M10 11v6M14 11v6"/>
+          </svg>
+          <span>清空全部</span>
+        </button>
+      </div>
     </div>
   </div>
 
@@ -3816,10 +3845,18 @@
     wipe.className = 'mini bad';
     wipe.textContent = '全部撤销';
     wipe.hidden = true;
-    wipe.style.marginLeft = 'auto';
+    // 同一个 IP 上堆了一串旧指纹时（清过浏览器数据 / 换浏览器 / 重装），一键只留最新的
+    var dupe = document.createElement('button');
+    dupe.className = 'mini';
+    dupe.textContent = '移除同 IP 设备';
+    dupe.hidden = true;
+    var headActs = document.createElement('div');
+    headActs.className = 'dev-head-acts';
+    headActs.appendChild(dupe);
+    headActs.appendChild(wipe);
     head.appendChild(htxt);
     head.appendChild(tag);
-    head.appendChild(wipe);
+    head.appendChild(headActs);
     box.appendChild(head);
 
     var listEl = document.createElement('div');
@@ -3899,6 +3936,23 @@
       });
     };
 
+    dupe.onclick = function () {
+      Dialog.confirm({
+        title: '移除同 IP 设备？',
+        desc: '同一个 IP 下只保留最近在线的那一台，其余设备的授权会作废、要重新验证。' +
+          '列表里出现一串同 IP 设备，通常是清过浏览器数据、换过浏览器或重装过系统留下的旧指纹，它们不会再回来。',
+        ok: '移除', danger: true
+      }).then(function (ok) {
+        if (!ok) return;
+        api('/api/devices?dupes=1', { method: 'DELETE' })
+          .then(function (d) {
+            toast(d.removed ? '已移除 ' + d.removed + ' 台同 IP 设备' : '没有需要移除的设备');
+            load();
+          })
+          .catch(function (e) { toast(e.message || '移除失败'); });
+      });
+    };
+
     function paint(d) {
       var pend = d.pending || [];
       var devs = d.devices || [];
@@ -3907,6 +3961,15 @@
       tag.hidden = !pend.length;
       tag.textContent = pend.length ? pend.length + ' 台待确认' : '';
       wipe.hidden = !devs.length;
+
+      // 数一下有几个会被清理掉的：每个 IP 里除最新一台以外的数量
+      var ipCount = {};
+      devs.forEach(function (v) { var ip = v.ip || ''; if (ip) ipCount[ip] = (ipCount[ip] || 0) + 1; });
+      var dupeN = Object.keys(ipCount).reduce(function (n, ip) {
+        return n + Math.max(0, ipCount[ip] - 1);
+      }, 0);
+      dupe.hidden = !dupeN;
+      dupe.title = dupeN ? '有 ' + dupeN + ' 台设备和其他设备共用 IP，点一下只保留最新的一台' : '';
 
       listEl.innerHTML = '';
       pend.forEach(function (p) {
@@ -4003,6 +4066,7 @@
       api('/api/devices').then(paint).catch(function (e) {
         // 别再静默吞掉：看不到列表时必须说明原因，否则很像「列表里根本没有这台设备」
         wipe.hidden = true;
+        dupe.hidden = true;
         listEl.innerHTML = '';
         var e2 = document.createElement('div');
         e2.className = 'dev-empty';
