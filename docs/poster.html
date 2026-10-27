@@ -75,6 +75,11 @@
   .sect-head{display:flex;align-items:baseline;gap:12px}
   .sect-head h2{font-size:24px;font-weight:700;letter-spacing:-.2px}
   .sect-head p{font-size:13.5px;color:var(--faint)}
+  .ver-tag{
+    display:inline-block;vertical-align:middle;margin-left:9px;transform:translateY(-2px);
+    font-size:11px;font-weight:700;letter-spacing:.4px;padding:2px 8px;border-radius:999px;
+    background:var(--accent-soft);color:var(--accent);
+  }
   .rule{height:1px;background:linear-gradient(90deg,var(--line),transparent);margin-top:14px}
 
   /* ---------- 截图三连 ---------- */
@@ -168,12 +173,12 @@
     <div class="logo"><img src="assets/logo.gif" alt=""></div>
     <div>
       <div class="brandname"><em>XM</em> 互传</div>
-      <div class="brandsub">局域网互传系统 · 说明</div>
+      <div class="brandsub">局域网互传系统 · v1.1.0 说明</div>
     </div>
   </div>
 
   <h1>把同一 Wi-Fi 下的设备，<br>变成一块<span>共享剪贴板</span></h1>
-  <p class="lead">一个零依赖的 Node 服务，跑起来就是完整的互传面板。手机、电脑打开同一个地址，文字、图片、文件随手互传；<b>图文混排成一条消息</b>、<b>Markdown</b>、<b>私聊</b>、<b>扫码</b>、<b>Telegram 远程同步</b>都在这一个页面里，不用装 App，不用连外网。</p>
+  <p class="lead">一个零依赖的 Node 服务，跑起来就是完整的互传面板。手机、电脑打开同一个地址，文字、图片、文件随手互传；<b>图文混排成一条消息</b>、<b>Markdown</b>、<b>私聊</b>、<b>扫码</b>、<b>Telegram 远程同步</b>都在这一个页面里，不用装 App，不用连外网。现在还有 <b>图片画廊</b>、<b>已读回执</b>、<b>按人 / 按日筛选</b> 和 <b>彩色工具栏</b>。</p>
 
   <div class="chips">
     <span class="chip hot"><i></i>零依赖</span>
@@ -288,6 +293,47 @@
     </div>
   </div>
 
+  <div class="sect">
+    <div class="sect-head">
+      <h2>本次更新<span class="ver-tag">v1.1.0</span></h2>
+      <p>看图、已读、筛选、收起，都重做了一遍</p>
+    </div>
+    <div class="rule"></div>
+
+    <div class="feats">
+      <div class="feat">
+        <div class="ico"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="14" rx="3"/><circle cx="8.5" cy="9" r="1.5"/><path d="M21 15.5 16.5 11 9 18.5"/></svg></div>
+        <h4>图片画廊</h4>
+        <p>一条消息里的多张图点开就是画廊：上一张 / 下一张、滚轮与双指缩放、下载、看原图，带「当前 / 总数」。</p>
+      </div>
+      <div class="feat warm">
+        <div class="ico"><svg viewBox="0 0 24 24"><path d="M2 12s3.6-6.2 10-6.2S22 12 22 12s-3.6 6.2-10 6.2S2 12 2 12Z"/><circle cx="12" cy="12" r="2.7"/></svg></div>
+        <h4>已读回执</h4>
+        <p>复制、下载、看图都算读过；按授权设备去重、含发送者本人，主设备或提权设备还能展开看「谁已读」。</p>
+      </div>
+      <div class="feat">
+        <div class="ico"><svg viewBox="0 0 24 24"><path d="M3.5 5h17l-6.6 7.6V19l-3.8 1.6v-8L3.5 5Z"/></svg></div>
+        <h4>按人 / 按日筛选</h4>
+        <p>发送人清单带头像与勾选态；日期用日历视图——只有真有内容的日期才可选，还能叠加分类标签。</p>
+      </div>
+      <div class="feat">
+        <div class="ico"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/><circle cx="9" cy="6" r="2.1"/><circle cx="15" cy="12" r="2.1"/><circle cx="7.5" cy="18" r="2.1"/></svg></div>
+        <h4>彩色工具栏</h4>
+        <p>两行排布，发送人紫、日期青、批量天蓝、清空红；宽屏图标 + 文字，窄屏自动收成图标。</p>
+      </div>
+      <div class="feat">
+        <div class="ico"><svg viewBox="0 0 24 24"><path d="M4 5h16M4 19h9"/><path d="M8 9l4 4 4-4"/><path d="M12 13v4"/></svg></div>
+        <h4>双击收起</h4>
+        <p>双击头像把长消息收成一行预览，再双击或点「已收起」展开；收起 / 展开都会把长文打回默认折叠。</p>
+      </div>
+      <div class="feat warm">
+        <div class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 16.5V7.5"/><path d="M8.5 11 12 7.5 15.5 11"/></svg></div>
+        <h4>回到顶部</h4>
+        <p>列表滚长了右下角浮出 ↑，点一下平滑回顶；配合批量选择、清空全部，整理起来更顺手。</p>
+      </div>
+    </div>
+  </div>
+
   <div class="dark">
     <div class="sect-head">
       <h2>身份与权限</h2>
@@ -343,11 +389,12 @@
   <div class="foot">
     <div class="urls">
       <div class="u">启动后终端会打印：本机 <code>http://localhost:6767/?host=…</code></div>
-      <div class="u">手机连同一个 Wi-Fi，打开局域网地址 <code>http://192.168.110.76:6767</code></div>
+      <div class="u">手机连同一个 Wi-Fi，打开局域网地址 <code>http://192.168.1.12:6767</code></div>
     </div>
     <div class="sign">
       <b><em>XM</em> 互传 <span style="display:inline;font-size:12px;color:var(--faint);font-weight:500">轻量 · 够快 · 不外传</span></b>
-      <span>github.com/xiaomaoJT/XiaoMaoShare</span>
+      <span>v1.1.0 · github.com/xiaomaoJT/XiaoMaoShare</span>
+      <span>Telegram 频道 · t.me/ListenToMao</span>
     </div>
   </div>
 

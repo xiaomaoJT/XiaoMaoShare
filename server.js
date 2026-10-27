@@ -13,6 +13,7 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const { exec } = require('child_process');
+const pkg = require('./package.json'); // 版本号唯一来源，前端通过 /api/version 读取
 
 const ROOT = __dirname;
 const DATA_DIR = path.join(ROOT, 'data');
@@ -1557,6 +1558,12 @@ const server = http.createServer((req, res) => {
       admin: isHostRequest(req),
       ip: clientIp(req),
     });
+    return;
+  }
+
+  // 版本号（package.json 为唯一来源，前端关于弹窗读取）
+  if (method === 'GET' && pathname === '/api/version') {
+    json(res, 200, { version: pkg.version });
     return;
   }
 

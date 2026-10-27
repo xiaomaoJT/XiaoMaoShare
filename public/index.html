@@ -146,9 +146,13 @@
   .top-in{max-width:760px;margin:0 auto;padding:10px 14px;display:flex;align-items:center;gap:11px}
   .mark{
     width:38px;height:38px;border-radius:12px;flex:none;overflow:hidden;
-    background:#fff;border:1px solid var(--line);
+    background:#fff;border:1px solid var(--line);cursor:pointer;
     box-shadow:0 3px 10px -4px rgba(16,24,40,.28);
+    transition:box-shadow .16s ease,transform .12s ease;
   }
+  .mark:hover{box-shadow:0 5px 14px -5px rgba(16,24,40,.4)}
+  .mark:active{transform:scale(.94)}
+  .mark:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   .mark img{width:100%;height:100%;object-fit:cover;display:block;-webkit-user-drag:none}
   .headtext{min-width:0;flex:0 0 auto;white-space:nowrap}
   .title{font-size:15px;font-weight:650;letter-spacing:.2px;line-height:1.2;white-space:nowrap}
@@ -873,6 +877,75 @@
     text-decoration:underline;text-underline-offset:3px;cursor:pointer;
   }
   .gate-link:hover{color:var(--text)}
+
+  /* ---- 关于面板（点击左上角 logo 头像） ---- */
+  .about{
+    position:fixed;inset:0;z-index:200;display:none;place-items:center;padding:24px;
+    background:rgba(12,16,24,.46);
+    -webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);
+  }
+  .about.on{display:grid}
+  .about-card{
+    position:relative;width:100%;max-width:400px;text-align:center;
+    padding:28px 24px 22px;background:var(--card);border:1px solid var(--line);
+    border-radius:22px;box-shadow:0 30px 72px -32px rgba(16,24,40,.6);
+    animation:aboutIn .16s ease both;
+  }
+  @keyframes aboutIn{from{opacity:0;transform:translateY(8px) scale(.985)}to{opacity:1;transform:none}}
+  .about-x{
+    position:absolute;top:12px;right:12px;width:30px;height:30px;padding:0;
+    border:0;border-radius:50%;background:var(--card-2);color:var(--sub);
+    font-size:15px;line-height:1;cursor:pointer;transition:background .15s ease,color .15s ease;
+  }
+  .about-x:hover{background:var(--line);color:var(--text)}
+  .about-logo{
+    width:58px;height:58px;margin:0 auto 12px;border-radius:16px;overflow:hidden;
+    background:#fff;border:1px solid var(--line);
+  }
+  .about-logo img{width:100%;height:100%;object-fit:cover;display:block}
+  .about-title{font-size:19px;font-weight:700;letter-spacing:.2px}
+  .about-title .brand{color:var(--brand);font-weight:750}
+  .about-ver{margin-top:4px;font-size:12.5px;color:var(--faint)}
+  .about-ver b{color:var(--sub);font-weight:600}
+  .about-desc{margin:9px 0 18px;font-size:12.5px;color:var(--sub);line-height:1.6}
+  .about-row{
+    display:flex;align-items:center;gap:12px;text-align:left;padding:12px;
+    border:1px solid var(--line);border-radius:14px;margin-bottom:10px;background:var(--card-2);
+  }
+  .about-row:last-child{margin-bottom:0}
+  .about-ico{width:36px;height:36px;border-radius:11px;flex:none;display:grid;place-items:center;color:#fff}
+  .about-ico svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  .about-ico.gh{background:#24292f}
+  .about-ico.tg{background:#29a9e0}
+  .about-body{flex:1;min-width:0}
+  .about-name{font-size:13.5px;font-weight:650;color:var(--text)}
+  .about-sub{font-size:11.5px;color:var(--sub);margin-top:1px;line-height:1.5}
+  .about-link{display:block;margin-top:3px;font-size:12px;color:var(--accent);text-decoration:none;word-break:break-all}
+  .about-link:hover{text-decoration:underline}
+  .about-copy{
+    flex:none;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:9px;
+    background:var(--card);color:var(--sub);font-family:inherit;font-size:12px;cursor:pointer;
+    transition:color .15s ease,border-color .15s ease,background .15s ease;
+  }
+  .about-copy:hover{color:var(--text);border-color:var(--line-soft)}
+  .about-copy.done{color:var(--accent);border-color:var(--accent);background:var(--accent-soft)}
+  :root[data-theme="glass"] .about-card{
+    -webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);
+  }
+  @media (max-width:430px){
+    .about{padding:18px}
+    .about-card{padding:22px 16px 18px}
+    .about-logo{width:52px;height:52px;border-radius:14px;margin-bottom:10px}
+    .about-title{font-size:17px}
+    .about-desc{margin:8px 0 14px}
+    .about-row{gap:10px;padding:10px;margin-bottom:8px}
+    .about-ico{width:32px;height:32px;border-radius:9px}
+    .about-ico svg{width:17px;height:17px}
+    .about-name{font-size:13px}
+    .about-sub{font-size:11px}
+    .about-link{font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .about-copy{height:28px;padding:0 10px;font-size:11.5px}
+  }
   .spin{
     width:27px;height:27px;margin:20px auto 14px;border-radius:50%;
     border:2.5px solid var(--line);border-top-color:var(--accent);animation:spin .8s linear infinite;
@@ -1320,7 +1393,7 @@
 
 <header class="top">
   <div class="top-in">
-    <div class="mark"><img src="/logo.gif" alt="XiaoMao"></div>
+    <div class="mark" id="brandMark" role="button" tabindex="0" title="关于 XiaoMao 互传" aria-haspopup="dialog" aria-expanded="false"><img src="/logo.gif" alt="XiaoMao"></div>
     <div class="headtext">
       <div class="title"><span class="brand">XM</span> 互传</div>
       <div class="addr" id="addr">连接中…</div>
@@ -1496,6 +1569,40 @@
     <span>在线设备</span><span class="peers-tip">同一 Wi-Fi</span>
   </div>
   <div class="peer-row" id="peerRow"></div>
+</div>
+
+<div class="about" id="about" hidden>
+  <div class="about-card" role="dialog" aria-modal="true" aria-labelledby="aboutTitle">
+    <button class="about-x" id="aboutX" type="button" aria-label="关闭">✕</button>
+    <div class="about-logo"><img src="/logo.gif" alt="XiaoMao"></div>
+    <div class="about-title" id="aboutTitle"><span class="brand">XM</span> 互传</div>
+    <div class="about-ver">版本 <b id="aboutVer">…</b></div>
+    <p class="about-desc">局域网内文字 / 图片 / 文件互传 · 零依赖 · 数据不出本机</p>
+
+    <div class="about-row">
+      <div class="about-ico gh" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M9 19c-4 1.2-4-2-5.5-2.5M15 21v-3.1a2.7 2.7 0 0 0-.7-2.1c2.3-.3 4.7-1.2 4.7-5.3a4.2 4.2 0 0 0-1.1-2.9 3.9 3.9 0 0 0-.1-2.9s-.9-.3-3 1.1a10.3 10.3 0 0 0-5.6 0C6.1 3.4 5.2 3.7 5.2 3.7a3.9 3.9 0 0 0-.1 2.9A4.2 4.2 0 0 0 4 9.5c0 4.1 2.4 5 4.7 5.3a2.7 2.7 0 0 0-.7 2.1V21"/></svg>
+      </div>
+      <div class="about-body">
+        <div class="about-name">GitHub 仓库</div>
+        <div class="about-sub">源码 · 反馈 · 下载</div>
+        <a class="about-link" href="https://github.com/xiaomaoJT/XiaoMaoShare" target="_blank" rel="noopener">github.com/xiaomaoJT/XiaoMaoShare</a>
+      </div>
+      <button class="about-copy" type="button" data-copy="https://github.com/xiaomaoJT/XiaoMaoShare">复制</button>
+    </div>
+
+    <div class="about-row">
+      <div class="about-ico tg" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M21.5 4.2 2.9 11.4c-.8.3-.8 1.5.1 1.7l4.4 1.3 1.7 5.2c.2.7 1.1.9 1.6.3l2.4-2.6 4.4 3.2c.6.4 1.5.1 1.7-.6l3-14.3c.2-.9-.7-1.6-1.7-1.4Z"/><path d="m9.4 14.4 8.4-5.6-6.6 6.9"/></svg>
+      </div>
+      <div class="about-body">
+        <div class="about-name">XiaoMao 频道</div>
+        <div class="about-sub">Telegram · 更新通知 · 交流</div>
+        <a class="about-link" href="https://t.me/ListenToMao" target="_blank" rel="noopener">t.me/ListenToMao</a>
+      </div>
+      <button class="about-copy" type="button" data-copy="https://t.me/ListenToMao">复制</button>
+    </div>
+  </div>
 </div>
 
 <div class="gate" id="gate">
@@ -5612,6 +5719,52 @@
     }
     launch(d);
     if (asHost && state.admin) toast('已把这台浏览器记为主设备');
+  })();
+
+  /* ============================================================ 关于面板（点击左上角 logo 头像） */
+  (function () {
+    var el = $('about'), verEl = $('aboutVer'), markEl = $('brandMark'), closeEl = $('aboutX');
+    if (!el || !markEl || !verEl || !closeEl) return;
+    var verLoaded = false;
+
+    function loadVersion() {
+      if (verLoaded) return;
+      verLoaded = true;
+      fetch('/api/version')
+        .then(function (r) { return r.json(); })
+        .then(function (d) { verEl.textContent = 'v' + (d && d.version ? d.version : '1.1.0'); })
+        .catch(function () { verEl.textContent = 'v1.1.0'; });
+    }
+    function openAbout() {
+      el.hidden = false;
+      requestAnimationFrame(function () { el.classList.add('on'); });
+      markEl.setAttribute('aria-expanded', 'true');
+      loadVersion();
+    }
+    function closeAbout() {
+      el.classList.remove('on');
+      markEl.setAttribute('aria-expanded', 'false');
+      setTimeout(function () { if (!el.classList.contains('on')) el.hidden = true; }, 160);
+    }
+
+    markEl.addEventListener('click', openAbout);
+    markEl.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') { e.preventDefault(); openAbout(); }
+    });
+    closeEl.addEventListener('click', closeAbout);
+    el.addEventListener('click', function (e) { if (e.target === el) closeAbout(); });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && el.classList.contains('on')) closeAbout();
+    });
+    el.querySelectorAll('.about-copy').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        copyText(btn.getAttribute('data-copy') || '');
+        var old = btn.textContent;
+        btn.textContent = '已复制';
+        btn.classList.add('done');
+        setTimeout(function () { btn.textContent = old; btn.classList.remove('done'); }, 1400);
+      });
+    });
   })();
 })();
 </script>
