@@ -288,6 +288,7 @@
   .pick-name{display:block;font-size:13.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .pick-sub{display:block;font-size:11.5px;color:var(--faint);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .pick-check{width:16px;height:16px;flex:none;color:var(--accent)}
+  .pick-box{width:16px;height:16px;flex:none;border:1.6px solid var(--faint);border-radius:5px;box-sizing:border-box}
   .locked{
     margin-top:9px;padding:8px 11px;border-radius:10px;font-size:12px;
     background:rgba(232,86,47,.09);color:#c2410c;display:flex;align-items:center;gap:6px;line-height:1.5;
@@ -1438,6 +1439,7 @@
   var ICONTRAST = svgIcon('<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18" fill="currentColor" stroke="none"/>', 1.8);
   var IQR = svgIcon('<rect x="3.2" y="3.2" width="6.6" height="6.6" rx="1.3"/><rect x="14.2" y="3.2" width="6.6" height="6.6" rx="1.3"/><rect x="3.2" y="14.2" width="6.6" height="6.6" rx="1.3"/><path d="M14.2 14.2h2.6v2.6h-2.6zM18.2 18.2h2.6v2.6h-2.6zM14.2 20.8h1.2M20.8 14.2v1.2"/>', 1.9);
   var ICHECK = svgIcon('<path d="M20 6L9 17l-5-5"/>', 2.6);
+  var IVIS = svgIcon('<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>', 1.8);
   var ISHIELD = svgIcon('<path d="M12 3l7 3v5.4c0 4.2-2.9 7.6-7 8.6-4.1-1-7-4.4-7-8.6V6l7-3z"/><path d="M9.4 12.1l1.9 1.9 3.3-3.3"/>', 1.9);
   var ISHIELD_OPEN = svgIcon('<path d="M12 3l7 3v5.4c0 4.2-2.9 7.6-7 8.6-4.1-1-7-4.4-7-8.6V6l7-3z"/>', 1.9);
   var IDEV = svgIcon('<rect x="2" y="5" width="14" height="10" rx="2"/><path d="M6 19h6M11 15v1"/><path d="M18 9h2v6"/>', 1.8);
@@ -1676,8 +1678,10 @@
     // limits = 服务端下发的长度上限，前端据此提前拦
     limits: { textBytes: 400 * 1024, textTotal: 512 * 1024, warnBytes: 48 * 1024, parts: 30 },
     pending: 0,
-    toCid: '',
-    toName: '',
+    toCids: [],              // 发送对象（cid 数组）；空 = 所有人可见
+    toNames: [],
+    deviceList: [],          // 已授权设备清单（精简版），供选接收人
+    _dl: 0,                  // 上次拉取 devices-lite 的时间戳（节流）
     pickMode: false,         // 批量选择模式
     picked: new Set()        // 勾中的消息 id
   };
@@ -1999,56 +2003,122 @@
   /* ============================================================ 发送对象 */
   function renderToChip() {
     var btn = $('toBtn');
-    var priv = !!state.toCid;
-    $('toName').textContent = priv ? (state.toName || '指定设备') : '所有人';
-    btn.classList.toggle('private', priv);
-    btn.title = priv
-      ? '私聊：只有你和「' + (state.toName || '对方') + '」能看到，点击可改'
-      : '当前所有人可见，点击可改为私聊';
+    var n = state.toCids.length;
+    var label = n === 0 ? '所有人' : (n === 1 ? (state.toNames[0] || '指定设备') : (n + ' 台设备'));
+    $('toName').textContent = label;
+    btn.classList.toggle('private', n > 0);
+    btn.title = n > 0
+      ? '指定可见：只有你和所选的 ' + n + ' 台设备能看到，点击可改'
+      : '当前所有人可见，点击可改为指定可见';
   }
 
-  function openTargetPicker() {
+  // 前端按 cid 解析展示名（优先用 deviceList / peers 里的名字，没有就用后 4 位）
+  function nameOfCidLocal(cid) {
+    if (!cid) return '';
+    var list = state.deviceList || [];
+    for (var i = 0; i < list.length; i++) if (list[i].cid === cid) return list[i].name;
+    var peers = state.peers || [];
+    for (var j = 0; j < peers.length; j++) if (peers[j].cid === cid) return peers[j].name;
+    return cid.slice(-4);
+  }
+
+  // 拉取已授权设备清单（节流，约每 15s 一次），供发送/改可见范围选接收人
+  function loadDevicesLite() {
+    api('/api/devices-lite').then(function (d) {
+      if (d && d.devices) state.deviceList = d.devices;
+    }).catch(function () {});
+  }
+
+  // 选接收人：多选；传 item 则是「改可见范围」，否则是「发送对象」
+  function openTargetPicker(optsArg) {
+    optsArg = optsArg || {};
+    var item = optsArg.item || null;
     var listEl = document.createElement('div');
     listEl.className = 'pick-list';
-    var current = state.toCid;
+    var current = item ? (item.to || []).slice() : state.toCids.slice();
     var handle = null;
 
-    var opts = [{ cid: '', name: '所有人', sub: '同一 Wi-Fi 下的设备都能看到' }];
-    state.peers.forEach(function (p) {
-      if (p.cid === state.cid) return;
-      opts.push({ cid: p.cid, name: p.name, sub: p.ip || '' });
-    });
-    var known = opts.some(function (o) { return o.cid === current; });
-    if (current && !known) {
-      opts.push({ cid: current, name: state.toName || '已选设备', sub: '当前不在线' });
-    }
+    // 设备清单：已授权（含离线）+ 在线，合并去重，剔除自己
+    var devs = {};
+    (state.deviceList || []).forEach(function (d) { if (d.cid && d.cid !== state.cid) devs[d.cid] = d; });
+    (state.peers || []).forEach(function (p) { if (p.cid && p.cid !== state.cid) devs[p.cid] = { cid: p.cid, name: p.name, model: p.model, online: true }; });
 
-    opts.forEach(function (o) {
-      var row = document.createElement('button');
-      row.type = 'button';
-      row.className = 'pick-row' + (o.cid === current ? ' on' : '');
-      row.innerHTML =
-        '<span class="pick-ava" style="background:' + (o.cid ? colorOf(o.name) : '#94a3b8') + '">' +
-        esc(o.cid ? String(o.name).slice(0, 1).toUpperCase() : '全') + '</span>' +
-        '<span class="pick-txt"><span class="pick-name">' + esc(o.name) + '</span>' +
-        (o.sub ? '<span class="pick-sub">' + esc(o.sub) + '</span>' : '') + '</span>' +
-        (o.cid === current ? '<span class="pick-check">' + ICHECK + '</span>' : '');
-      row.onclick = function () {
-        state.toCid = o.cid;
-        state.toName = o.cid ? o.name : '';
-        renderToChip();
-        if (handle) handle.close(true);
-      };
-      listEl.appendChild(row);
+    var rows = [{ cid: '', name: '所有人', sub: '同一 Wi-Fi 下的设备都能看到', online: true }];
+    Object.keys(devs).forEach(function (k) {
+      var d = devs[k];
+      rows.push({ cid: d.cid, name: d.name, sub: (d.model || '') + (d.online ? ' · 在线' : ' · 离线'), online: !!d.online });
     });
+
+    function paint() {
+      listEl.innerHTML = '';
+      rows.forEach(function (o) {
+        var sel = o.cid ? (current.indexOf(o.cid) !== -1) : (current.length === 0);
+        var row = document.createElement('button');
+        row.type = 'button';
+        row.className = 'pick-row' + (sel ? ' on' : '') + (o.cid ? '' : ' all');
+        row.innerHTML =
+          '<span class="pick-ava" style="background:' + (o.cid ? colorOf(o.name) : '#94a3b8') + '">' +
+          esc(o.cid ? String(o.name).slice(0, 1).toUpperCase() : '全') + '</span>' +
+          '<span class="pick-txt"><span class="pick-name">' + esc(o.name) + '</span>' +
+          (o.sub ? '<span class="pick-sub">' + esc(o.sub) + '</span>' : '') + '</span>' +
+          (sel ? '<span class="pick-check">' + ICHECK + '</span>' : '<span class="pick-box"></span>');
+        row.onclick = function () {
+          if (o.cid === '') {
+            current = [];
+          } else {
+            var i = current.indexOf(o.cid);
+            if (i === -1) current.push(o.cid); else current.splice(i, 1);
+          }
+          paint();
+        };
+        listEl.appendChild(row);
+      });
+    }
+    paint();
 
     Dialog.open({
-      title: '发送给谁',
-      desc: '默认全局域网可见；选一台设备就变成私聊，只有你们两台看得到。',
+      title: item ? '修改可见范围' : '发送给谁',
+      desc: item
+        ? '选择哪些设备能看到这条消息（你自己始终可见）。留空 = 所有人可见。'
+        : '默认所有人可见；勾选设备即「指定可见」，只有所选设备能看到。',
       body: listEl,
       onReady: function (h) { handle = h; },
-      actions: [{ label: '取消', value: null }]
-    }).then(renderToChip);
+      actions: [
+        { label: '取消', value: null },
+        { label: item ? '保存' : '完成', value: 'ok', kind: 'primary' }
+      ]
+    }).then(function (v) {
+      if (v === 'ok') {
+        if (item) {
+          applyVisibility(item, current);
+        } else {
+          state.toCids = current.slice();
+          state.toNames = current.map(nameOfCidLocal);
+        }
+      }
+      renderToChip();
+    });
+  }
+
+  // 改已发消息的可见范围（仅发送者或主设备可操作）
+  function applyVisibility(item, cids) {
+    api('/api/item/visibility', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cid: state.cid, id: item.id, to: cids })
+    }).then(function (d) {
+      if (d && d.item) {
+        item.to = d.item.to || [];
+        item.toName = d.item.toName || '';
+      } else {
+        item.to = cids.slice();
+        item.toName = cids.map(nameOfCidLocal).join('、');
+      }
+      render();
+      toast('可见范围已更新');
+    }).catch(function (e) {
+      toast(e.message || '修改失败');
+    });
   }
 
   /* ============================================================ 权限 */
@@ -2292,14 +2362,22 @@
       dbtn.onclick = function () { removeItem(it); };
       acts.appendChild(dbtn);
     }
+    // 仅发送者或主设备能改可见范围
+    if (state.admin || (it.owner && it.owner === state.cid)) {
+      var vbtn = document.createElement('button');
+      vbtn.className = 'icon'; vbtn.innerHTML = IVIS; vbtn.title = '修改可见范围';
+      vbtn.onclick = function (e) { e.stopPropagation(); openTargetPicker({ item: it }); };
+      acts.appendChild(vbtn);
+    }
 
     meta.appendChild(ava); meta.appendChild(who);
-    if (it.to) {
+    if (it.to && it.to.length) {
       var pv = document.createElement('span');
       pv.className = 'pv';
-      var other = (state.me && it.owner === state.cid) ? (it.toName || '对方') : (it.from || '对方');
-      pv.textContent = '私聊';
-      pv.title = '只有你和「' + other + '」能看到';
+      var names = (it.toName || '').split('、').filter(Boolean);
+      var label = names.length ? names.join('、') : '指定设备';
+      pv.textContent = '指定可见';
+      pv.title = '仅你和 ' + label + ' 可见' + (it.owner === state.cid ? '（点击右上角眼睛可改）' : '');
       meta.appendChild(pv);
     }
     if (it.tgAt) {
@@ -2503,7 +2581,7 @@
     var f = view.filter;
     if (f === 'all') return true;
     var parts = it.parts || [];
-    if (f === 'private') return !!it.to;
+    if (f === 'private') return !!(it.to && it.to.length);
     if (f === 'text') return parts.some(function (p) { return p.kind === 'text'; });
     if (f === 'image') return parts.some(isImagePart);
     if (f === 'file') return parts.some(function (p) { return p.kind === 'file' && !isImagePart(p); });
@@ -2710,6 +2788,11 @@
     if (d.limits) state.limits = d.limits;
     if (d.tg) state.tg = d.tg;
     if (d.peers) { state.peers = d.peers; renderPeers(d.peers); }
+    // 授权设备清单拉一次用于选接收人；节流，约每 15s 刷新一次
+    if (d.me && Date.now() - state._dl > 15000) {
+      state._dl = Date.now();
+      loadDevicesLite();
+    }
     applyPermissions();
     renderTg();
     syncWho();
@@ -3191,7 +3274,7 @@
       var r = await api('/api/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cid: state.cid, to: state.toCid, parts: parts })
+        body: JSON.stringify({ cid: state.cid, to: state.toCids, parts: parts })
       });
 
       resetCompose();
@@ -3335,7 +3418,7 @@
       var sent = await api('/api/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cid: state.cid, to: state.toCid, parts: parts })
+        body: JSON.stringify({ cid: state.cid, to: state.toCids, parts: parts })
       });
 
       resetCompose();

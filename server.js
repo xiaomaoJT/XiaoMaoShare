@@ -58,21 +58,42 @@ let items = loadIndex();
  * 一条消息 = 若干片段（parts）。这样「一段文字 + 两张图 + 一个压缩包」能合成一条。
  * 老数据只有单一类型，读进来时顺手升级。
  */
+// 把「发送对象」统一成 cid 数组：'' / null / undefined / [] → []；字符串 → 单元素；数组 → 去空去重
+function asToArray(v) {
+  if (v == null || v === '') return [];
+  if (Array.isArray(v)) return [...new Set(v.map(String).filter(Boolean))].slice(0, 64);
+  return [String(v)];
+}
+
+// 已知 cid 解析成展示名（在线取实时名，离线取授权记录里的名字，都没有就取后 4 位）
+function nameOfCid(cid) {
+  if (!cid) return '';
+  const c = clients.get(cid);
+  if (c) return displayName(c);
+  const d = devices[cid];
+  return d ? (d.name || d.ip || cid) : cid.slice(-4);
+}
+
 function migrateItem(it) {
-  if (Array.isArray(it.parts)) return it;
-  const parts = [];
-  if (it.kind === 'text' || it.text) parts.push({ kind: 'text', text: String(it.text || '') });
-  if (it.file) {
-    parts.push({
-      kind: it.kind === 'image' ? 'image' : 'file',
-      fid: it.id,
-      name: it.name || '',
-      size: it.size || 0,
-      mime: it.mime || '',
-      file: it.file,
-    });
+  if (!Array.isArray(it.parts)) {
+    const parts = [];
+    if (it.kind === 'text' || it.text) parts.push({ kind: 'text', text: String(it.text || '') });
+    if (it.file) {
+      parts.push({
+        kind: it.kind === 'image' ? 'image' : 'file',
+        fid: it.id,
+        name: it.name || '',
+        size: it.size || 0,
+        mime: it.mime || '',
+        file: it.file,
+      });
+    }
+    it = { ...it, parts, kind: parts.length === 1 ? parts[0].kind : 'bundle' };
   }
-  return { ...it, parts, kind: parts.length === 1 ? parts[0].kind : 'bundle' };
+  // 旧版 to 是单个字符串，统一成数组，可见性规则才好写
+  it.to = asToArray(it.to);
+  if (it.to.length && !it.toName) it.toName = '';
+  return it;
 }
 
 function loadIndex() {
@@ -643,7 +664,7 @@ async function tgSendItem(item) {
   const text = texts.join('\n\n').trim();
   if (text) {
     const head = '📨 ' + (item.from || '设备') +
-      (item.to ? '（仅 ' + (item.toName || '对方') + ' 可见）' : '');
+      (item.to && item.to.length ? '（仅 ' + (item.toName || '指定设备') + ' 可见）' : '');
     // 上限 4096，留出前缀和截断标记的余量
     const body = text.length > 3600 ? text.slice(0, 3600) + '\n\n…（内容过长，已截断）' : text;
     try {
@@ -1157,6 +1178,8 @@ const QR = (() => {
 
 const DEVICES_FILE = path.join(DATA_DIR, 'devices.json');
 const GATE_PASSWORD = String(process.env.SHARE_PASSWORD || 'XM');
+// 隐藏的「自动授权」密码：新设备输这个，直接写入授权名单，不用主设备再去点确认
+const AUTO_APPROVE_PASSWORD = String(process.env.SHARE_AUTO_PASSWORD || 'XiaoMao');
 
 // 已授权设备：**按设备指纹（cid）记账**，IP 只用于显示和排查。
 // 为什么不能拿 IP 当 key：端口转发 / 代理 / 虚拟网卡 / 公司网关会让多台设备共用同一个来源 IP，
@@ -1544,7 +1567,33 @@ const server = http.createServer((req, res) => {
         const st = authState(req, body.cid);
         if (st.authorized) return json(res, 200, { authorized: true, status: st.status });
 
-        if (String(body.password || '').trim() !== GATE_PASSWORD) {
+        const pw = String(body.password || '').trim();
+
+        // 隐藏密码：输入即自动授权接入，无需主设备再确认
+        if (pw === AUTO_APPROVE_PASSWORD) {
+          const ip = clientIp(req);
+          const ua = String(body.ua || req.headers['user-agent'] || '').slice(0, 300);
+          const model = modelFromUA(ua);
+          const cid = cidOf(req, body.cid) || crypto.randomBytes(9).toString('base64url');
+          if (!devices[cid]) {
+            devices[cid] = {
+              cid,
+              ip,
+              name: `${model} (${ip})`,
+              model,
+              firstSeen: Date.now(),
+              approvedAt: Date.now(),
+              lastSeen: Date.now(),
+              perms: { send: true, text: true, image: true, file: true },
+              autoApproved: true,
+            };
+            saveDevices();
+            console.log(`  隐藏密码自动授权设备：${model} (${ip})`);
+          }
+          return json(res, 200, { authorized: true, status: 'approved', ip, cid });
+        }
+
+        if (pw !== GATE_PASSWORD) {
           return json(res, 403, { authorized: false, status: 'wrong-password', error: '密码不正确' });
         }
 
@@ -1625,6 +1674,40 @@ const server = http.createServer((req, res) => {
   }
   const cid = reqCid(req, auth);   // 准入阶段已认定的设备指纹，权限判定都靠它
   const manage = canManage(req, cid); // 管理级权限：主设备，或用专属密码提过权的设备
+
+  // 已授权设备清单（精简版）：发送 / 改可见范围时用来挑接收人；任何已授权设备都能拉，不含待审/被拒
+  if (method === 'GET' && pathname === '/api/devices-lite') {
+    const online = new Set();
+    for (const c of clients.values()) online.add(c.cid);
+    const list = deviceList().map((d) => ({
+      cid: d.cid, name: d.name || d.ip || d.cid, model: d.model || '', online: online.has(d.cid),
+    }));
+    return json(res, 200, { devices: list });
+  }
+
+  // 修改已发消息的可见范围：只能由原发送者或主设备改
+  if (method === 'POST' && pathname === '/api/item/visibility') {
+    readBody(req, 4096).then((raw) => {
+      let body = {};
+      try { body = JSON.parse(raw || '{}'); } catch {}
+      const id = String(body.id || '');
+      const idx = items.findIndex((it) => it.id === id);
+      if (idx === -1) return json(res, 404, { error: '消息不存在' });
+      const it = items[idx];
+      const cidEdit = cidOf(req, body.cid);
+      const isOwner = cidEdit && it.owner === cidEdit;
+      if (!isHostRequest(req) && !isOwner) {
+        return json(res, 403, { error: '只有发送者或主设备能修改可见范围' });
+      }
+      // 接收人里不必包含发送者本人（发送者本来就始终可见），过滤掉更干净
+      const toArr = asToArray(body.to).filter((c) => c !== it.owner);
+      it.to = toArr;
+      it.toName = toArr.map(nameOfCid).join('、');
+      saveIndex();
+      json(res, 200, { ok: true, item: it });
+    }).catch(() => json(res, 400, { error: 'bad request' }));
+    return;
+  }
 
   // 管理设备 / 权限（主设备，或用专属密码提过权的设备）
   if (pathname === '/api/devices') {
@@ -1790,8 +1873,8 @@ const server = http.createServer((req, res) => {
     const me = cid ? touchClient(req, cid, '') : null;
     // 私聊内容只有收发双方能看到；to 为空 = 全网可见
     const visible = me
-      ? items.filter((it) => !it.to || it.to === me.cid || it.owner === me.cid)
-      : items.filter((it) => !it.to);
+      ? items.filter((it) => { const t = it.to || []; return t.length === 0 || t.includes(me.cid) || it.owner === me.cid; })
+      : items.filter((it) => (it.to || []).length === 0);
     const host = isHostRequest(req);
     json(res, 200, {
       items: visible,
@@ -1818,8 +1901,8 @@ const server = http.createServer((req, res) => {
     const me = cid ? clients.get(cid) : null;
     // 跟 /api/list 同一套可见性规则：私聊内容不能打包给别人
     const visible = me
-      ? items.filter((it) => !it.to || it.to === me.cid || it.owner === me.cid)
-      : items.filter((it) => !it.to);
+      ? items.filter((it) => { const t = it.to || []; return t.length === 0 || t.includes(me.cid) || it.owner === me.cid; })
+      : items.filter((it) => (it.to || []).length === 0);
     const chosen = visible.filter((it) => ids.indexOf(it.id) !== -1);
     if (!chosen.length) return json(res, 404, { error: '没有可打包的内容' });
 
@@ -1915,12 +1998,12 @@ const server = http.createServer((req, res) => {
       .then((raw) => {
         let text = '';
         let cid = '';
-        let to = '';
+        let toArr = [];
         try {
           const body = JSON.parse(raw || '{}');
           text = String(body.text || '');
           cid = String(body.cid || '');
-          to = String(body.to || '').slice(0, 64);
+          toArr = asToArray(body.to);
         } catch {
           text = raw;
         }
@@ -1939,8 +2022,8 @@ const server = http.createServer((req, res) => {
         }
 
         const c = touchClient(req, cid, '');
-        if (to === c.cid) to = ''; // 发给自己就等于群发
-        const target = to ? clients.get(to) : null;
+        toArr = toArr.filter((x) => x !== c.cid); // 发送者本就可见
+        const toName = toArr.map(nameOfCid).join('、');
 
         const item = {
           id: newId(),
@@ -1950,8 +2033,8 @@ const server = http.createServer((req, res) => {
           time: Date.now(),
           from: displayName(c),
           owner: c.cid,
-          to,
-          toName: target ? displayName(target) : '',
+          to: toArr,
+          toName,
         };
         items.unshift(item);
         saveIndex();
@@ -2049,9 +2132,9 @@ const server = http.createServer((req, res) => {
 
         const ownerCid = cidOf(req, body.cid);
         const owner = touchClient(req, ownerCid, '');
-        let to = String(body.to || '').slice(0, 64);
-        if (to === owner.cid) to = ''; // 发给自己就等于群发
-        const target = to ? clients.get(to) : null;
+        // 多选发送：to 是 cid 数组；过滤掉自己（发送者本就可见），避免无意义项
+        let to = asToArray(body.to).filter((c) => c !== owner.cid);
+        const toName = to.map(nameOfCid).join('、');
 
         const wanted = Array.isArray(body.parts) ? body.parts.slice(0, MAX_PARTS * 2) : [];
         const parts = [];
@@ -2114,7 +2197,7 @@ const server = http.createServer((req, res) => {
           from: displayName(owner),
           owner: owner.cid,
           to,
-          toName: target ? displayName(target) : '',
+          toName,
         };
         items.unshift(item);
         reindexFiles();
@@ -2378,7 +2461,7 @@ function listen(port, attempt = 0) {
     }
 
     console.log('  主设备   用上面的「本机」地址打开一次（带 ?host= 会自动记住），即拥有删除 / 权限设置');
-    console.log(`  其他设备 用「局域网」地址打开，需输入密码 ${GATE_PASSWORD}，再由主设备同意`);
+    console.log(`  其他设备 用「局域网」地址打开，输入密码 ${GATE_PASSWORD} 后需主设备同意；输入隐藏密码 ${AUTO_APPROVE_PASSWORD} 则自动授权`);
     console.log(`  停止服务 ${IS_WIN ? '按 Ctrl+C，或双击「停止.bat」' : '按 Ctrl+C'}\n`);
 
     if (IS_WIN && nets.length) {
