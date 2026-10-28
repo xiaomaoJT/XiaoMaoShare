@@ -600,6 +600,18 @@
   .icon.del:hover{color:var(--danger)}
   .icon svg{width:15px;height:15px;display:block}
 
+  /* 保留开关：常驻可见 —— 这是「别删我的」的开关，藏起来就没人找得到；已保留时点亮 */
+  .keepbtn{
+    width:20px;height:20px;margin-left:5px;padding:0;border:0;border-radius:6px;
+    display:grid;place-items:center;background:transparent;color:var(--faint);
+    cursor:pointer;opacity:.45;transition:.15s;flex:none;
+  }
+  .keepbtn svg{width:13px;height:13px;display:block}
+  .keepbtn:hover{opacity:1;background:var(--card-2);color:var(--text)}
+  .keepbtn.on{opacity:1;color:var(--accent)}
+  .keepbtn.on svg{fill:currentColor;fill-opacity:.16}
+  .keepbtn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+
   .text-body{font-size:calc(14.5px * var(--tfs));line-height:1.62;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere}
   .text-body.clamp{
     max-height:10.6em;overflow:hidden;
@@ -683,6 +695,91 @@
   }
   .dl:hover{background:var(--accent);border-color:var(--accent);color:#fff}
   .dl svg{width:13px;height:13px;flex:none}
+
+  /* 文件行：能在线看的文件多一个「预览」，和「下载」并排靠右 */
+  .pv{
+    flex:none;height:32px;padding:0 12px;border-radius:9px;white-space:nowrap;margin-left:auto;
+    background:var(--accent-soft);border:1px solid transparent;color:var(--accent);
+    font-size:12.5px;font-weight:600;display:inline-flex;align-items:center;gap:5px;
+    cursor:pointer;transition:.15s;
+  }
+  .pv:hover{background:var(--accent);color:#fff}
+  .pv svg{width:13px;height:13px;flex:none}
+  .pv + .dl{margin-left:0}
+
+  /* ---- 文件预览弹层（文本类在内嵌面板里看，媒体类交给浏览器） ---- */
+  .fpv{
+    position:fixed;inset:0;z-index:180;display:none;padding:20px;
+    background:rgba(16,24,40,.44);
+  }
+  .fpv.on{display:flex;align-items:center;justify-content:center}
+  .fpv-box{
+    width:100%;max-width:880px;max-height:calc(100vh - 40px);
+    display:flex;flex-direction:column;overflow:hidden;
+    background:var(--card);border:1px solid var(--line);border-radius:18px;
+    box-shadow:0 30px 80px -40px rgba(16,24,40,.7);
+  }
+  .fpv-head{
+    display:flex;align-items:center;gap:12px;padding:13px 16px;
+    border-bottom:1px solid var(--line);flex:none;
+  }
+  .fpv-meta{min-width:0;flex:1}
+  .fpv-ttl{font-size:14.5px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .fpv-sub{font-size:12px;color:var(--faint);margin-top:3px}
+  .fpv-acts{display:flex;align-items:center;gap:8px;flex:none}
+  .fpv-dl{
+    height:32px;padding:0 12px;border-radius:9px;white-space:nowrap;text-decoration:none;
+    background:var(--card-2);border:1px solid var(--line);color:var(--sub);
+    font-size:12.5px;font-weight:600;display:inline-flex;align-items:center;gap:5px;transition:.15s;
+  }
+  .fpv-dl:hover{background:var(--accent);border-color:var(--accent);color:#fff}
+  .fpv-dl svg{width:13px;height:13px;flex:none}
+  .fpv-x{
+    width:32px;height:32px;border-radius:9px;border:1px solid var(--line);background:var(--card-2);
+    color:var(--sub);font-size:13px;cursor:pointer;display:grid;place-items:center;transition:.15s;
+  }
+  .fpv-x:hover{background:var(--card);color:var(--text)}
+  .fpv-body{flex:1;min-height:0;overflow:auto;background:var(--card)}
+  .fpv-scroll{overflow:auto;max-height:100%;padding:14px 16px}
+  .fpv-pre{
+    margin:0;white-space:pre;tab-size:2;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:12.5px;line-height:1.66;color:var(--text);
+  }
+  .fpv-load{display:grid;place-items:center;padding:56px 0}
+  .fpv-err{font-size:13.5px;font-weight:600;color:var(--danger)}
+  .fpv-errtip{margin-top:8px;font-size:12.5px;line-height:1.7;color:var(--faint)}
+  .fpv-more{margin-top:10px;font-size:12px;color:var(--faint)}
+  .fpv-table{border-collapse:collapse;font-size:12.5px;white-space:nowrap}
+  .fpv-table th,.fpv-table td{border:1px solid var(--line);padding:6px 10px;text-align:left}
+  .fpv-table th{background:var(--card-2);font-weight:650;position:sticky;top:0;z-index:1}
+  .fpv-table tbody tr:nth-child(even){background:var(--line-soft)}
+
+  /* Markdown 文件预览：mdToHtml 出的是裸标签，这里给它一套排版 */
+  .fpv-md{padding:16px 20px 24px;font-size:calc(13.6px * var(--tfs));line-height:1.75}
+  .fpv-md > :first-child{margin-top:0}
+  .fpv-md h1,.fpv-md h2,.fpv-md h3,.fpv-md h4{margin:1.3em 0 .55em;line-height:1.35;font-weight:700}
+  .fpv-md h1{font-size:1.5em;padding-bottom:.3em;border-bottom:1px solid var(--line)}
+  .fpv-md h2{font-size:1.28em;padding-bottom:.26em;border-bottom:1px solid var(--line-soft)}
+  .fpv-md h3{font-size:1.12em}
+  .fpv-md h4{font-size:1em}
+  .fpv-md p{margin:.7em 0}
+  .fpv-md ul,.fpv-md ol{margin:.7em 0;padding-left:1.5em}
+  .fpv-md li{margin:.25em 0}
+  .fpv-md a{color:var(--accent)}
+  .fpv-md hr{border:0;border-top:1px solid var(--line);margin:1.4em 0}
+  .fpv-md blockquote{
+    margin:.9em 0;padding:.1em 0 .1em 1em;border-left:3px solid var(--line);color:var(--sub);
+  }
+  .fpv-md code{
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.92em;
+    background:var(--card-2);border-radius:5px;padding:.12em .38em;
+  }
+  .fpv-md pre{background:var(--card-2);border-radius:10px;padding:12px 14px;overflow:auto;margin:.9em 0}
+  .fpv-md pre code{background:none;padding:0;font-size:12.5px;line-height:1.65}
+  .fpv-md table{border-collapse:collapse;margin:.9em 0;font-size:.94em}
+  .fpv-md th,.fpv-md td{border:1px solid var(--line);padding:6px 10px}
+  .fpv-md th{background:var(--card-2);font-weight:650}
 
   .empty{text-align:center;padding:48px 20px;color:var(--faint)}
   .empty .logo{
@@ -1304,15 +1401,14 @@
   .note-del.armed{opacity:1;background:rgba(214,69,56,.12);color:var(--danger)}
   .note-del:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
   @media (hover:none){ .note-del{opacity:.55} }
-  /* 补充的复制 / 引用按钮：和删除并列在行尾。
-     复制/引用是正向操作，默认就露出来（.5），悬停整行再提亮；
-     删除是破坏性操作，仍然默认藏起来，两者有意区分。 */
+  /* 补充的复制 / 引用按钮：和删除并列在行尾，平时不显形，鼠标移到这一行（或键盘聚焦）才浮出来。
+     触屏没有 hover，所以只在 hover:none 的设备上常显淡色，否则永远点不到。 */
   .note-acts{display:flex;gap:1px;flex:0 0 auto;margin-top:1px}
   .note-btn{
     width:22px;height:22px;padding:0;line-height:0;border:0;border-radius:7px;
     display:flex;align-items:center;justify-content:center;
     background:transparent;color:var(--sub);cursor:pointer;
-    opacity:.55;transition:opacity .12s, background .12s, color .12s;
+    opacity:0;transition:opacity .12s, background .12s, color .12s;
   }
   .note-btn svg{width:12px;height:12px;display:block}
   .note-row:hover .note-btn,
@@ -2411,6 +2507,8 @@
   var IVIS = svgIcon('<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>', 1.8);
   var IEDIT = svgIcon('<path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/><path d="M14.5 5.5l3 3"/>', 1.8);
   var IQUOTE = svgIcon('<path d="M8 7c-2 0-3.5 1.6-3.5 3.6V14H8v-3H6.5v-1c0-.9.7-1.5 1.5-1.5V7zm8 0c-2 0-3.5 1.6-3.5 3.6V14H16v-3h-1.5v-1c0-.9.7-1.5 1.5-1.5V7z"/>', 1.8);
+  // 保留：一枚图钉。点了就被排除在自动清理之外，所以图标常驻、不随 hover 藏
+  var IPIN = svgIcon('<path d="M12 17v4"/><path d="M5 16h14v-1.2a2 2 0 0 0-1.1-1.8l-1.6-.8A2 2 0 0 1 15 10.4V7h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v3.4a2 2 0 0 1-1.1 1.8l-1.6.8A2 2 0 0 0 5 14.8Z"/>', 1.7);
   var ISHIELD = svgIcon('<path d="M12 3l7 3v5.4c0 4.2-2.9 7.6-7 8.6-4.1-1-7-4.4-7-8.6V6l7-3z"/><path d="M9.4 12.1l1.9 1.9 3.3-3.3"/>', 1.9);
   var ISHIELD_OPEN = svgIcon('<path d="M12 3l7 3v5.4c0 4.2-2.9 7.6-7 8.6-4.1-1-7-4.4-7-8.6V6l7-3z"/>', 1.9);
   var IDEV = svgIcon('<rect x="2" y="5" width="14" height="10" rx="2"/><path d="M6 19h6M11 15v1"/><path d="M18 9h2v6"/>', 1.8);
@@ -2779,7 +2877,7 @@
     /* 输入密码 */
     function form(errMsg) {
       stopPoll();
-      var desc = '这是同一 Wi-Fi 下的互传服务。输入接入密码后，还要等主设备同意。';
+      var desc = '这是同一 Wi-Fi 下的互传服务。输入接入密码后，还要等主设备同意；已经有账户的，直接用账户名和密码登录就能进。';
       if (info && isLoopIp(info.ip)) {
         desc += '如果你就是运行服务这台电脑，改用启动窗口里带 ?host= 的地址（或 localhost）打开就能直接管理。';
       }
@@ -2808,6 +2906,15 @@
       wrap.appendChild(btn);
       wrap.appendChild(err);
       bodyEl.appendChild(wrap);
+
+      // 有账户的人不该被卡在这层：账户密码本身就是更强的凭据，输了直接进，不用等主设备同意
+      var toLogin = document.createElement('button');
+      toLogin.type = 'button';
+      toLogin.className = 'gate-link';
+      toLogin.textContent = '已有账户？用账户名和密码登录';
+      toLogin.onclick = function () { loginForm('', { mode: 'admit' }); };
+      bodyEl.appendChild(toLogin);
+
       setTimeout(function () { try { inp.focus(); } catch (e) {} }, 80);
 
       function submit() {
@@ -2847,6 +2954,14 @@
       again.onclick = function () { form(); };
       bodyEl.appendChild(again);
 
+      // 有账户的人不必等审批：账户密码本身就够了
+      var toLogin = document.createElement('button');
+      toLogin.type = 'button';
+      toLogin.className = 'gate-link';
+      toLogin.textContent = '已有账户？用账户名和密码登录';
+      toLogin.onclick = function () { loginForm('', { mode: 'admit' }); };
+      bodyEl.appendChild(toLogin);
+
       stopPoll();
       timer = setInterval(function () {
         api('/api/hello', {
@@ -2873,6 +2988,13 @@
       btn.onclick = function () { form(); };
       wrap.appendChild(btn);
       bodyEl.appendChild(wrap);
+
+      var toLogin = document.createElement('button');
+      toLogin.type = 'button';
+      toLogin.className = 'gate-link';
+      toLogin.textContent = '已有账户？用账户名和密码登录';
+      toLogin.onclick = function () { loginForm('', { mode: 'admit' }); };
+      bodyEl.appendChild(toLogin);
     }
 
     function pass(d) {
@@ -2881,16 +3003,24 @@
       if (onPass) onPass(d);
     }
 
-    /* ---------------- 账户登录（设备已过许可；登录是可选的「跨设备身份」） ---------------- */
-    function loginForm(errMsg) {
+    /* ---------------- 账户登录 ----------------
+       两种入口：① 还没过接入许可（mode=admit）—— 登录本身就当准入，直接进；
+                ② 已过许可、想认个人（mode=switch）—— 登录只是加的跨设备身份，可跳过。 */
+    function loginForm(errMsg, opt) {
       stopPoll();
-      shell('登录账户',
-        '已通过接入许可就能直接使用。想以某个账户身份发言（跨设备同一个人）时，输入账户名和密码登录；不登录也不影响使用。');
-      drawLogin(errMsg);
+      var admit = !!(opt && opt.mode === 'admit');
+      if (admit) {
+        shell('登录账户', '用账户名和密码进来，不用再输接入密码、也不用等主设备同意。');
+      } else {
+        shell('登录账户',
+          '已通过接入许可就能直接使用。想以某个账户身份发言（跨设备同一个人）时，输入账户名和密码登录；不登录也不影响使用。');
+      }
+      drawLogin(errMsg, { mode: admit ? 'admit' : 'switch' });
     }
 
     // 不再列出所有账户（那等于公开了有哪些人）：直接输「账户名 + 密码」。
-    function drawLogin(errMsg) {
+    function drawLogin(errMsg, opt) {
+      var admit = !!(opt && opt.mode === 'admit');
       bodyEl.innerHTML = '';
       var pwd, btn;
 
@@ -2929,20 +3059,28 @@
 
       var tip = document.createElement('div');
       tip.className = 'gate-meta';
-      tip.innerHTML = '没有账户？让主控在「设置 → 账户」里加一个。不登录也能用，只是发言会以这台设备的名义。';
+      tip.innerHTML = admit
+        ? '没有账户？让主控在「设置 → 账户」里加一个。'
+        : '没有账户？让主控在「设置 → 账户」里加一个。不登录也能用，只是发言会以这台设备的名义。';
       bodyEl.appendChild(tip);
 
-      // 登录是可选的：留一个出口，别把不想登录的人关在这儿
       var skip = document.createElement('button');
       skip.type = 'button';
       skip.className = 'gate-link';
-      skip.textContent = '暂不登录，继续使用';
-      skip.onclick = function () {
-        stopPoll();
-        el.classList.remove('on');
-        poll(true);
-        startPolling();
-      };
+      if (admit) {
+        // 还没过准入：这时关掉闸门就是白屏（所有接口都会 401），只能把人引回接入密码那条路
+        skip.textContent = '改用接入密码申请接入';
+        skip.onclick = function () { form(); };
+      } else {
+        // 已过准入：登录是可选的，留个出口，别把不想登录的人关在这儿
+        skip.textContent = '暂不登录，继续使用';
+        skip.onclick = function () {
+          stopPoll();
+          el.classList.remove('on');
+          poll(true);
+          startPolling();
+        };
+      }
       bodyEl.appendChild(skip);
 
       setTimeout(function () { try { (nameInp.value ? pwd : nameInp).focus(); } catch (e) {} }, 90);
@@ -2961,7 +3099,8 @@
           body: JSON.stringify({ cid: state.cid, name: nm, password: v })
         }).then(function (d) {
           adoptIdentity(d);
-          toast('已登录为「' + ((d.acc && d.acc.name) || '') + '」');
+          var who = (d.acc && d.acc.name) || '';
+          toast(d.admitted ? '已用账户「' + who + '」接入' : '已登录为「' + who + '」');
           pass(d);
         }).catch(function (e) {
           btn.disabled = false;
@@ -3426,6 +3565,186 @@
   }
 
   /* ============================================================ 文件行（卡片与编辑态共用） */
+  /* ============================================================ 文件在线预览
+     图片 / 视频 / 音频 / PDF 交给浏览器自己渲染（/f/ 是 inline 的）；
+     文本类（md / json / csv / 代码…）由 /api/file/text 取出文字，在弹层里渲染。
+     Office 文档、压缩包浏览器解不出来，只给下载 —— 说清楚比放个假预览好。 */
+  var TEXT_FILE_RE = /\.(txt|md|markdown|text|log|csv|tsv|json|jsonc|ya?ml|xml|html?|css|scss|less|m?js|cjs|ts|jsx|tsx|vue|py|go|rs|java|kt|swift|c|cc|cpp|h|hpp|cs|sh|bash|zsh|fish|bat|ps1|sql|ini|conf|cfg|env|toml|gitignore|dockerfile|makefile|patch|diff)$/i;
+
+  /** 这个附件能不能在线看：返回 ''（不能）/ 'text'（内置面板）/ 'browser'（丢给浏览器） */
+  function filePreviewKind(p) {
+    if (!p || !p.fid) return '';
+    var mime = String(p.type || p.mime || '');
+    var nm = String(p.name || '');
+    if (/^image\//i.test(mime)) return '';                                   // 图片走缩略图 + 灯箱
+    if (/^application\/pdf/i.test(mime) || /\.pdf$/i.test(nm)) return 'browser';
+    if (/^(video|audio)\//i.test(mime)) return 'browser';
+    if (/^text\//i.test(mime) || TEXT_FILE_RE.test(nm)) return 'text';
+    // 只认明确的文本型 mime。别写 /xml/ 这种模糊匹配 —— docx 的 mime 里带 "openxmlformats"，会被误判
+    if (/^application\/(json|ld\+json|xml|x-yaml|yaml|x-sh|x-shellscript|javascript|ecmascript|x-httpd-php|x-python|x-ruby|sql)\b/i.test(mime)) return 'text';
+    return '';
+  }
+
+  var fpvEl = null, fpvCur = null;
+
+  function fpvBuild() {
+    var el = document.createElement('div');
+    el.className = 'fpv';
+    el.innerHTML =
+      '<div class="fpv-box" role="dialog" aria-modal="true">' +
+        '<div class="fpv-head">' +
+          '<div class="fpv-meta"><div class="fpv-ttl"></div><div class="fpv-sub"></div></div>' +
+          '<div class="fpv-acts">' +
+            '<a class="fpv-dl" download>' + IDL + '<span>下载</span></a>' +
+            '<button type="button" class="fpv-x" aria-label="关闭预览">✕</button>' +
+          '</div>' +
+        '</div>' +
+        '<div class="fpv-body"></div>' +
+      '</div>';
+    el.addEventListener('click', function (e) { if (e.target === el) fpvClose(); });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && el.classList.contains('on')) fpvClose();
+    });
+    el.querySelector('.fpv-x').onclick = fpvClose;
+    document.body.appendChild(el);
+    fpvEl = el;
+    return el;
+  }
+
+  function fpvClose() {
+    if (!fpvEl) return;
+    fpvEl.classList.remove('on');
+    fpvCur = null;
+  }
+
+  /** CSV / TSV：按行切，能还原成表格就不当纯文本看 */
+  function csvToTable(text, sep) {
+    var rows = text.replace(/\r\n?/g, '\n').split('\n').filter(function (l) { return l.length; });
+    var head = rows[0] || '';
+    if (head.indexOf(sep) === -1) return null;
+    var MAXR = 300, MAXC = 30;
+    function cells(line) {
+      var out = [], cur = '', q = false;
+      for (var i = 0; i < line.length; i++) {
+        var ch = line[i];
+        if (q) {
+          if (ch === '"' && line[i + 1] === '"') { cur += '"'; i++; }
+          else if (ch === '"') q = false;
+          else cur += ch;
+        } else if (ch === '"') q = true;
+        else if (ch === sep) { out.push(cur); cur = ''; }
+        else cur += ch;
+      }
+      out.push(cur);
+      return out.slice(0, MAXC);
+    }
+    var t = document.createElement('table');
+    t.className = 'fpv-table';
+    var thead = document.createElement('thead');
+    var htr = document.createElement('tr');
+    cells(head).forEach(function (c) {
+      var th = document.createElement('th');
+      th.textContent = c;
+      htr.appendChild(th);
+    });
+    thead.appendChild(htr);
+    t.appendChild(thead);
+    var tb = document.createElement('tbody');
+    rows.slice(1, MAXR + 1).forEach(function (line) {
+      var tr = document.createElement('tr');
+      cells(line).forEach(function (c) {
+        var td = document.createElement('td');
+        td.textContent = c;
+        tr.appendChild(td);
+      });
+      tb.appendChild(tr);
+    });
+    t.appendChild(tb);
+    var wrap = document.createElement('div');
+    wrap.className = 'fpv-scroll';
+    wrap.appendChild(t);
+    if (rows.length > MAXR + 1) {
+      var more = document.createElement('div');
+      more.className = 'fpv-more';
+      more.textContent = '只显示前 ' + MAXR + ' 行，共 ' + (rows.length - 1) + ' 行。完整内容请下载。';
+      wrap.appendChild(more);
+    }
+    return wrap;
+  }
+
+  function fpvRender(p, d) {
+    var body = fpvEl.querySelector('.fpv-body');
+    body.innerHTML = '';
+    var ext = String(d.ext || '').toLowerCase();
+    var text = String(d.text || '');
+
+    // Markdown：直接吃消息卡片那套渲染器，看得见标题、列表、代码块
+    if (ext === 'md' || ext === 'markdown') {
+      var art = document.createElement('div');
+      art.className = 'fpv-md md';
+      art.innerHTML = mdToHtml(text);
+      body.appendChild(art);
+      return;
+    }
+    // CSV / TSV：表格比一屏逗号好读
+    if (ext === 'csv' || ext === 'tsv') {
+      var tb = csvToTable(text, ext === 'tsv' ? '\t' : ',');
+      if (tb) { body.appendChild(tb); return; }
+    }
+    // JSON：格式化后再显示，能解析失败就按原文
+    if (ext === 'json' || ext === 'jsonc') {
+      try { text = JSON.stringify(JSON.parse(text), null, 2); } catch (e) { /* 原样显示 */ }
+    }
+    var pre = document.createElement('pre');
+    pre.className = 'fpv-pre';
+    pre.textContent = text;
+    var wrap = document.createElement('div');
+    wrap.className = 'fpv-scroll';
+    wrap.appendChild(pre);
+    body.appendChild(wrap);
+  }
+
+  function openFilePreview(p) {
+    var kind = filePreviewKind(p);
+    if (kind === 'browser') {
+      window.open('/f/' + p.fid + '?cid=' + encodeURIComponent(state.cid), '_blank');
+      return;
+    }
+    if (!kind) { toast('这类文件浏览器打不开，下载后查看'); return; }
+
+    if (!fpvEl) fpvBuild();
+    var el = fpvEl;
+    el.querySelector('.fpv-ttl').textContent = p.name || '文件';
+    el.querySelector('.fpv-sub').textContent = fmtSize(p.size) + ' · 读取中…';
+    var dl = el.querySelector('.fpv-dl');
+    dl.href = '/f/' + p.fid + '?dl=1&cid=' + encodeURIComponent(state.cid);
+    dl.setAttribute('download', p.name || 'file');
+    var body = el.querySelector('.fpv-body');
+    body.innerHTML = '<div class="fpv-load"><div class="spin"></div></div>';
+    el.classList.add('on');
+    fpvCur = p.fid;
+
+    api('/api/file/text?id=' + encodeURIComponent(p.fid) + '&cid=' + encodeURIComponent(state.cid))
+      .then(function (d) {
+        if (fpvCur !== p.fid) return;                 // 已经关掉或换了文件
+        el.querySelector('.fpv-sub').textContent = fmtSize(d.size || p.size);
+        fpvRender(p, d);
+      })
+      .catch(function (e) {
+        if (fpvCur !== p.fid) return;
+        el.querySelector('.fpv-sub').textContent = fmtSize(p.size);
+        body.innerHTML = '';
+        var box = document.createElement('div');
+        box.className = 'fpv-err';
+        box.textContent = (e && e.message) || '预览失败';
+        var tip = document.createElement('div');
+        tip.className = 'fpv-errtip';
+        tip.textContent = '这条文件没法在页面里展开，点右上角「下载」用本地应用打开。';
+        body.appendChild(box);
+        body.appendChild(tip);
+      });
+  }
+
   function fileRow(it, p) {
     var row = document.createElement('div');
     row.className = 'file';
@@ -3469,6 +3788,17 @@
     dl.onclick = function () { markRead(it); };   // 下载即算读过
     row.appendChild(fico);
     row.appendChild(info);
+    // 能在线看的给一个「预览」：文本类进弹出面板，PDF / 视频 / 音频交给浏览器
+    var pkind = filePreviewKind(p);
+    if (pkind) {
+      var pvbtn = document.createElement('button');
+      pvbtn.type = 'button';
+      pvbtn.className = 'pv';
+      pvbtn.innerHTML = IVIS + '<span>预览</span>';
+      pvbtn.title = pkind === 'text' ? '在线查看内容' : '用浏览器打开';
+      pvbtn.onclick = function (e) { e.stopPropagation(); markRead(it); openFilePreview(p); };
+      row.appendChild(pvbtn);
+    }
     row.appendChild(dl);
     return row;
   }
@@ -3571,7 +3901,16 @@
     // 已读回执：含发送者本人，按设备去重；主设备 / 提权设备可点击查看是谁
     var rpill = buildReadPill(it);
     if (rpill) meta.appendChild(rpill);
-    meta.appendChild(time); meta.appendChild(acts);
+    // 保留开关：常驻显示（不跟其他操作一起藏起来），点了这条就排除在自动清理之外
+    var kbtn = document.createElement('button');
+    kbtn.type = 'button';
+    kbtn.className = 'keepbtn' + (it.keep ? ' on' : '');
+    kbtn.innerHTML = IPIN;
+    kbtn.title = it.keep ? '已保留：不会被自动清理（点一下取消）' : '保留这条消息，不让自动清理删掉';
+    kbtn.setAttribute('aria-pressed', it.keep ? 'true' : 'false');
+    kbtn.onclick = function (e) { e.stopPropagation(); toggleKeep(it, kbtn); };
+
+    meta.appendChild(time); meta.appendChild(kbtn); meta.appendChild(acts);
     el.appendChild(meta);
     // 内容区（文字 / 图片 / 文件 / 收起说明）抽成 buildBody，便于编辑后增量重建
     buildBody(el, it);
@@ -4657,6 +4996,34 @@
       await api('/api/item?id=' + encodeURIComponent(it.id) + '&cid=' + encodeURIComponent(state.cid), { method: 'DELETE' });
       poll(true);
     } catch (e) { toast(e.message || '删除失败'); }
+  }
+
+  /* 保留 / 取消保留：被保留的消息连同它的补充说明都不再参与自动清理 */
+  function toggleKeep(it, btn) {
+    if (btn && btn.disabled) return;
+    var want = !it.keep;
+    if (btn) btn.disabled = true;
+    api('/api/item/keep', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cid: state.cid, id: it.id, keep: want })
+    }).then(function (d) {
+      it.keep = !!d.keep;
+      // allItems 里是同一条记录，顺手同步，免得下次轮询按 id 比对时把状态抹掉
+      for (var i = 0; i < allItems.length; i++) {
+        if (allItems[i].id === it.id) allItems[i].keep = it.keep;
+      }
+      if (btn) {
+        btn.classList.toggle('on', it.keep);
+        btn.setAttribute('aria-pressed', it.keep ? 'true' : 'false');
+        btn.title = it.keep ? '已保留：不会被自动清理（点一下取消）' : '保留这条消息，不让自动清理删掉';
+      }
+      toast(it.keep ? '已保留，不会被自动清理' : '已取消保留');
+    }).catch(function (e) {
+      toast(e.message || '操作失败');
+    }).then(function () {
+      if (btn) btn.disabled = false;
+    });
   }
 
   /* ---------------- 筛选 / 分页 ---------------- */
@@ -6919,7 +7286,7 @@
 
     var ktip = document.createElement('div');
     ktip.className = 'dev-hint';
-    ktip.textContent = '超过这个时间的内容会在启动时、之后每 6 小时自动清掉，文件一并删除。选「不清理」就一直留着。';
+    ktip.textContent = '超过这个时间的内容会在启动时、之后每 6 小时自动清掉，文件一并删除。标了「保留」的消息不受影响；选「不清理」就一直留着。';
     keepBox.appendChild(ktip);
     box.appendChild(keepBox);
 

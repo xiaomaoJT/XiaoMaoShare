@@ -240,18 +240,19 @@ function fmtBytes(n) {
 /**
  * 互传的内容大多是「传完就走」，攒久了既占磁盘又难翻。
  * 设了保留天数就定期把过期内容连同文件一起清掉（文件有人共用就先留着）。
+ * 手动标了「保留」（it.keep）的不动 —— 那是用户点名要留的东西，主动删除外。
  */
 function sweepExpired() {
   const days = Number(settings.keepDays) || 0;
   if (days <= 0) return 0;
   const cutoff = Date.now() - days * 864e5;
-  const gone = items.filter((it) => Number(it.time || 0) < cutoff);
+  const gone = items.filter((it) => !it.keep && Number(it.time || 0) < cutoff);
   if (!gone.length) return 0;
 
   let bytes = 0;
   for (const it of gone) for (const p of allPartsOf(it)) bytes += Number(p.size) || 0;
 
-  items = items.filter((it) => Number(it.time || 0) >= cutoff);
+  items = items.filter((it) => it.keep || Number(it.time || 0) >= cutoff);
   reindexFiles();                              // 先重索引，引用计数才数得准
   for (const it of gone) unlinkParts(allPartsOf(it));
   saveIndex();
@@ -1974,6 +1975,93 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  /* ---------------- 账户登录：它本身也是一种准入方式 ---------------- */
+  /**
+   * 账户名 + 密码既是「我是谁」，也是「凭什么进来」，所以这个接口排在准入闸门【之前】：
+   * 设备被主设备移出授权、或者换了台新设备时，拿着账户密码就能直接进来，
+   * 不必再去问接入密码、也不用等主设备点同意。
+   * 凭据强度也支持这么排：接入密码是全场共用的一句口令（默认还是 XM），
+   * 账户密码是主控单独发给某个人的，谁该进来本来就由账户决定。
+   * 放开这道口子后 /api/login 成了唯一的爆破面，所以下面全程共用 IP 限流（连错 6 次锁 10 分钟）。
+   */
+  if (method === 'POST' && pathname === '/api/login') {
+    const ip = clientIp(req);
+    if (loginBlocked(ip)) return json(res, 429, { error: '密码错太多次了，过 10 分钟再试' });
+    readBody(req, 4096)
+      .then((raw) => {
+        let body = {};
+        try { body = JSON.parse(raw || '{}'); } catch { /* 空 body */ }
+        const cidHere = cidOf(req, body.cid);
+        if (!cidHere) return json(res, 400, { error: '缺少设备指纹，刷新页面再试' });
+        const accId = String(body.acc || '').slice(0, 64);
+        const nmIn = String(body.name || '').trim().replace(/\s+/g, ' ').slice(0, 24);
+        let a = accounts[accId] || null;
+        // 按「账户名 + 密码」登录（前端不再列账户让人选）；也兼容旧的 accId 方式
+        if (!a && nmIn) {
+          a = Object.values(accounts).find((x) => x && !x.disabled && x.name === nmIn) || null;
+        }
+        if (!a) {
+          // 不区分「账户不存在」和「密码错」，免得被拿来枚举有哪些账户
+          loginFail(ip);
+          return json(res, 403, { error: '账户名或密码不正确' });
+        }
+        if (a.disabled) return json(res, 403, { error: '这个账户已被主控停用' });
+        // 没设密码的账户不放行：否则谁都能顶着「主控」的名义进来
+        if (!a.hash) {
+          return json(res, 403, {
+            error: a.role === 'owner'
+              ? '主控账户还没设密码，暂时只能在主控设备上使用'
+              : '这个账户还没设密码，请让主控在「设置 → 账户」里设一个',
+          });
+        }
+        if (loginBlocked(ip)) return json(res, 429, { error: '密码错太多次了，过 10 分钟再试' });
+        if (!checkAccPass(a, body.password)) {
+          loginFail(ip);
+          return json(res, 403, { error: '账户名或密码不正确' });
+        }
+        loginTries.delete(ip);
+
+        // 这台设备此前没有任何记录 → 这次登录同时把准入也办了；
+        // 正卡在待审批里的，直接按通过处理（有账户密码的人不必再等人点同意）
+        const admitted = !devices[cidHere];
+        const d = ensureDeviceRec(cidHere, req);
+        if (!d) return json(res, 400, { error: '缺少设备指纹，刷新页面再试' });
+        if (admitted) {
+          pending.delete(cidHere);
+          d.autoApproved = true;   // 和「隐藏密码自动授权」同一语义：无需主设备手动同意
+          d.viaLogin = true;
+        }
+        d.acc = a.id;
+        d.lastSeen = Date.now();
+        saveDevices();
+        a.lastLogin = Date.now();
+        saveAccounts();
+
+        const c = touchClient(req, cidHere, body.ua);
+        console.log(`  ${autoNameFor(req, c.model)} 登录为「${a.name}」（${roleLabel(a.role)}）` +
+          (admitted ? ' —— 同时通过账户密码准入' : ''));
+        const role = roleOf(req, cidHere);
+        json(res, 200, {
+          ok: true,
+          authorized: true,
+          admitted,
+          me: publicClient(c),
+          acc: publicAcc(a),
+          role,
+          roleName: roleLabel(role),
+          admin: canManage(req, cidHere),
+          hostAdmin: isHostRequest(req),
+          elevated: isElevated(req, cidHere),
+          canConfig: canConfig(req, cidHere),
+          caps: capsPayload(req, cidHere),
+          profiles: publicProfiles(),
+          accounts: canConfig(req, cidHere) ? accountList(false) : [],
+        });
+      })
+      .catch(() => json(res, 400, { error: 'bad request' }));
+    return;
+  }
+
   /* ---------------- 准入闸门：以下接口都要求已授权 ---------------- */
   // /f/ 下载和二维码是 <img>/<a> 直接发起的，带不了设备指纹，只能按 IP 认
   const lenient = pathname.startsWith('/f/') || pathname.startsWith('/a/') || pathname === '/api/qr' || pathname === '/api/info';
@@ -1997,6 +2085,33 @@ const server = http.createServer((req, res) => {
       cid: d.cid, name: nameOfCid(d.cid) || d.ip || d.cid, model: d.model || '', online: online.has(d.cid),
     }));
     return json(res, 200, { devices: list });
+  }
+
+  // 标记「保留」：这条消息连同它的补充说明都不再参与自动清理（手动删除仍可删）
+  if (method === 'POST' && pathname === '/api/item/keep') {
+    readBody(req, 4096).then((raw) => {
+      let body = {};
+      try { body = JSON.parse(raw || '{}'); } catch {}
+      const id = String(body.id || '');
+      const it = items.find((x) => x.id === id);
+      if (!it) return json(res, 404, { error: '消息不存在' });
+      const cidKeep = cidOf(req, body.cid);
+      const isOwner = samePerson(cidKeep, it.owner);
+      if (!canManage(req, cidKeep) && !isOwner) {
+        return json(res, 403, { error: '只能保留自己发送的内容' });
+      }
+      // 不传 keep 就是「标为保留」，传 false 取消
+      if (body.keep === false) {
+        delete it.keep;
+        delete it.keepAt;
+      } else {
+        it.keep = true;
+        it.keepAt = Date.now();
+      }
+      saveIndex();
+      json(res, 200, { ok: true, keep: !!it.keep, keepAt: it.keepAt || 0 });
+    }).catch(() => json(res, 400, { error: 'bad request' }));
+    return;
   }
 
   // 修改已发消息的可见范围：只能由原发送者或主设备改
@@ -2611,73 +2726,6 @@ const server = http.createServer((req, res) => {
 
   /* ---------------- 账户：换个身份登录这台设备 ---------------- */
 
-  // 登录 = 选定一个账户 + 密码，成功后这台设备就代表那个人（多台设备可以登同一个账户）
-  if (method === 'POST' && pathname === '/api/login') {
-    const ip = clientIp(req);
-    if (loginBlocked(ip)) return json(res, 429, { error: '密码错太多次了，过 10 分钟再试' });
-    readBody(req, 4096)
-      .then((raw) => {
-        let body = {};
-        try { body = JSON.parse(raw || '{}'); } catch { /* 空 body */ }
-        const cidHere = cidOf(req, body.cid) || cid;
-        const accId = String(body.acc || '').slice(0, 64);
-        const nmIn = String(body.name || '').trim().replace(/\s+/g, ' ').slice(0, 24);
-        let a = accounts[accId] || null;
-        // 按「账户名 + 密码」登录（前端不再列账户让人选）；也兼容旧的 accId 方式
-        if (!a && nmIn) {
-          a = Object.values(accounts).find((x) => x && !x.disabled && x.name === nmIn) || null;
-        }
-        if (!a) {
-          // 不区分「账户不存在」和「密码错」，免得被拿来枚举有哪些账户
-          loginFail(ip);
-          return json(res, 403, { error: '账户名或密码不正确' });
-        }
-        if (a.disabled) return json(res, 403, { error: '这个账户已被主控停用' });
-        // 没设密码的账户不放行：否则谁都能顶着「主控」的名义进来
-        if (!a.hash) {
-          return json(res, 403, {
-            error: a.role === 'owner'
-              ? '主控账户还没设密码，暂时只能在主控设备上使用'
-              : '这个账户还没设密码，请让主控在「设置 → 账户」里设一个',
-          });
-        }
-        if (loginBlocked(ip)) return json(res, 429, { error: '密码错太多次了，过 10 分钟再试' });
-        if (!checkAccPass(a, body.password)) {
-          loginFail(ip);
-          return json(res, 403, { error: '账户名或密码不正确' });
-        }
-        loginTries.delete(ip);
-
-        const d = ensureDeviceRec(cidHere, req);
-        if (!d) return json(res, 400, { error: '缺少设备指纹，刷新页面再试' });
-        d.acc = a.id;
-        d.lastSeen = Date.now();
-        saveDevices();
-        a.lastLogin = Date.now();
-        saveAccounts();
-
-        const c = touchClient(req, cidHere, body.ua);
-        console.log(`  ${autoNameFor(req, c.model)} 登录为「${a.name}」（${roleLabel(a.role)}）`);
-        const role = roleOf(req, cidHere);
-        json(res, 200, {
-          ok: true,
-          me: publicClient(c),
-          acc: publicAcc(a),
-          role,
-          roleName: roleLabel(role),
-          admin: canManage(req, cidHere),
-          hostAdmin: isHostRequest(req),
-          elevated: isElevated(req, cidHere),
-          canConfig: canConfig(req, cidHere),
-          caps: capsPayload(req, cidHere),
-          profiles: publicProfiles(),
-          accounts: canConfig(req, cidHere) ? accountList(false) : [],
-        });
-      })
-      .catch(() => json(res, 400, { error: 'bad request' }));
-    return;
-  }
-
   // 退出登录：这台设备回到「设备身份」（接入许可还在，不用重新输接入密码；
   // 收发照常，只是回到最基础那档能力，管理类接口会拒绝）
   if (method === 'POST' && pathname === '/api/logout') {
@@ -3227,6 +3275,50 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // 文本类文件在线预览：直接返回解码后的文字，前端按扩展名渲染 Markdown / JSON / CSV / 纯文本。
+  // 图片 / 视频 / 音频 / PDF 不用这个接口 —— 它们由浏览器自己渲染（走下面的 /f/ 内联）。
+  if (method === 'GET' && pathname === '/api/file/text') {
+    const fid = String(url.searchParams.get('id') || '');
+    const hit = fileIndex.get(fid);
+    if (!hit) return json(res, 404, { error: '文件不存在' });
+    const part = hit.part;
+    const nm = String(part.name || '');
+    const ext = (nm.split('.').pop() || '').toLowerCase();
+    const TEXT_EXT = new Set([
+      'txt', 'md', 'markdown', 'text', 'log', 'csv', 'tsv', 'json', 'jsonc', 'yml', 'yaml',
+      'xml', 'html', 'htm', 'css', 'scss', 'less', 'js', 'mjs', 'cjs', 'ts', 'jsx', 'tsx',
+      'vue', 'py', 'go', 'rs', 'java', 'kt', 'swift', 'c', 'cc', 'cpp', 'h', 'hpp', 'cs',
+      'sh', 'bash', 'zsh', 'fish', 'bat', 'ps1', 'sql', 'ini', 'conf', 'cfg', 'env', 'toml',
+      'gitignore', 'dockerfile', 'makefile', 'patch', 'diff', 'rtf',
+    ]);
+    const mime = String(part.mime || '');
+    // 只认明确的文本型 mime：写 /xml/ 这种模糊匹配会把 docx（mime 里带 openxmlformats）当成文本
+    const isText = /^text\//i.test(mime) || TEXT_EXT.has(ext) ||
+      /^application\/(json|ld\+json|xml|x-yaml|yaml|x-sh|x-shellscript|javascript|ecmascript|x-httpd-php|x-python|x-ruby|sql)\b/i.test(mime);
+    if (!isText) return json(res, 415, { error: '这类文件不支持在线预览' });
+
+    const filePath = path.join(FILES_DIR, part.file);
+    let stat;
+    try { stat = fs.statSync(filePath); } catch { return json(res, 404, { error: '文件已不在磁盘上' }); }
+    const MAX_TEXT = 2 * 1024 * 1024;
+    if (stat.size > MAX_TEXT) {
+      return json(res, 413, { error: '超过 2 MB 的文本不在这里展开，请下载后查看', tooBig: true });
+    }
+    let buf;
+    try { buf = fs.readFileSync(filePath); } catch { return json(res, 500, { error: '读取失败' }); }
+    // 前 8KB 里出现 NUL 就按二进制处理，免得把乱码塞进界面
+    if (buf.subarray(0, 8192).includes(0)) return json(res, 415, { error: '这不是文本文件' });
+    json(res, 200, {
+      ok: true,
+      name: nm,
+      size: stat.size,
+      mime,
+      ext,
+      text: buf.toString('utf8'),
+    });
+    return;
+  }
+
   // 下载 / 预览
   if (method === 'GET' && pathname.startsWith('/f/')) {
     const fid = pathname.slice(3);
@@ -3285,18 +3377,18 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // 清空全部：主设备，或用专属密码提过权的设备
+  // 清空全部：主设备，或用专属密码提过权的设备。
+  // 手动标了「保留」的不清 —— 那是用户点名要留的东西；真要删就单独删那一条。
   if (method === 'DELETE' && pathname === '/api/all') {
     if (!manage) return json(res, 403, { error: '没有管理权限，只有主设备可以清空' });
-    for (const it of items) {
-      for (const p of allPartsOf(it)) {
-        if (p.file) fs.unlink(path.join(FILES_DIR, p.file), () => {});
-      }
-    }
-    items = [];
+    const keepers = items.filter((it) => it.keep);
+    const goners = items.filter((it) => !it.keep);
+    items = keepers;               // 先把保留的留下，再按引用计数删文件
     reindexFiles();
+    for (const it of goners) unlinkParts(allPartsOf(it));
     saveIndex();
-    json(res, 200, { ok: true });
+    if (keepers.length) console.log(`  清空内容：保留 ${keepers.length} 条已标记「保留」的消息`);
+    json(res, 200, { ok: true, kept: keepers.length });
     return;
   }
 
