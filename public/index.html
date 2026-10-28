@@ -994,6 +994,10 @@
   .edit-x:hover{background:var(--line);color:var(--text)}
   .edit-pop-title{font-size:17px;font-weight:700;letter-spacing:.2px}
   .edit-pop-sub{margin:5px 0 14px;font-size:12px;color:var(--sub);line-height:1.55}
+  .edit-pop-sub .mini-del{color:#b3261e;text-decoration:line-through}
+  .edit-pop-sub .mini-ins{color:#1e7e34}
+  :root[data-theme="dark"] .edit-pop-sub .mini-del{color:#ff9d92}
+  :root[data-theme="dark"] .edit-pop-sub .mini-ins{color:#87e6a6}
   .edit-hist-list{display:flex;flex-direction:column;gap:10px}
   .eh-row{
     border:1px solid var(--line);border-radius:13px;padding:11px 13px;background:var(--card-2);
@@ -1017,12 +1021,134 @@
     white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;
   }
   .eh-row.open .eh-full{display:block}
+
+  /* 修订历史里的差异高亮 */
+  .eh-sum del{
+    color:#b3261e;background:rgba(179,38,30,.10);text-decoration:line-through;
+    border-radius:3px;padding:0 1px;
+  }
+  .eh-sum ins{
+    color:#1e7e34;background:rgba(30,126,52,.13);text-decoration:none;
+    border-radius:3px;padding:0 1px;
+  }
+  .eh-seg{
+    display:inline-block;font-size:10.5px;font-weight:700;color:var(--accent);
+    background:var(--accent-soft);border-radius:6px;padding:1px 6px;margin-right:5px;
+    vertical-align:1px;
+  }
+  .eh-gap{height:7px}
+  .eh-orig,.eh-nodiff{color:var(--faint)}
+  .eh-ell{color:var(--faint);padding:0 1px}
+  :root[data-theme="dark"] .eh-sum del{color:#ff9d92;background:rgba(255,157,146,.15)}
+  :root[data-theme="dark"] .eh-sum ins{color:#87e6a6;background:rgba(135,230,166,.15)}
   :root[data-theme="glass"] .edit-pop-card{ -webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px); }
   @media (max-width:430px){
     .edit-pop{padding:18px}
     .edit-pop-card{max-width:100%;padding:18px 16px 16px}
     .edit-pop-title{font-size:16px}
   }
+
+  /* ---- 引用卡（消息内） ---- */
+  .quote-card{
+    display:flex;gap:9px;align-items:flex-start;
+    margin:2px 0 11px;padding:9px 12px 9px 11px;
+    background:
+      linear-gradient(135deg, var(--accent-soft), transparent 72%),
+      var(--card-2);
+    border:1px solid var(--line);
+    border-left:3px solid var(--accent);
+    border-radius:10px;cursor:pointer;max-width:100%;
+    transition:transform .12s ease, box-shadow .12s ease, border-color .12s ease;
+  }
+  .quote-card:hover{
+    transform:translateY(-1px);
+    border-color:var(--accent);
+    box-shadow:0 8px 20px rgba(20,30,60,.10);
+  }
+  .quote-card .qc-ico{flex:0 0 auto;font-size:15px;line-height:1.15;color:var(--accent);opacity:.92;transform:translateY(1px)}
+  .quote-card .qc-main{min-width:0;flex:1 1 auto}
+  .quote-card .qc-name{font-size:11.5px;font-weight:700;color:var(--accent);letter-spacing:.2px;margin-bottom:2px}
+  .quote-card .qc-text{
+    font-size:12.5px;color:var(--sub);line-height:1.5;word-break:break-word;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+  }
+
+  /* 跳转到原消息时的高亮脉冲 */
+  .card.flash{animation:cardFlash 1.2s ease}
+  @keyframes cardFlash{
+    0%,100%{outline:2px solid transparent;outline-offset:2px}
+    22%,62%{outline:2px solid var(--accent);outline-offset:2px}
+  }
+
+  /* ---- 编辑器引用 chip ---- */
+  .quote-chip{
+    display:flex;align-items:center;gap:9px;
+    margin:2px 0 9px;padding:8px 10px;
+    background:var(--accent-soft);
+    border:1px solid var(--line);border-left:3px solid var(--accent);
+    border-radius:9px;
+  }
+  .quote-chip[hidden]{display:none}
+  .quote-chip .qchip-ico{color:var(--accent);font-size:14px;flex:0 0 auto}
+  .quote-chip .qchip-body{min-width:0;flex:1 1 auto;display:flex;flex-direction:column;gap:1px}
+  .quote-chip .qchip-name{font-size:11.5px;font-weight:700;color:var(--accent)}
+  .quote-chip .qchip-text{font-size:12px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .quote-chip .qchip-x{
+    flex:0 0 auto;width:24px;height:24px;display:grid;place-items:center;
+    border:0;background:transparent;color:var(--sub);cursor:pointer;border-radius:7px;
+    transition:background .12s, color .12s;
+  }
+  .quote-chip .qchip-x:hover{background:rgba(0,0,0,.07);color:var(--text)}
+  .quote-chip .qchip-x svg{width:14px;height:14px}
+
+  /* ---- 追加补充 ---- */
+  .notes-wrap{margin:8px 0 2px}
+  .notes-wrap.has-notes{margin:11px 0 2px;padding:11px 0 1px;border-top:1px dashed var(--line)}
+  .notes-head{
+    display:flex;align-items:center;gap:6px;
+    font-size:11.5px;font-weight:700;color:var(--sub);letter-spacing:.3px;margin-bottom:8px;
+  }
+  .notes-head svg{width:13px;height:13px;color:var(--accent)}
+  .note-row{display:flex;gap:8px;align-items:flex-start;padding:5px 0}
+  .note-ava{
+    flex:0 0 auto;width:22px;height:22px;border-radius:50%;
+    display:grid;place-items:center;font-size:11px;font-weight:700;color:#fff;
+    box-shadow:0 1px 3px rgba(0,0,0,.14);margin-top:1px;
+  }
+  .note-main{min-width:0;flex:1 1 auto}
+  .note-meta{display:flex;align-items:baseline;gap:7px;margin-bottom:1px}
+  .note-name{font-size:12px;font-weight:600;color:var(--text)}
+  .note-time{font-size:10.5px;color:var(--faint)}
+  .note-text{font-size:13px;line-height:1.55;color:var(--text);white-space:pre-wrap;word-break:break-word}
+  .note-add{display:flex;gap:8px;align-items:flex-end;margin-top:9px}
+  .note-add[hidden]{display:none}
+  .note-toggle{
+    display:inline-flex;align-items:center;gap:4px;margin-top:2px;padding:2px 5px;
+    border:0;background:transparent;color:var(--faint);font-size:11.5px;font-weight:600;
+    cursor:pointer;border-radius:6px;transition:color .12s, background .12s;
+  }
+  .note-toggle:hover{color:var(--accent);background:var(--accent-soft)}
+  .note-toggle svg{width:12px;height:12px}
+  .note-input{
+    flex:1 1 auto;min-height:34px;max-height:120px;padding:7px 10px;
+    font-family:inherit;font-size:13px;line-height:1.4;color:var(--text);
+    background:var(--card-2);border:1px solid var(--line);border-radius:9px;
+    resize:none;outline:none;transition:border-color .12s, box-shadow .12s;
+  }
+  .note-input::placeholder{color:var(--faint)}
+  .note-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  .note-send{
+    flex:0 0 auto;height:34px;padding:0 15px;border:0;border-radius:9px;
+    background:var(--accent);color:#fff;font-size:12.5px;font-weight:600;cursor:pointer;
+    transition:opacity .12s, transform .12s, box-shadow .12s;
+    box-shadow:0 4px 12px rgba(76,110,245,.28);
+  }
+  .note-send:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 7px 18px rgba(76,110,245,.34)}
+  .note-send:disabled{opacity:.42;cursor:not-allowed;box-shadow:none}
+  :root[data-theme="glass"] .quote-card,
+  :root[data-theme="glass"] .notes-wrap{ -webkit-backdrop-filter:blur(0); }
+  :root[data-theme="dark"] .quote-chip .qchip-x:hover,
+  :root[data-theme="glass"] .quote-chip .qchip-x:hover{background:rgba(255,255,255,.12)}
 
   .spin{
     width:27px;height:27px;margin:20px auto 14px;border-radius:50%;
@@ -1511,6 +1637,7 @@
 <div class="composer-bar" id="composerBar">
   <div class="composer-wrap">
     <section class="composer" id="composer">
+      <div class="quote-chip" id="quoteChip" hidden></div>
       <div class="blocks" id="blocks"></div>
       <div class="mdp" id="mdp"></div>
       <div class="mtools-wrap" id="mtoolsWrap">
@@ -1705,7 +1832,7 @@
   <div class="edit-pop-card" role="dialog" aria-modal="true" aria-labelledby="editHistTitle">
     <button class="edit-x" id="editHistX" type="button" aria-label="关闭">✕</button>
     <div class="edit-pop-title" id="editHistTitle">修订历史</div>
-    <p class="edit-pop-sub">仅文字内容可编辑，以下按时间倒序展示每次编辑前的版本；点文字可展开全文。</p>
+    <p class="edit-pop-sub">按时间倒序列出各版本，摘要直接标出这一版<b>改了哪里</b>（<span class="mini-del">红色删除</span> / <span class="mini-ins">绿色新增</span>）；点摘要可展开该版本全文。</p>
     <div class="edit-hist-list"></div>
   </div>
 </div>
@@ -1932,6 +2059,7 @@
   var ICHECK = svgIcon('<path d="M20 6L9 17l-5-5"/>', 2.6);
   var IVIS = svgIcon('<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>', 1.8);
   var IEDIT = svgIcon('<path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/><path d="M14.5 5.5l3 3"/>', 1.8);
+  var IQUOTE = svgIcon('<path d="M8 7c-2 0-3.5 1.6-3.5 3.6V14H8v-3H6.5v-1c0-.9.7-1.5 1.5-1.5V7zm8 0c-2 0-3.5 1.6-3.5 3.6V14H16v-3h-1.5v-1c0-.9.7-1.5 1.5-1.5V7z"/>', 1.8);
   var ISHIELD = svgIcon('<path d="M12 3l7 3v5.4c0 4.2-2.9 7.6-7 8.6-4.1-1-7-4.4-7-8.6V6l7-3z"/><path d="M9.4 12.1l1.9 1.9 3.3-3.3"/>', 1.9);
   var ISHIELD_OPEN = svgIcon('<path d="M12 3l7 3v5.4c0 4.2-2.9 7.6-7 8.6-4.1-1-7-4.4-7-8.6V6l7-3z"/>', 1.9);
   var IDEV = svgIcon('<rect x="2" y="5" width="14" height="10" rx="2"/><path d="M6 19h6M11 15v1"/><path d="M18 9h2v6"/>', 1.8);
@@ -2902,6 +3030,13 @@
       ebtn.onclick = function (e) { e.stopPropagation(); startEdit(el._it || it, el); };
       acts.appendChild(ebtn);
     }
+    // 引用：任何人都能引用任意消息，引用后把它挂到输入区，下一条发出的消息带上引用卡
+    {
+      var qbtn = document.createElement('button');
+      qbtn.className = 'icon'; qbtn.innerHTML = IQUOTE; qbtn.title = '引用这条消息';
+      qbtn.onclick = function (e) { e.stopPropagation(); startQuote(it); };
+      acts.appendChild(qbtn);
+    }
 
     ava.title = '双击收起 / 展开这条消息';
     ava.addEventListener('dblclick', function (e) {
@@ -2935,6 +3070,8 @@
     el.appendChild(meta);
     // 内容区（文字 / 图片 / 文件 / 收起说明）抽成 buildBody，便于编辑后增量重建
     buildBody(el, it);
+    // 追加补充：所有人可补充，挂在内容区下方
+    buildNotes(el, it);
 
     // 选择模式下点整张卡切换选中；卡片里本来就有按钮/链接，那些照旧各干各的
     el.addEventListener('click', function (e) {
@@ -3038,6 +3175,22 @@
   // 顶层内容节点统一打 .bnode，maybeClamp 生成的「展开全文」按钮打 .more，重建时一并清除。
   function buildBody(el, it) {
     Array.prototype.slice.call(el.querySelectorAll('.bnode, .more')).forEach(function (n) { n.remove(); });
+
+    // 引用卡：贴在内容区最上方，点它跳回被引用的原消息
+    if (it.quote && it.quote.id) {
+      var q = it.quote;
+      var qn = nameOfCidLocal(q.by) || (q.byName || (q.by ? ('设备' + String(q.by).slice(-4)) : '某设备'));
+      var qcard = document.createElement('div');
+      qcard.className = 'quote-card bnode';
+      qcard.innerHTML = '<span class="qc-ico">❝</span>' +
+        '<div class="qc-main"><div class="qc-name">' + esc(qn) + '</div>' +
+        '<div class="qc-text">' + esc(q.snippet || '') + '</div></div>';
+      qcard.title = '点击跳转到原消息';
+      qcard.onclick = function () { jumpToMsg(q.id); };
+      var metaNode = el.querySelector('.meta');
+      el.insertBefore(qcard, metaNode ? metaNode.nextSibling : el.firstChild);
+    }
+
     var parts = it.parts || (it.text ? [{ kind: 'text', text: it.text }] : []);
     var imgParts = parts.filter(function (p) { return p.kind === 'image'; });
     var run = [];
@@ -3250,16 +3403,93 @@
   function summarizeParts(parts) {
     return (parts || []).filter(function (p) { return p.kind === 'text'; }).map(function (p) { return p.text || ''; }).join('\n');
   }
-  function editHistRow(label, by, at, parts) {
+
+  // ---- 修订历史 diff：直接对比「这一版」与「上一版」，标出改了哪里 ----
+  // 短文本用逐字符 LCS 精确对比；过长则退化为「公共前后缀之间的差异段」，避免卡顿。
+  function diffByEdge(a, b) {
+    var p = 0, maxP = Math.min(a.length, b.length);
+    while (p < maxP && a[p] === b[p]) p++;
+    var s = 0;
+    while (s < maxP - p && a[a.length - 1 - s] === b[b.length - 1 - s]) s++;
+    var ops = [], i;
+    for (i = 0; i < p; i++) ops.push({ t: 'eq', c: a[i] });
+    for (i = p; i < a.length - s; i++) ops.push({ t: 'del', c: a[i] });
+    for (i = p; i < b.length - s; i++) ops.push({ t: 'ins', c: b[i] });
+    for (i = a.length - s; i < a.length; i++) ops.push({ t: 'eq', c: a[i] });
+    return ops;
+  }
+  function diffChars(a, b) {
+    var n = a.length, m = b.length;
+    if (n * m > 900000) return diffByEdge(a, b);
+    var dp = [], i, j;
+    for (i = 0; i <= n; i++) dp.push(new Uint32Array(m + 1));
+    for (i = 1; i <= n; i++) {
+      for (j = 1; j <= m; j++) {
+        dp[i][j] = a[i - 1] === b[j - 1] ? dp[i - 1][j - 1] + 1 : Math.max(dp[i - 1][j], dp[i][j - 1]);
+      }
+    }
+    var ops = [], x = n, y = m;
+    while (x > 0 && y > 0) {
+      if (a[x - 1] === b[y - 1]) { ops.push({ t: 'eq', c: a[x - 1] }); x--; y--; }
+      else if (dp[x - 1][y] > dp[x][y - 1]) { ops.push({ t: 'del', c: a[x - 1] }); x--; }
+      else { ops.push({ t: 'ins', c: b[y - 1] }); y--; }
+    }
+    while (x > 0) { ops.push({ t: 'del', c: a[--x] }); }
+    while (y > 0) { ops.push({ t: 'ins', c: b[--y] }); }
+    return ops.reverse();
+  }
+  function diffHtml(oldStr, newStr) {
+    var ops = diffChars(oldStr, newStr);
+    var out = '', eqRun = '', changed = false, budget = 560;
+    function flushEq() {
+      if (!eqRun) return;
+      if (eqRun.length > 60) out += esc(eqRun.slice(0, 16)) + '<span class="eh-ell">…</span>' + esc(eqRun.slice(-16));
+      else out += esc(eqRun);
+      eqRun = '';
+    }
+    for (var i = 0; i < ops.length; i++) {
+      var o = ops[i];
+      if (o.t === 'eq') { eqRun += o.c; continue; }
+      flushEq();
+      if (budget <= 0) { out += '<span class="eh-ell">…</span>'; break; }
+      if (o.t === 'del') out += '<del>' + esc(o.c) + '</del>';
+      else out += '<ins>' + esc(o.c) + '</ins>';
+      budget -= 1;
+      changed = true;
+    }
+    flushEq();
+    return changed ? out : '';
+  }
+  // 多条文字段逐段对比；段数与顺序在编辑时被固定，可直接按下标配对
+  function diffTextParts(prevParts, parts) {
+    var oldT = (prevParts || []).filter(function (p) { return p.kind === 'text'; });
+    var newT = (parts || []).filter(function (p) { return p.kind === 'text'; });
+    var n = Math.max(oldT.length, newT.length), blocks = [];
+    for (var i = 0; i < n; i++) {
+      var ov = oldT[i] ? String(oldT[i].text || '') : '';
+      var nv = newT[i] ? String(newT[i].text || '') : '';
+      if (ov === nv) continue;
+      var d = diffHtml(ov, nv);
+      if (!d) continue;
+      var label = n > 1 ? '<span class="eh-seg">第 ' + (i + 1) + ' 段</span>' : '';
+      blocks.push(label + '<span class="eh-diff">' + d + '</span>');
+    }
+    return blocks.join('<div class="eh-gap"></div>');
+  }
+  function editHistRow(label, by, at, parts, prevParts, isCurrent) {
     var txt = summarizeParts(parts);
-    var lines = txt.split('\n');
-    var summary = lines.slice(0, 3).join('\n');
     var name = nameOfCidLocal(by) || ('设备' + String(by || '').slice(-4));
-    return '<div class="eh-row">' +
+    var diff;
+    if (!prevParts) diff = '<span class="eh-orig">最初版本，无对比</span>';
+    else {
+      diff = diffTextParts(prevParts, parts);
+      if (!diff) diff = '<span class="eh-nodiff">（文字没有变化）</span>';
+    }
+    return '<div class="eh-row' + (isCurrent ? ' current' : '') + '">' +
       '<div class="eh-head"><span class="eh-label">' + esc(label) + '</span>' +
       '<span class="eh-when">' + esc(fmtTime(at)) + '</span></div>' +
       '<div class="eh-by">编辑者：' + esc(name) + '</div>' +
-      '<div class="eh-sum">' + esc(summary) + (lines.length > 3 ? '…' : '') + '</div>' +
+      '<div class="eh-sum" title="点击展开该版本全文">' + diff + '</div>' +
       '<pre class="eh-full">' + esc(txt) + '</pre>' +
       '</div>';
   }
@@ -3268,11 +3498,17 @@
     if (!pop) return;
     var list = pop.querySelector('.edit-hist-list');
     if (!list) return;
-    var hist = (it.history || []).slice().reverse();
-    var rows = [editHistRow('当前版本', it.owner, it.editedAt || it.time, it.parts)];
-    hist.forEach(function (h, i) {
-      rows.push(editHistRow('第 ' + (hist.length - i) + ' 次编辑前', h.by, h.at, h.parts));
-    });
+    // 正序拼出所有版本：versions[0]=最初；versions[k]=第 k 次编辑后的状态；最后一版=当前
+    var versions = [];
+    (it.history || []).forEach(function (h) { versions.push({ by: h.by, at: h.at, parts: h.parts }); });
+    versions.push({ by: it.owner, at: it.editedAt || it.time, parts: it.parts, current: true });
+    var rows = [];
+    for (var k = versions.length - 1; k >= 0; k--) {
+      var v = versions[k];
+      var prev = k > 0 ? versions[k - 1] : null;
+      var label = v.current ? '当前版本' : (k === 0 ? '最初版本' : ('第 ' + k + ' 次编辑后'));
+      rows.push(editHistRow(label, v.by, v.at, v.parts, prev ? prev.parts : null, !!v.current));
+    }
     list.innerHTML = rows.join('');
     Array.prototype.slice.call(list.querySelectorAll('.eh-sum')).forEach(function (sum) {
       sum.onclick = function () { sum.parentNode.classList.toggle('open'); };
@@ -3289,6 +3525,147 @@
     setTimeout(function () { if (!pop.classList.contains('on')) pop.hidden = true; }, 160);
   }
   function editHistKey(e) { if (e.key === 'Escape') closeEditHist(); }
+
+  /* ---------------- 消息引用 ---------------- */
+  var pendingQuote = null;
+
+  function startQuote(it) {
+    var parts = it.parts || (it.text ? [{ kind: 'text', text: it.text }] : []);
+    var snip = summarizeParts(parts).replace(/\s+/g, ' ').trim();
+    if (!snip) {
+      var nImg = parts.filter(function (p) { return p.kind === 'image'; }).length;
+      var nFil = parts.filter(function (p) { return p.kind !== 'text' && p.kind !== 'image'; }).length;
+      snip = nImg && nFil ? '[图片 / 文件]' : (nImg ? '[图片]' : (nFil ? '[文件]' : '(无文字内容)'));
+    }
+    pendingQuote = { id: it.id, by: it.owner, byName: it.from, snippet: snip.slice(0, 140) };
+    renderQuoteChip();
+    var comp = $('composer');
+    if (comp) comp.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    var blocksEl = $('blocks');
+    var ta = blocksEl && blocksEl.querySelector('textarea');
+    if (ta) ta.focus();
+    toast('已引用，输入内容后发送');
+  }
+
+  function renderQuoteChip() {
+    var chip = $('quoteChip');
+    if (!chip) return;
+    if (!pendingQuote) { chip.hidden = true; chip.innerHTML = ''; return; }
+    var nm = nameOfCidLocal(pendingQuote.by) || (pendingQuote.byName || (pendingQuote.by ? ('设备' + String(pendingQuote.by).slice(-4)) : '某设备'));
+    chip.hidden = false;
+    chip.innerHTML = '<span class="qchip-ico">❝</span>' +
+      '<span class="qchip-body"><span class="qchip-name">引用 ' + esc(nm) + '</span>' +
+      '<span class="qchip-text">' + esc(pendingQuote.snippet) + '</span></span>' +
+      '<button type="button" class="qchip-x" title="取消引用" aria-label="取消引用"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>';
+    var x = chip.querySelector('.qchip-x');
+    if (x) x.onclick = function (e) { e.stopPropagation(); pendingQuote = null; renderQuoteChip(); };
+  }
+
+  function jumpToMsg(id) {
+    var target = nodes.get(id);
+    if (!target) { toast('原消息已不存在'); return; }
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    target.classList.remove('flash');
+    void target.offsetWidth;
+    target.classList.add('flash');
+    setTimeout(function () { target.classList.remove('flash'); }, 1200);
+  }
+
+  /* ---------------- 追加补充（所有人可补充） ---------------- */
+  function buildNotes(el, it) {
+    var wrap = el._notes;
+    if (!wrap) {
+      wrap = document.createElement('div');
+      wrap.className = 'notes-wrap';
+      el.appendChild(wrap);
+      el._notes = wrap;
+    } else {
+      wrap.innerHTML = '';
+    }
+    el._notesVer = it.notesVer || 0;
+    var notes = it.notes || [];
+    wrap.classList.toggle('has-notes', notes.length > 0);
+    if (notes.length) {
+      var head = document.createElement('div');
+      head.className = 'notes-head';
+      head.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5H4l2-3.2A8.5 8.5 0 1 1 21 11.5z"/></svg><span>补充 ' + notes.length + '</span>';
+      wrap.appendChild(head);
+      notes.forEach(function (n) {
+        var nm = nameOfCidLocal(n.by) || ('设备' + String(n.by || '').slice(-4));
+        var row = document.createElement('div');
+        row.className = 'note-row';
+        row.innerHTML = '<span class="note-ava" style="background:' + colorOf(nm) + '">' + esc(String(nm).slice(0, 1).toUpperCase()) + '</span>' +
+          '<div class="note-main"><div class="note-meta"><span class="note-name">' + esc(nm) + '</span>' +
+          '<span class="note-time">' + esc(fmtTime(n.at)) + '</span></div>' +
+          '<div class="note-text">' + esc(n.text) + '</div></div>';
+        wrap.appendChild(row);
+      });
+    }
+    // 输入区默认收起，点「补充」再展开，避免每条消息都挂一个输入框
+    var add = document.createElement('div');
+    add.className = 'note-add';
+    add.hidden = true;
+    var ta = document.createElement('textarea');
+    ta.className = 'note-input';
+    ta.rows = 1;
+    ta.placeholder = notes.length ? '继续补充…' : '补充点什么…';
+    ta.setAttribute('aria-label', '补充内容');
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'note-send';
+    btn.textContent = '补充';
+    btn.disabled = true;
+    ta.addEventListener('input', function () {
+      btn.disabled = !ta.value.trim();
+      ta.style.height = 'auto';
+      ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
+    });
+    ta.addEventListener('keydown', function (e) {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); sendNote(it, ta.value); }
+    });
+    btn.onclick = function () { sendNote(it, ta.value); };
+    add.appendChild(ta);
+    add.appendChild(btn);
+
+    var toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'note-toggle';
+    toggle.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg><span>' + (notes.length ? '继续补充' : '补充说明') + '</span>';
+    toggle.onclick = function (e) {
+      e.stopPropagation();
+      add.hidden = !add.hidden;
+      if (!add.hidden) ta.focus();
+    };
+    wrap.appendChild(toggle);
+    wrap.appendChild(add);
+  }
+
+  function sendNote(it, text) {
+    text = String(text || '').trim();
+    if (!text) return;
+    api('/api/item/note', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: it.id, cid: state.cid, text: text }),
+    }).then(function () {
+      poll(true);
+    }).catch(function (e) {
+      toast(e.message || '补充失败');
+    });
+  }
+
+  function detectNotes() {
+    allItems.forEach(function (it) {
+      var el2 = nodes.get(it.id);
+      if (!el2) return;
+      var v = it.notesVer || 0;
+      if (el2._notesVer !== undefined && el2._notesVer !== v) {
+        var focused = el2._notes && el2._notes.querySelector('.note-input') === document.activeElement;
+        if (focused) return;
+        buildNotes(el2, it);
+      }
+    });
+  }
 
   function copyText(t) {
     if (navigator.clipboard && window.isSecureContext) {
@@ -3803,7 +4180,7 @@
       markOnline();
       allItems = d.items || [];
       var sig = allItems.map(function (x) { return x.id; }).join(',');
-      if (!force && sig === lastSig) { detectEdits(); tickTimes(); return; }
+      if (!force && sig === lastSig) { detectEdits(); detectNotes(); tickTimes(); return; }
       lastSig = sig;
       refreshSenders();
       refreshDates();
@@ -4274,6 +4651,8 @@
     blocksEl.innerHTML = '';
     addTextBlock(false);
     if (previewOn) togglePreview(false);
+    pendingQuote = null;
+    renderQuoteChip();
     syncSend();
   }
 
@@ -4315,7 +4694,7 @@
       var r = await api('/api/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cid: state.cid, to: state.toCids, parts: parts })
+        body: JSON.stringify({ cid: state.cid, to: state.toCids, parts: parts, quote: pendingQuote ? { id: pendingQuote.id, snippet: pendingQuote.snippet } : undefined })
       });
 
       resetCompose();
@@ -4459,7 +4838,7 @@
       var sent = await api('/api/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cid: state.cid, to: state.toCids, parts: parts })
+        body: JSON.stringify({ cid: state.cid, to: state.toCids, parts: parts, quote: pendingQuote ? { id: pendingQuote.id, snippet: pendingQuote.snippet } : undefined })
       });
 
       resetCompose();

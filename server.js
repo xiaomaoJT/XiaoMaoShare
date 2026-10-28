@@ -1755,6 +1755,29 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // 追加补充：任意授权设备都能对任一消息追加说明；纯追加、不破坏原文、不重置已读
+  if (method === 'POST' && pathname === '/api/item/note') {
+    readBody(req, 1 << 16).then((raw) => {
+      let body = {};
+      try { body = JSON.parse(raw || '{}'); } catch {}
+      const id = String(body.id || '');
+      const idx = items.findIndex((it) => it.id === id);
+      if (idx === -1) return json(res, 404, { error: '消息不存在' });
+      const it = items[idx];
+      const cidNote = cidOf(req, body.cid);
+      if (!cidNote) return json(res, 403, { error: '未授权的设备' });
+      const t = String(body.text || '').replace(/\u0000/g, '').trim();
+      if (!t) return json(res, 400, { error: '补充内容不能为空' });
+      if (bytesOf(t) > 8 * 1024) return json(res, 413, { error: '补充内容过长（上限 8KB）' });
+      if (!Array.isArray(it.notes)) it.notes = [];
+      it.notes.push({ by: cidNote, at: Date.now(), text: t });
+      it.notesVer = (it.notesVer || 0) + 1;
+      saveIndex();
+      json(res, 200, { ok: true, item: it });
+    }).catch(() => json(res, 400, { error: 'bad request' }));
+    return;
+  }
+
   // 已读回执：任意授权设备对这条消息做了「复制 / 下载 / 看图」之一即记为已读，按设备去重。
   // 主设备用空 cid 访问，不计入回执；同一设备重复阅读不会让计数增加。
   if (method === 'POST' && pathname === '/api/item/read') {
@@ -2297,6 +2320,22 @@ const server = http.createServer((req, res) => {
         if (!parts.length) return json(res, 400, { error: '内容为空' });
         if (parts.length > MAX_PARTS * 2) parts.length = MAX_PARTS * 2;
 
+        // 发送时引用：仅记录被引用消息的 id，服务端回填发送者与片段，避免客户端伪造
+        let quote = null;
+        if (body.quote && body.quote.id) {
+          const qItem = items.find((x) => x.id === String(body.quote.id));
+          if (qItem) {
+            const qtext = (qItem.parts || []).filter((p) => p.kind === 'text').map((p) => p.text || '').join('\n');
+            const snip = String(body.quote.snippet || qtext || '').replace(/\s+/g, ' ').trim().slice(0, 140);
+            quote = {
+              id: qItem.id,
+              by: qItem.owner,
+              byName: qItem.from,
+              snippet: snip,
+            };
+          }
+        }
+
         const item = {
           id: newId(),
           kind: parts.length === 1 ? parts[0].kind : 'bundle',
@@ -2307,6 +2346,9 @@ const server = http.createServer((req, res) => {
           owner: owner.cid,
           to,
           toName,
+          quote,
+          notes: [],
+          notesVer: 0,
           readBy: [],
         };
         items.unshift(item);
