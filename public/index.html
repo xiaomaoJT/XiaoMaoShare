@@ -2064,6 +2064,28 @@
   .dc-err{font-size:12px;color:var(--danger);line-height:1.5;min-height:0}
   .dc-err:empty{display:none}
   .dc-tip{font-size:11.5px;color:var(--faint);line-height:1.6}
+
+  /* ---- 关于面板 · 接入历史（浏览器端 localStorage，桌面主窗口不显示） ---- */
+  .about-hosts{margin-top:16px;border-top:1px solid var(--line);padding-top:12px;text-align:left}
+  .ah-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+  .ah-h span{font-size:11.5px;font-weight:800;color:var(--faint);letter-spacing:.5px}
+  .ah-clear{border:0;background:transparent;color:var(--faint);font-size:11px;font-weight:600;cursor:pointer;padding:2px 6px;border-radius:5px;transition:.12s}
+  .ah-clear:hover{color:var(--danger);background:var(--line-soft)}
+  .ah-list{display:flex;flex-direction:column;gap:6px}
+  .ah-item{
+    display:flex;align-items:center;gap:8px;padding:8px 10px;
+    border:1px solid var(--line);border-radius:10px;background:var(--card-2);
+    cursor:pointer;transition:border-color .12s, background .12s;
+  }
+  .ah-item:hover{border-color:var(--accent);background:var(--accent-soft)}
+  .ah-u{flex:1;min-width:0}
+  .ah-n{font-size:13px;font-weight:700;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ah-s{font-size:10.5px;color:var(--faint);margin-top:1px}
+  .ah-cur{flex:none;font-size:10px;font-weight:800;color:var(--accent);background:var(--accent-soft);border-radius:5px;padding:2px 6px;letter-spacing:.3px}
+  .ah-x{flex:none;border:0;background:transparent;color:var(--faint);cursor:pointer;font-size:11px;padding:3px 5px;border-radius:5px;line-height:1;transition:.12s}
+  .ah-x:hover{color:var(--danger);background:var(--line-soft)}
+  .ah-tip{margin-top:8px;font-size:10.5px;color:var(--faint);line-height:1.6}
+  .ah-empty{padding:8px 0;font-size:12px;color:var(--faint)}
 </style>
 </head>
 <body>
@@ -2282,6 +2304,15 @@
         <a class="about-link" href="https://t.me/ListenToMao" target="_blank" rel="noopener">t.me/ListenToMao</a>
       </div>
       <button class="about-copy" type="button" data-copy="https://t.me/ListenToMao">复制</button>
+    </div>
+
+    <div class="about-hosts" id="aboutHosts" hidden>
+      <div class="ah-h">
+        <span>接入历史</span>
+        <button class="ah-clear" id="ahClear" type="button">清空</button>
+      </div>
+      <div class="ah-list" id="ahList"></div>
+      <div class="ah-tip">这台浏览器连过的主机，点一下直接回连；只存在本机浏览器里，不会上传。</div>
     </div>
   </div>
 </div>
@@ -2985,6 +3016,15 @@
       s1.appendChild(h1);
       n.addrBox = mk('div');
       s1.appendChild(n.addrBox);
+
+      // 出码：手机相机扫一下就进来，省得手输地址（复用主控的扫码弹窗）
+      var qrRow = mk('div', 'dc-row');
+      var qrb = mk('button', 'dc-cp');
+      qrb.innerHTML = IQR + '<span>出二维码</span>';
+      qrb.onclick = function () { openQr(); };
+      qrRow.appendChild(qrb);
+      s1.appendChild(qrRow);
+
       s1.appendChild(mk('div', 'dc-tip',
         '这台电脑一直在对外提供服务。别人在浏览器里打开上面这个地址就能连进来，第一次要输接入密码（或账户名密码）。'));
       body.appendChild(s1);
@@ -8764,11 +8804,80 @@
         .then(function (d) { verEl.textContent = 'v' + (d && d.version ? d.version : '1.1.0'); })
         .catch(function () { verEl.textContent = 'v1.1.0'; });
     }
+
+    /* ---- 接入历史：这台浏览器连过的主机。
+       桌面主窗口不记（那边由主进程管「最近连过」，两套机制各管各的场景）；
+       localhost 也不记 —— 那是本机主控，不是「接入」了谁。 ---- */
+    var AH_KEY = 'xm.hosts';
+    function isLocalHost(h) {
+      return /^(localhost|127\.0\.0\.1|\[::1\]|::1)$/i.test(h);
+    }
+    function readHosts() {
+      try {
+        var a = JSON.parse(localStorage.getItem(AH_KEY) || '[]');
+        return Array.isArray(a) ? a.filter(function (x) { return x && typeof x.u === 'string'; }) : [];
+      } catch (e) { return []; }
+    }
+    function writeHosts(a) {
+      try { localStorage.setItem(AH_KEY, JSON.stringify(a.slice(0, 8))); } catch (e) { /* 隐私模式存不了就算了 */ }
+    }
+    function trackHost() {
+      if (window.xmDesktop || isLocalHost(location.hostname)) return;
+      var list = readHosts().filter(function (x) { return x.u !== location.origin; });
+      list.unshift({ u: location.origin, t: Date.now() });
+      writeHosts(list);
+    }
+    trackHost();
+
+    function renderHosts() {
+      var box = $('aboutHosts'), listEl = $('ahList'), clearEl = $('ahClear');
+      if (!box || !listEl || !clearEl) return;
+      var list = readHosts();
+      box.hidden = !list.length;
+      listEl.innerHTML = '';
+      list.forEach(function (x) {
+        var cur = x.u === location.origin;
+        var it = document.createElement('div');
+        it.className = 'ah-item';
+        var u = document.createElement('div'); u.className = 'ah-u';
+        var n = document.createElement('div'); n.className = 'ah-n';
+        var s = document.createElement('div'); s.className = 'ah-s';
+        var host;
+        try { host = new URL(x.u).host; } catch (e) { host = x.u; }
+        n.textContent = host;
+        var d = new Date(x.t || Date.now());
+        var pad = function (v) { return (v < 10 ? '0' : '') + v; };
+        s.textContent = '最近接入 ' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' +
+          pad(d.getHours()) + ':' + pad(d.getMinutes());
+        u.appendChild(n); u.appendChild(s);
+        it.appendChild(u);
+        if (cur) {
+          var tag = document.createElement('span');
+          tag.className = 'ah-cur'; tag.textContent = '当前';
+          it.appendChild(tag);
+        }
+        var x2 = document.createElement('button');
+        x2.className = 'ah-x'; x2.type = 'button'; x2.textContent = '✕'; x2.title = '从历史中删除';
+        x2.addEventListener('click', function (e) {
+          e.stopPropagation();
+          writeHosts(readHosts().filter(function (y) { return y.u !== x.u; }));
+          renderHosts();
+        });
+        it.appendChild(x2);
+        it.addEventListener('click', function () {
+          if (cur) { closeAbout(); return; }
+          location.href = x.u;
+        });
+        listEl.appendChild(it);
+      });
+    }
+
     function openAbout() {
       el.hidden = false;
       requestAnimationFrame(function () { el.classList.add('on'); });
       markEl.setAttribute('aria-expanded', 'true');
       loadVersion();
+      renderHosts();
     }
     function closeAbout() {
       el.classList.remove('on');
@@ -8782,6 +8891,14 @@
     });
     closeEl.addEventListener('click', closeAbout);
     el.addEventListener('click', function (e) { if (e.target === el) closeAbout(); });
+    var ahClear = $('ahClear');
+    if (ahClear) {
+      ahClear.addEventListener('click', function (e) {
+        e.stopPropagation();
+        writeHosts([]);
+        renderHosts();
+      });
+    }
     document.addEventListener('keydown', function (e) {
       if (e.key === 'Escape' && el.classList.contains('on')) closeAbout();
     });
