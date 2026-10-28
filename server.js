@@ -115,10 +115,18 @@ items = items.filter((it) =>
 
 // fid → { part, item }，/f/:fid 走这里，避免每次遍历全表
 let fileIndex = new Map();
+/** 一条消息占用磁盘的全部片段：正文 + 各条补充（补充也能带图片 / 文件） */
+function allPartsOf(it) {
+  const out = [];
+  for (const p of it.parts || []) out.push(p);
+  for (const n of it.notes || []) for (const p of n.parts || []) out.push(p);
+  return out;
+}
+
 function reindexFiles() {
   fileIndex = new Map();
   for (const it of items) {
-    for (const p of it.parts || []) {
+    for (const p of allPartsOf(it)) {
       if (p.fid && p.file) fileIndex.set(p.fid, { part: p, item: it });
     }
   }
@@ -134,7 +142,7 @@ reindexFiles();
 function refCount(file) {
   let n = 0;
   for (const it of items) {
-    for (const p of it.parts || []) if (p.file === file) n++;
+    for (const p of allPartsOf(it)) if (p.file === file) n++;
   }
   return n;
 }
@@ -239,11 +247,11 @@ function sweepExpired() {
   if (!gone.length) return 0;
 
   let bytes = 0;
-  for (const it of gone) for (const p of it.parts || []) bytes += Number(p.size) || 0;
+  for (const it of gone) for (const p of allPartsOf(it)) bytes += Number(p.size) || 0;
 
   items = items.filter((it) => Number(it.time || 0) >= cutoff);
   reindexFiles();                              // 先重索引，引用计数才数得准
-  for (const it of gone) unlinkParts(it.parts);
+  for (const it of gone) unlinkParts(allPartsOf(it));
   saveIndex();
   console.log(`  自动清理 清掉 ${gone.length} 条超过 ${days} 天的内容（约 ${fmtBytes(bytes)}）`);
   return gone.length;
@@ -1755,9 +1763,10 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // 追加补充：任意授权设备都能对任一消息追加说明；纯追加、不破坏原文、不重置已读
+  // 追加补充：任意授权设备都能对任一消息追加说明；纯追加、不破坏原文、不重置已读。
+  // 内容可以是 Markdown 文字，也可以是图片 / 文件（走同一个上传暂存区）。
   if (method === 'POST' && pathname === '/api/item/note') {
-    readBody(req, 1 << 16).then((raw) => {
+    readBody(req, 1 << 20).then((raw) => {
       let body = {};
       try { body = JSON.parse(raw || '{}'); } catch {}
       const id = String(body.id || '');
@@ -1766,12 +1775,88 @@ const server = http.createServer((req, res) => {
       const it = items[idx];
       const cidNote = cidOf(req, body.cid);
       if (!cidNote) return json(res, 403, { error: '未授权的设备' });
-      const t = String(body.text || '').replace(/\u0000/g, '').trim();
-      if (!t) return json(res, 400, { error: '补充内容不能为空' });
-      if (bytesOf(t) > 8 * 1024) return json(res, 413, { error: '补充内容过长（上限 8KB）' });
+
+      // 兼容只传 text 的老调用；新调用传 parts（文字段 + 附件段）
+      const wanted = Array.isArray(body.parts) && body.parts.length
+        ? body.parts.slice(0, MAX_PARTS * 2)
+        : [{ kind: 'text', text: body.text }];
+
+      const parts = [];
+      const picked = [];
+      const missing = [];
+      let textBytes = 0;
+
+      for (const p of wanted) {
+        if (!p) continue;
+        if (p.kind === 'text' || p.type === 'text') {
+          const t = String(p.text || '').replace(/\u0000/g, '').trim();
+          if (!t) continue;
+          if (!canSendType(req, 'text', cidNote)) return json(res, 403, { error: denyReason('text', cidNote) });
+          textBytes += bytesOf(t);
+          parts.push({ kind: 'text', text: t });
+          continue;
+        }
+        const s = staged.get(String(p.fid || ''));
+        if (!s || (s.owner && s.owner !== cidNote)) { missing.push(String(p.fid || '')); continue; }
+        picked.push(s);
+        parts.push({ kind: s.kind, fid: s.fid, name: s.name, size: s.size, mime: s.mime, file: s.file });
+      }
+
+      // 宁可整条报错，也不悄悄少补一个附件
+      if (missing.length) {
+        return json(res, 409, { error: `有 ${missing.length} 个附件已失效，请移除后重新添加` });
+      }
+      if (!parts.length) return json(res, 400, { error: '补充内容不能为空' });
+      if (textBytes > 8 * 1024) return json(res, 413, { error: '补充文字过长（上限 8KB）' });
+      for (const s of picked) staged.delete(s.fid);
+
       if (!Array.isArray(it.notes)) it.notes = [];
-      it.notes.push({ by: cidNote, at: Date.now(), text: t });
+      const note = {
+        id: newId(),
+        by: cidNote,
+        at: Date.now(),
+        parts,
+        // 纯文本丢一份，方便老客户端与搜索
+        text: parts.filter((p) => p.kind === 'text').map((p) => p.text).join('\n'),
+      };
+      it.notes.push(note);
       it.notesVer = (it.notesVer || 0) + 1;
+      reindexFiles();
+      saveIndex();
+      json(res, 200, { ok: true, item: it, note });
+    }).catch(() => json(res, 400, { error: 'bad request' }));
+    return;
+  }
+
+  // 删除补充：补充人本人可删自己的，主设备可删任意一条
+  if (method === 'POST' && pathname === '/api/item/note/del') {
+    readBody(req, 4096).then((raw) => {
+      let body = {};
+      try { body = JSON.parse(raw || '{}'); } catch {}
+      const id = String(body.id || '');
+      const idx = items.findIndex((it) => it.id === id);
+      if (idx === -1) return json(res, 404, { error: '消息不存在' });
+      const it = items[idx];
+      if (!Array.isArray(it.notes)) return json(res, 404, { error: '补充不存在' });
+
+      const nid = String(body.noteId || '');
+      const at = Number(body.at || 0);
+      let ni = nid ? it.notes.findIndex((n) => n.id === nid) : -1;
+      // 老数据没有 note.id，用时间戳 + 补充人兜底
+      if (ni === -1 && at) ni = it.notes.findIndex((n) => Number(n.at) === at);
+      if (ni === -1) return json(res, 404, { error: '补充不存在' });
+
+      const note = it.notes[ni];
+      const cidDel = cidOf(req, body.cid);
+      const mine = cidDel && note.by && note.by === cidDel;
+      if (!mine && !canManage(req, cidDel)) {
+        return json(res, 403, { error: '只能删除自己补充的内容' });
+      }
+
+      it.notes.splice(ni, 1);
+      unlinkParts(note.parts || []);
+      it.notesVer = (it.notesVer || 0) + 1;
+      reindexFiles();
       saveIndex();
       json(res, 200, { ok: true, item: it });
     }).catch(() => json(res, 400, { error: 'bad request' }));
@@ -2544,7 +2629,7 @@ const server = http.createServer((req, res) => {
     }
 
     items.splice(idx, 1);
-    unlinkParts(target.parts);
+    unlinkParts(allPartsOf(target));
     reindexFiles();
     saveIndex();
     json(res, 200, { ok: true });
@@ -2555,7 +2640,7 @@ const server = http.createServer((req, res) => {
   if (method === 'DELETE' && pathname === '/api/all') {
     if (!manage) return json(res, 403, { error: '没有管理权限，只有主设备可以清空' });
     for (const it of items) {
-      for (const p of it.parts || []) {
+      for (const p of allPartsOf(it)) {
         if (p.file) fs.unlink(path.join(FILES_DIR, p.file), () => {});
       }
     }

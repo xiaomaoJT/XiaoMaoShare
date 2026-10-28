@@ -1119,8 +1119,29 @@
   .note-meta{display:flex;align-items:baseline;gap:7px;margin-bottom:1px}
   .note-name{font-size:12px;font-weight:600;color:var(--text)}
   .note-time{font-size:10.5px;color:var(--faint)}
-  .note-text{font-size:13px;line-height:1.55;color:var(--text);white-space:pre-wrap;word-break:break-word}
-  .note-add{display:flex;gap:8px;align-items:flex-end;margin-top:9px}
+  .note-text{font-size:13px;line-height:1.58;color:var(--text);word-break:break-word;overflow-wrap:anywhere}
+  .note-text.md{font-size:13px;line-height:1.6;white-space:normal}
+  .note-text.md p{margin:0 0 .45em}
+  .note-text.md>*:last-child{margin-bottom:0}
+  .note-del{
+    margin-left:auto;flex:none;align-self:center;width:20px;height:20px;display:grid;place-items:center;
+    border:0;border-radius:6px;background:transparent;color:var(--faint);cursor:pointer;
+    opacity:0;transition:opacity .12s, background .12s, color .12s;
+  }
+  .note-del svg{width:11px;height:11px}
+  .note-row:hover .note-del{opacity:.72}
+  .note-del:hover{opacity:1;background:rgba(214,69,56,.1);color:var(--danger)}
+  @media (hover:none){ .note-del{opacity:.55} }
+
+  .note-shots{display:grid;gap:5px;margin-top:6px;max-width:340px}
+  .note-shots.n1{grid-template-columns:1fr}
+  .note-shots.n2{grid-template-columns:1fr 1fr}
+  .note-shots.n3{grid-template-columns:repeat(3,1fr)}
+  .note-shots .thumb{width:100%;height:100%;object-fit:cover;border-radius:9px;min-height:0;cursor:zoom-in}
+  .note-shots.n1 .thumb{width:auto;max-width:100%;height:auto;max-height:220px;justify-self:start}
+  .note-shots.n2 .thumb,.note-shots.n3 .thumb{aspect-ratio:1/1}
+
+  .note-add{margin-top:9px}
   .note-add[hidden]{display:none}
   .note-toggle{
     display:inline-flex;align-items:center;gap:4px;margin-top:2px;padding:2px 5px;
@@ -1129,22 +1150,54 @@
   }
   .note-toggle:hover{color:var(--accent);background:var(--accent-soft)}
   .note-toggle svg{width:12px;height:12px}
+
+  .na-box{
+    border:1px solid var(--line);border-radius:11px;background:var(--card-2);
+    padding:7px 8px 6px;transition:border-color .12s, box-shadow .12s;
+  }
+  .na-box:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
   .note-input{
-    flex:1 1 auto;min-height:34px;max-height:120px;padding:7px 10px;
-    font-family:inherit;font-size:13px;line-height:1.4;color:var(--text);
-    background:var(--card-2);border:1px solid var(--line);border-radius:9px;
-    resize:none;outline:none;transition:border-color .12s, box-shadow .12s;
+    display:block;width:100%;min-height:21px;max-height:140px;padding:0 2px;
+    font-family:inherit;font-size:13px;line-height:1.52;color:var(--text);
+    background:transparent;border:0;resize:none;outline:none;
   }
-  .note-input::placeholder{color:var(--faint)}
-  .note-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  .note-input::placeholder{color:var(--faint);font-size:12.5px}
+  .na-chips{display:flex;flex-wrap:wrap;gap:5px;margin:7px 0 1px}
+  .na-chips[hidden]{display:none}
+  .na-chip{
+    display:inline-flex;align-items:center;gap:5px;max-width:230px;
+    padding:3px 5px 3px 8px;border-radius:8px;background:var(--card);
+    border:1px solid var(--line);font-size:11.5px;color:var(--sub);
+  }
+  .na-chip-n{max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);font-weight:600}
+  .na-chip-s{color:var(--faint);flex:none}
+  .na-chip.bad{border-color:rgba(214,69,56,.45);color:var(--danger)}
+  .na-chip-x{border:0;background:transparent;color:var(--faint);cursor:pointer;font-size:10px;padding:0 2px;line-height:1}
+  .na-chip-x:hover{color:var(--danger)}
+  .na-bar{display:flex;align-items:center;gap:2px;margin-top:5px}
+  .na-tool{
+    height:24px;min-width:24px;padding:0 5px;border:0;border-radius:6px;background:transparent;
+    color:var(--faint);font-size:12px;font-weight:700;line-height:1;cursor:pointer;
+    transition:background .12s, color .12s;
+  }
+  .na-tool:hover{background:var(--line);color:var(--text)}
+  .na-tool.on{background:var(--accent-soft);color:var(--accent)}
+  .na-hint{margin-left:auto;font-size:10.5px;color:var(--faint);letter-spacing:.2px;padding-right:6px}
+  .na-file{display:none}
   .note-send{
-    flex:0 0 auto;height:34px;padding:0 15px;border:0;border-radius:9px;
-    background:var(--accent);color:#fff;font-size:12.5px;font-weight:600;cursor:pointer;
-    transition:opacity .12s, transform .12s, box-shadow .12s;
-    box-shadow:0 4px 12px rgba(76,110,245,.28);
+    flex:none;height:26px;padding:0 13px;border:0;border-radius:8px;
+    background:var(--accent);color:#fff;font-size:12px;font-weight:600;cursor:pointer;
+    transition:opacity .12s, box-shadow .12s;box-shadow:0 3px 10px rgba(76,110,245,.26);
   }
-  .note-send:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 7px 18px rgba(76,110,245,.34)}
-  .note-send:disabled{opacity:.42;cursor:not-allowed;box-shadow:none}
+  .note-send:hover:not(:disabled){box-shadow:0 6px 16px rgba(76,110,245,.32)}
+  .note-send:disabled{opacity:.4;cursor:not-allowed;box-shadow:none}
+  @media (max-width:480px){
+    /* 窄屏优先给按钮留出触摸面积，辅助提示让位 */
+    .na-hint{display:none}
+    .na-tool{height:28px;min-width:28px;font-size:13px}
+    .note-send{height:30px;padding:0 14px}
+    .note-shots{max-width:100%}
+  }
   :root[data-theme="glass"] .quote-card,
   :root[data-theme="glass"] .notes-wrap{ -webkit-backdrop-filter:blur(0); }
   :root[data-theme="dark"] .quote-chip .qchip-x:hover,
@@ -3571,7 +3624,104 @@
     setTimeout(function () { target.classList.remove('flash'); }, 1200);
   }
 
-  /* ---------------- 追加补充（所有人可补充） ---------------- */
+  /* ---------------- 追加补充（所有人可补充，支持文字 / 表情 / 图片 / 文件） ---------------- */
+  function notePartsOf(n) {
+    if (n && n.parts && n.parts.length) return n.parts;
+    return (n && n.text) ? [{ kind: 'text', text: n.text }] : [];
+  }
+
+  /** 往任意 textarea 插一段文字（表情走这里），插完回调让外部刷新状态 */
+  function insertInto(ta, str) {
+    ta.focus();
+    var s = ta.selectionStart;
+    if (s == null) s = ta.value.length;
+    if (ta.selectionEnd != null && ta.selectionEnd > s) s = ta.selectionEnd;
+    ta.value = ta.value.slice(0, s) + str + ta.value.slice(s);
+    var c = s + str.length;
+    ta.selectionStart = ta.selectionEnd = c;
+    ta.dispatchEvent(new Event('input'));
+  }
+
+  /** 把选区包进 Markdown 标记（加粗 / 斜体 / 行内代码） */
+  function wrapIn(ta, pre, post, place) {
+    ta.focus();
+    var s = ta.selectionStart, e = ta.selectionEnd;
+    if (s == null) { s = e = ta.value.length; }
+    var sel = ta.value.slice(s, e) || place || '';
+    ta.value = ta.value.slice(0, s) + pre + sel + post + ta.value.slice(e);
+    ta.selectionStart = s + pre.length;
+    ta.selectionEnd = s + pre.length + sel.length;
+    ta.dispatchEvent(new Event('input'));
+  }
+
+  function noteRow(el, it, n) {
+    var parts = notePartsOf(n);
+    var nm = nameOfCidLocal(n.by) || ('设备' + String(n.by || '').slice(-4));
+    var row = document.createElement('div');
+    row.className = 'note-row';
+
+    var ava = document.createElement('span');
+    ava.className = 'note-ava';
+    ava.style.background = colorOf(nm);
+    ava.textContent = String(nm).slice(0, 1).toUpperCase();
+
+    var main = document.createElement('div');
+    main.className = 'note-main';
+
+    var meta = document.createElement('div');
+    meta.className = 'note-meta';
+    meta.innerHTML = '<span class="note-name">' + esc(nm) + '</span>' +
+      '<span class="note-time">' + esc(fmtTime(n.at)) + '</span>';
+
+    // 补充人本人（或主设备）可以删掉这一条
+    if (state.admin || (n.by && n.by === state.cid)) {
+      var del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'note-del';
+      del.title = '删除这条补充';
+      del.setAttribute('aria-label', '删除补充');
+      del.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>';
+      del.onclick = function (e) { e.stopPropagation(); delNote(it, n); };
+      meta.appendChild(del);
+    }
+
+    main.appendChild(meta);
+
+    var texts = parts.filter(function (p) { return p.kind === 'text'; });
+    var imgs = parts.filter(function (p) { return p.kind === 'image'; });
+    var files = parts.filter(function (p) { return p.kind === 'file'; });
+
+    if (texts.length) {
+      var body = document.createElement('div');
+      body.className = 'note-text md';
+      body.innerHTML = texts.map(function (p) { return mdToHtml(p.text); }).join('');
+      main.appendChild(body);
+    }
+
+    if (imgs.length) {
+      var grid = document.createElement('div');
+      grid.className = 'note-shots n' + Math.min(imgs.length, 3);
+      imgs.forEach(function (p, i) {
+        var img = document.createElement('img');
+        img.className = 'thumb';
+        img.loading = 'lazy';
+        img.decoding = 'async';
+        img.src = '/f/' + p.fid + '?cid=' + encodeURIComponent(state.cid);
+        img.alt = p.name || '图片';
+        img.title = (p.name || '图片') + ' · ' + fmtSize(p.size);
+        img.onclick = function () { openLbParts(parts, i); markRead(it); };
+        grid.appendChild(img);
+      });
+      main.appendChild(grid);
+    }
+
+    files.forEach(function (p) { main.appendChild(fileRow(it, p)); });
+
+    row.appendChild(ava);
+    row.appendChild(main);
+    return row;
+  }
+
   function buildNotes(el, it) {
     var wrap = el._notes;
     if (!wrap) {
@@ -3583,6 +3733,7 @@
       wrap.innerHTML = '';
     }
     el._notesVer = it.notesVer || 0;
+    wrap._dirty = false;
     var notes = it.notes || [];
     wrap.classList.toggle('has-notes', notes.length > 0);
     if (notes.length) {
@@ -3590,67 +3741,247 @@
       head.className = 'notes-head';
       head.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5H4l2-3.2A8.5 8.5 0 1 1 21 11.5z"/></svg><span>补充 ' + notes.length + '</span>';
       wrap.appendChild(head);
-      notes.forEach(function (n) {
-        var nm = nameOfCidLocal(n.by) || ('设备' + String(n.by || '').slice(-4));
-        var row = document.createElement('div');
-        row.className = 'note-row';
-        row.innerHTML = '<span class="note-ava" style="background:' + colorOf(nm) + '">' + esc(String(nm).slice(0, 1).toUpperCase()) + '</span>' +
-          '<div class="note-main"><div class="note-meta"><span class="note-name">' + esc(nm) + '</span>' +
-          '<span class="note-time">' + esc(fmtTime(n.at)) + '</span></div>' +
-          '<div class="note-text">' + esc(n.text) + '</div></div>';
-        wrap.appendChild(row);
-      });
+      notes.forEach(function (n) { wrap.appendChild(noteRow(el, it, n)); });
     }
-    // 输入区默认收起，点「补充」再展开，避免每条消息都挂一个输入框
+    // noteComposer 自己会把「继续补充」入口挂到 wrap 上
+    noteComposer(el, it, notes.length);
+  }
+
+  /** 补充的编辑区：文字 + 表情 + Markdown 快捷 + 图片/文件 */
+  function noteComposer(el, it, count) {
+    var wrap = el._notes;
     var add = document.createElement('div');
     add.className = 'note-add';
     add.hidden = true;
+
+    var box = document.createElement('div');
+    box.className = 'na-box';
+
     var ta = document.createElement('textarea');
     ta.className = 'note-input';
     ta.rows = 1;
-    ta.placeholder = notes.length ? '继续补充…' : '补充点什么…';
+    ta.placeholder = (count ? '继续补充…' : '补充点什么…') + '（支持 Markdown、表情、图片、文件）';
     ta.setAttribute('aria-label', '补充内容');
-    var btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'note-send';
-    btn.textContent = '补充';
-    btn.disabled = true;
-    ta.addEventListener('input', function () {
-      btn.disabled = !ta.value.trim();
+
+    var chips = document.createElement('div');
+    chips.className = 'na-chips';
+    chips.hidden = true;
+
+    var bar = document.createElement('div');
+    bar.className = 'na-bar';
+
+    var pending = [];
+
+    var send = document.createElement('button');
+    send.type = 'button';
+    send.className = 'note-send';
+    send.textContent = '补充';
+
+    function sync() {
+      send.disabled = (!ta.value.trim() && !pending.length) || send.dataset.busy === '1';
+      wrap._dirty = !add.hidden || pending.length > 0 || !!ta.value.trim();
+    }
+    function typed() {
       ta.style.height = 'auto';
-      ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
+      ta.style.height = Math.min(ta.scrollHeight, 140) + 'px';
+      sync();
+    }
+    function tool(label, title, fn) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'na-tool';
+      b.title = title;
+      b.textContent = label;
+      b.onclick = function (e) { e.stopPropagation(); fn(); };
+      return b;
+    }
+
+    var emoTool = tool('😊', '插入表情', function () {
+      openEmojiAt(emoTool, function (ch) { insertInto(ta, ch); });
     });
+
+    bar.appendChild(emoTool);
+    bar.appendChild(tool('B', '加粗', function () { wrapIn(ta, '**', '**', '加粗文字'); }));
+    bar.appendChild(tool('I', '斜体', function () { wrapIn(ta, '*', '*', '斜体文字'); }));
+    bar.appendChild(tool('</>', '行内代码', function () { wrapIn(ta, '`', '`', '代码'); }));
+    bar.appendChild(tool('≡', '列表', function () { wrapIn(ta, '- ', '', '一项'); }));
+
+    var pick = document.createElement('input');
+    pick.type = 'file';
+    pick.multiple = true;
+    pick.className = 'na-file';
+    pick.tabIndex = -1;
+    pick.onchange = function () {
+      addFiles(Array.prototype.slice.call(pick.files || []));
+      pick.value = '';
+    };
+    bar.appendChild(tool('📎', '添加图片或文件', function () { pick.click(); }));
+
+    var hint = document.createElement('span');
+    hint.className = 'na-hint';
+    hint.textContent = 'Markdown';
+    bar.appendChild(hint);
+    bar.appendChild(send);
+
+    box.appendChild(ta);
+    box.appendChild(chips);
+    box.appendChild(bar);
+    add.appendChild(box);
+
+    function uploadPart(file) {
+      return new Promise(function (resolve, reject) {
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/upload?name=' + encodeURIComponent(file.name || 'file') +
+          '&type=' + encodeURIComponent(file.type || '') +
+          '&cid=' + encodeURIComponent(state.cid));
+        xhr.onload = function () {
+          var d = {};
+          try { d = JSON.parse(xhr.responseText); } catch (e) {}
+          if (xhr.status === 200 && d.part) resolve(d.part);
+          else reject(new Error(d.error || '上传失败'));
+        };
+        xhr.onerror = function () { reject(new Error('上传失败')); };
+        xhr.send(file);
+      });
+    }
+
+    function addFiles(files) {
+      files.forEach(function (f) {
+        if (!f || !f.size) { toast('空文件无法添加'); return; }
+        var isImg = /^image\//.test(f.type);
+        if (isImg && !canSend('image')) { toast('主设备已关闭图片发送'); return; }
+        if (!isImg && !canSend('file')) { toast('主设备已关闭文件发送'); return; }
+
+        var item = { kind: isImg ? 'image' : 'file', name: f.name || ('图片-' + Date.now() + '.png'), size: f.size, part: null };
+        pending.push(item);
+
+        var chip = document.createElement('span');
+        chip.className = 'na-chip';
+        var nmEl = document.createElement('span');
+        nmEl.className = 'na-chip-n';
+        nmEl.textContent = item.name;
+        var stEl = document.createElement('span');
+        stEl.className = 'na-chip-s';
+        stEl.textContent = '上传中…';
+        var xEl = document.createElement('button');
+        xEl.type = 'button';
+        xEl.className = 'na-chip-x';
+        xEl.title = '移除';
+        xEl.textContent = '✕';
+        xEl.onclick = function (e) {
+          e.stopPropagation();
+          chip.remove();
+          var i = pending.indexOf(item);
+          if (i >= 0) pending.splice(i, 1);
+          if (!pending.length) chips.hidden = true;
+          sync();
+        };
+        chip.appendChild(nmEl);
+        chip.appendChild(stEl);
+        chip.appendChild(xEl);
+        chips.appendChild(chip);
+        chips.hidden = false;
+        add.hidden = false;
+        sync();
+
+        uploadPart(f).then(function (part) {
+          item.part = part;
+          stEl.textContent = fmtSize(item.size);
+          sync();
+        }).catch(function (err) {
+          chip.classList.add('bad');
+          stEl.textContent = (err && err.message) || '上传失败';
+          var i = pending.indexOf(item);
+          if (i >= 0) pending.splice(i, 1);
+          sync();
+        });
+      });
+    }
+
+    function submit() {
+      if (send.dataset.busy === '1') return;
+      var text = ta.value.trim();
+      var parts = [];
+      if (text) parts.push({ kind: 'text', text: text });
+      pending.forEach(function (p) { if (p.part) parts.push({ kind: p.part.kind, fid: p.part.fid }); });
+      if (!parts.length) return;
+
+      send.dataset.busy = '1';
+      send.textContent = '补充中…';
+      sync();
+      api('/api/item/note', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: it.id, cid: state.cid, parts: parts })
+      }).then(function () {
+        ta.value = '';
+        pending.length = 0;
+        chips.innerHTML = '';
+        chips.hidden = true;
+        add.hidden = true;
+        wrap._dirty = false;   // 提交完了，允许轮询把新补充画出来
+        poll(true);
+      }).catch(function (e) {
+        send.dataset.busy = '';
+        send.textContent = '补充';
+        sync();
+        toast(e.message || '补充失败');
+      });
+    }
+
+    if (send.dataset.busy === undefined) send.dataset.busy = '';
+    send.onclick = submit;
+    ta.addEventListener('input', typed);
     ta.addEventListener('keydown', function (e) {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); sendNote(it, ta.value); }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); submit(); }
     });
-    btn.onclick = function () { sendNote(it, ta.value); };
-    add.appendChild(ta);
-    add.appendChild(btn);
 
     var toggle = document.createElement('button');
     toggle.type = 'button';
     toggle.className = 'note-toggle';
-    toggle.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg><span>' + (notes.length ? '继续补充' : '补充说明') + '</span>';
+    toggle.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg><span>' + (count ? '继续补充' : '补充说明') + '</span>';
     toggle.onclick = function (e) {
       e.stopPropagation();
       add.hidden = !add.hidden;
       if (!add.hidden) ta.focus();
+      sync();
     };
+
     wrap.appendChild(toggle);
     wrap.appendChild(add);
+    wrap.appendChild(pick);
+    sync();
   }
 
-  function sendNote(it, text) {
-    text = String(text || '').trim();
-    if (!text) return;
-    api('/api/item/note', {
+  function delNote(it, n) {
+    var body = { id: it.id, cid: state.cid, noteId: n.id || '', at: n.at };
+    api('/api/item/note/del', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: it.id, cid: state.cid, text: text }),
+      body: JSON.stringify(body)
     }).then(function () {
+      // 只摘掉这一行，不重建整块补充区 —— 否则会把正在写的补充冲掉
+      var el = nodes.get(it.id);
+      var wrap = el && el._notes;
+      if (wrap) {
+        var local = (it.notes || []);
+        var idx = -1;
+        for (var i = 0; i < local.length; i++) {
+          if ((n.id && local[i].id === n.id) || Number(local[i].at) === Number(n.at)) { idx = i; break; }
+        }
+        var rows = wrap.querySelectorAll('.note-row');
+        if (idx >= 0 && rows[idx]) rows[idx].remove();
+        var left = wrap.querySelectorAll('.note-row').length;
+        var head = wrap.querySelector('.notes-head span');
+        if (head) head.textContent = '补充 ' + left;
+        var toggleTxt = wrap.querySelector('.note-toggle span');
+        if (toggleTxt) toggleTxt.textContent = left ? '继续补充' : '补充说明';
+        if (left) wrap.classList.add('has-notes'); else wrap.classList.remove('has-notes');
+      }
+      toast('已删除补充');
       poll(true);
     }).catch(function (e) {
-      toast(e.message || '补充失败');
+      toast(e.message || '删除失败');
     });
   }
 
@@ -3660,8 +3991,8 @@
       if (!el2) return;
       var v = it.notesVer || 0;
       if (el2._notesVer !== undefined && el2._notesVer !== v) {
-        var focused = el2._notes && el2._notes.querySelector('.note-input') === document.activeElement;
-        if (focused) return;
+        // 正在写补充（或已挂了待发附件）时先别重建，免得打断输入
+        if (el2._notes && el2._notes._dirty) return;
         buildNotes(el2, it);
       }
     });
@@ -4185,6 +4516,10 @@
       refreshSenders();
       refreshDates();
       render();
+      // 已有卡片的「编辑 / 补充」是增量刷新的，这里补一次，
+      // 否则自己刚发的补充要等下次轮询才出现
+      detectEdits();
+      detectNotes();
     }).catch(function (e) {
       if (e && e.message === 'unauthorized') return;
       markOffline();
@@ -5011,14 +5346,15 @@
     ['符号', ['—', '–', '·', '•', '…', '※', '→', '←', '↑', '↓', '↔', '①', '②', '③', '④', '✓',
       '✗', '★', '☆', '§', '°', '±', '×', '÷', '≈', '≤', '≥', '∞', '【】', '「」', '『』', '《》']]
   ];
-  var emojiPop = null, emojiOpen = false;
+  var emojiPop = null, emojiOpen = false, emojiTarget = null, emojiAnchor = null;
 
   function closeEmoji() {
     if (!emojiPop) return;
     emojiPop.classList.remove('on');
     emojiOpen = false;
-    var btn = document.querySelector('[data-tool="emoji"]');
-    if (btn) btn.classList.remove('on');
+    if (emojiAnchor) emojiAnchor.classList.remove('on');
+    emojiAnchor = null;
+    emojiTarget = null;
   }
 
   function buildEmojiPop() {
@@ -5036,7 +5372,7 @@
         var btn = document.createElement('button');
         btn.type = 'button';
         btn.textContent = ch;
-        btn.onclick = function () { insertAt(ch); };
+        btn.onclick = function () { if (emojiTarget) emojiTarget(ch); };
         grid.appendChild(btn);
       });
       Array.prototype.forEach.call(tabs.children, function (t, i) {
@@ -5063,7 +5399,7 @@
       if (!emojiOpen) return;
       var t = e.target;
       if (pop.contains(t)) return;
-      if (t && t.closest && t.closest('[data-tool="emoji"]')) return;
+      if (emojiAnchor && emojiAnchor.contains(t)) return;
       closeEmoji();
     });
     document.addEventListener('keydown', function (e) {
@@ -5072,22 +5408,30 @@
     return pop;
   }
 
-  function toggleEmoji() {
-    var btn = document.querySelector('[data-tool="emoji"]');
+  /** 在任意输入框旁边弹出表情面板：anchor 是触发按钮，insert 决定字符插到哪儿 */
+  function openEmojiAt(anchor, insert) {
     var pop = buildEmojiPop();
-    if (emojiOpen) { closeEmoji(); return; }
-    closeFmt();
+    var same = emojiOpen && emojiAnchor === anchor;
+    closeEmoji();
+    if (same) return;
+    emojiTarget = insert;
+    emojiAnchor = anchor;
     pop.classList.add('on');
     emojiOpen = true;
-    btn.classList.add('on');
+    if (anchor) anchor.classList.add('on');
 
-    var r = btn.getBoundingClientRect();
+    var r = anchor.getBoundingClientRect();
     var w = pop.offsetWidth, h = pop.offsetHeight;
     var left = Math.min(Math.max(8, r.left), window.innerWidth - w - 8);
     var top = r.top - h - 10;
     if (top < 8) top = r.bottom + 10;
     pop.style.left = Math.round(left) + 'px';
     pop.style.top = Math.round(top) + 'px';
+  }
+
+  function toggleEmoji() {
+    closeFmt();
+    openEmojiAt(document.querySelector('[data-tool="emoji"]'), function (ch) { insertAt(ch); });
   }
 
   /* ---- 格式面板：小屏把 9 个格式动作收进底部抽屉 ---- */
@@ -6281,14 +6625,16 @@
     updateLbUI();
     lb.classList.add('on');
   }
-  function openLb(it, index) {
-    var parts = (it && it.parts) || [];
-    lbList = parts.filter(function (p) { return p.kind === 'image'; }).map(function (p) {
+  function openLbParts(parts, index) {
+    lbList = (parts || []).filter(function (p) { return p.kind === 'image'; }).map(function (p) {
       return { src: '/f/' + p.fid + '?cid=' + encodeURIComponent(state.cid), name: p.name || '图片' };
     });
     if (!lbList.length) return;
     lbMax = lbList.length;
     showLb(index || 0);
+  }
+  function openLb(it, index) {
+    openLbParts((it && it.parts) || [], index);
   }
   function closeLb() {
     lb.classList.remove('on', 'grab', 'grabbing');
