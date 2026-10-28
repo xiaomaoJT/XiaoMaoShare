@@ -182,11 +182,19 @@
   .chip:hover{border-color:var(--accent);color:var(--text)}
   .chip b{color:var(--text);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
   .dot{width:6px;height:6px;border-radius:50%;background:var(--ok);flex:none;box-shadow:0 0 0 3px rgba(18,184,134,.16)}
+  .who-avawrap{position:relative;flex:none;display:inline-flex;width:18px;height:18px}
   .who-ava{
-    width:16px;height:16px;border-radius:50%;flex:none;display:grid;place-items:center;
-    font-size:8.5px;font-weight:800;color:#fff;line-height:1;overflow:hidden;
+    width:18px;height:18px;border-radius:50%;flex:none;display:grid;place-items:center;
+    font-size:9.5px;font-weight:800;color:#fff;line-height:1;overflow:hidden;
     background-size:cover;background-position:50% 50%;
   }
+  /* 在线状态：贴在头像右下角的角标。点要小、要有卡片底色的描边，
+     否则在 18px 的小头像上会糊住字母 */
+  .who-dot{
+    position:absolute;right:-2px;bottom:-2px;width:6px;height:6px;border-radius:50%;
+    background:var(--ok);box-shadow:0 0 0 1.5px var(--card);pointer-events:none;
+  }
+  .chip#who.guest .who-dot{background:var(--faint)}
   /* 未登录态：虚线圈 + 灰头像，一眼看出「这台设备还没登录」 */
   .chip#who.guest{border-style:dashed}
   .chip#who.guest .who-ava{background:var(--card-2)!important;color:var(--faint)!important;background-image:none!important;box-shadow:inset 0 0 0 1px var(--line)}
@@ -928,12 +936,14 @@
 
   /* ---- 接入许可（未授权设备看到的界面） ---- */
   .gate{
-    position:fixed;inset:0;z-index:150;display:none;place-items:center;padding:24px;
+    position:fixed;inset:0;z-index:150;display:none;padding:24px;overflow:auto;
     background-color:var(--bg);background-image:var(--bg-image);background-size:cover;
   }
-  .gate.on{display:grid}
+  /* 用 flex + 卡片 margin:auto，而不是 place-items:center：
+     窗口矮的时候卡片会比视口高，居中会让上边滚不到，margin:auto 两边都能滚到 */
+  .gate.on{display:flex}
   .gate-card{
-    width:100%;max-width:372px;text-align:center;padding:30px 26px;
+    width:100%;max-width:372px;text-align:center;padding:30px 26px;margin:auto;
     background:var(--card);border:1px solid var(--line);border-radius:22px;
     box-shadow:0 26px 64px -34px rgba(16,24,40,.55);
   }
@@ -952,6 +962,8 @@
   }
   .gate-form input:focus{outline:0;border-color:var(--accent);background:var(--card)}
   .gate-form .btn{height:44px;justify-content:center;font-size:14px;border-radius:12px}
+  /* 账户名 / 密码这类普通输入：不要授权码那种「居中 + 拉开字距」，正常排字更好读 */
+  .gate-form.login input{letter-spacing:normal;text-align:left;font-size:14.5px}
   .gate-err{min-height:17px;font-size:12.5px;color:var(--danger);margin-top:2px}
   .gate-meta{margin-top:16px;font-size:11.5px;color:var(--faint);line-height:1.6}
   .gate-meta code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px}
@@ -1292,6 +1304,22 @@
   .note-del.armed{opacity:1;background:rgba(214,69,56,.12);color:var(--danger)}
   .note-del:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
   @media (hover:none){ .note-del{opacity:.55} }
+  /* 补充的复制 / 引用按钮：和删除并列在行尾。
+     复制/引用是正向操作，默认就露出来（.5），悬停整行再提亮；
+     删除是破坏性操作，仍然默认藏起来，两者有意区分。 */
+  .note-acts{display:flex;gap:1px;flex:0 0 auto;margin-top:1px}
+  .note-btn{
+    width:22px;height:22px;padding:0;line-height:0;border:0;border-radius:7px;
+    display:flex;align-items:center;justify-content:center;
+    background:transparent;color:var(--sub);cursor:pointer;
+    opacity:.55;transition:opacity .12s, background .12s, color .12s;
+  }
+  .note-btn svg{width:12px;height:12px;display:block}
+  .note-row:hover .note-btn,
+  .note-btn:focus-visible{opacity:.9}
+  .note-btn:hover{opacity:1;background:rgba(0,0,0,.06);color:var(--text)}
+  .note-btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+  @media (hover:none){ .note-btn{opacity:.7} }
 
   /* 删除确认气泡：破坏性操作统一走这里，二次确认不打断上下文 */
   .cfm-pop{
@@ -1876,7 +1904,7 @@
     </div>
     <div class="spacer"></div>
     <button class="chip" id="who" title="点击设置头像与昵称">
-      <span class="who-ava" id="whoAva"></span><b id="whoName">…</b><span class="dot"></span>
+      <span class="who-avawrap"><span class="who-ava" id="whoAva"></span><i class="who-dot" aria-hidden="true"></i></span><b id="whoName">…</b>
     </button>
     <button class="peers-btn" id="peersBtn" title="在线设备" aria-haspopup="true" aria-expanded="false" aria-controls="peersPop">
       <span class="pstack" id="pstack"></span>
@@ -2853,125 +2881,84 @@
       if (onPass) onPass(d);
     }
 
-    /* ---------------- 选账户登录（设备已过许可，还没说清「你是谁」） ---------------- */
-    var ICK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" ' +
-      'stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
-
+    /* ---------------- 账户登录（设备已过许可；登录是可选的「跨设备身份」） ---------------- */
     function loginForm(errMsg) {
       stopPoll();
-      shell('选择账户登录', '设备已经通过接入许可。选一个账户登录，发出去的内容才会记在「你」名下。');
-      bodyEl.innerHTML = '<div class="spin"></div>';
-      api('/api/accounts')
-        .then(function (d) { drawLogin((d && d.accounts) || [], errMsg); })
-        .catch(function () { drawLogin(state.accounts || [], errMsg); });
+      shell('登录账户',
+        '已通过接入许可就能直接使用。想以某个账户身份发言（跨设备同一个人）时，输入账户名和密码登录；不登录也不影响使用。');
+      drawLogin(errMsg);
     }
 
-    function drawLogin(list, errMsg) {
+    // 不再列出所有账户（那等于公开了有哪些人）：直接输「账户名 + 密码」。
+    function drawLogin(errMsg) {
       bodyEl.innerHTML = '';
-      if (!list.length) {
-        shell('还没有可用的账户', '让主控先在「设置 → 账户」里建一个账户（或给主控账户设个密码），再回来登录。');
-        return;
-      }
-
-      // 只预选「上次在这台设备上登的那个」。第一次来就空着，别替人做主
-      // —— 默认选中最强的账户，等于诱导别人去猜主控的密码。
-      var picked = (state.acc && state.acc.id) || '';
-
-      var ul = document.createElement('div');
-      ul.className = 'acc-list';
-      var rows = [];
       var pwd, btn;
 
-      function curAcc() {
-        for (var j = 0; j < list.length; j++) if (list[j].id === picked) return list[j];
-        return null;
-      }
-      function syncSel() {
-        rows.forEach(function (r) { r.el.classList.toggle('on', r.id === picked); });
-        var cur = curAcc();
-        var need = !!(cur && cur.hasPass);
-        pwd.disabled = !need;
-        if (!need) pwd.value = '';
-        pwd.placeholder = !cur
-          ? '先在上面选一个账户'
-          : need ? '输入「' + cur.name + '」的密码' : '这个账户还没设密码，先让主控设一个';
-        btn.disabled = !need;
-        btn.textContent = need ? '登录' : (cur ? '暂不能登录' : '请先选账户');
-      }
-
-      list.forEach(function (a) {
-        var b = document.createElement('button');
-        b.type = 'button';
-        b.className = 'acc-pick';
-        b.setAttribute('role', 'option');
-        var av = document.createElement('span');
-        av.className = 'pava';
-        paintAccAva(av, a);
-        var bx = document.createElement('div');
-        bx.className = 'acc-pick-i';
-        var nm = document.createElement('span');
-        nm.className = 'acc-pick-n';
-        nm.textContent = a.name;
-        var sb = document.createElement('span');
-        sb.className = 'acc-pick-s';
-        sb.textContent = a.roleName + (a.hasPass ? ' · 已设密码' : ' · 还没设密码');
-        bx.appendChild(nm);
-        bx.appendChild(sb);
-        var ck = document.createElement('span');
-        ck.className = 'acc-pick-tick';
-        ck.innerHTML = ICK;
-        b.appendChild(av);
-        b.appendChild(bx);
-        b.appendChild(ck);
-        b.onclick = function () {
-          picked = a.id;
-          syncSel();
-          if (!pwd.disabled) { try { pwd.focus(); } catch (e) {} }
-        };
-        rows.push({ id: a.id, el: b });
-        ul.appendChild(b);
-      });
-      bodyEl.appendChild(ul);
-
-      // 全新安装时一个设过密码的账户都没有，列表里的按钮全是灰的，
-      // 不解释一句很容易以为服务坏了
-      if (!list.some(function (a) { return a.hasPass; })) {
-        var noPw = document.createElement('div');
-        noPw.className = 'gate-meta';
-        noPw.innerHTML = '还没有账户设过密码，所以谁也登不进来。先到<b>主控设备</b>上打开「设置 → 账户」给账户设一个密码，再回来登录。';
-        bodyEl.appendChild(noPw);
-      }
-
       var wrap = document.createElement('div');
-      wrap.className = 'gate-form';
+      wrap.className = 'gate-form login';
+
+      var nameInp = document.createElement('input');
+      nameInp.type = 'text';
+      nameInp.autocomplete = 'username';
+      nameInp.maxLength = 24;
+      nameInp.placeholder = '账户名';
+      nameInp.setAttribute('aria-label', '账户名');
+      // 只带出「本机上次登录的那个账户名」方便复用，不暴露其他账户
+      if (state.acc && state.acc.name) nameInp.value = state.acc.name;
+
       pwd = document.createElement('input');
       pwd.type = 'password';
-      pwd.autocomplete = 'off';
+      pwd.autocomplete = 'current-password';
       pwd.maxLength = 64;
+      pwd.placeholder = '密码';
       pwd.setAttribute('aria-label', '账户密码');
+
       btn = document.createElement('button');
       btn.className = 'btn primary';
+      btn.textContent = '登录';
+
       var err = document.createElement('div');
       err.className = 'gate-err';
       err.textContent = errMsg || '';
+
+      wrap.appendChild(nameInp);
       wrap.appendChild(pwd);
       wrap.appendChild(btn);
       wrap.appendChild(err);
       bodyEl.appendChild(wrap);
 
-      syncSel();
-      setTimeout(function () { if (!pwd.disabled) { try { pwd.focus(); } catch (e) {} } }, 90);
+      var tip = document.createElement('div');
+      tip.className = 'gate-meta';
+      tip.innerHTML = '没有账户？让主控在「设置 → 账户」里加一个。不登录也能用，只是发言会以这台设备的名义。';
+      bodyEl.appendChild(tip);
+
+      // 登录是可选的：留一个出口，别把不想登录的人关在这儿
+      var skip = document.createElement('button');
+      skip.type = 'button';
+      skip.className = 'gate-link';
+      skip.textContent = '暂不登录，继续使用';
+      skip.onclick = function () {
+        stopPoll();
+        el.classList.remove('on');
+        poll(true);
+        startPolling();
+      };
+      bodyEl.appendChild(skip);
+
+      setTimeout(function () { try { (nameInp.value ? pwd : nameInp).focus(); } catch (e) {} }, 90);
 
       function submit() {
         if (btn.disabled) return;
+        var nm = nameInp.value.trim();
         var v = pwd.value;
+        if (!nm) { err.textContent = '请输入账户名'; nameInp.focus(); return; }
         if (!v) { err.textContent = '请输入密码'; pwd.focus(); return; }
         btn.disabled = true;
         btn.textContent = '登录中…';
         api('/api/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ cid: state.cid, acc: picked, password: v })
+          body: JSON.stringify({ cid: state.cid, name: nm, password: v })
         }).then(function (d) {
           adoptIdentity(d);
           toast('已登录为「' + ((d.acc && d.acc.name) || '') + '」');
@@ -2984,6 +2971,7 @@
         });
       }
       btn.onclick = submit;
+      nameInp.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); pwd.focus(); } });
       pwd.addEventListener('keydown', function (e) {
         if (e.key === 'Enter') { e.preventDefault(); submit(); }
       });
@@ -4088,6 +4076,26 @@
     setTimeout(function () { target.classList.remove('flash'); }, 1200);
   }
 
+  /** 引用某一条「补充」：挂到输入区，下一条发出时带引用卡（服务端按 note 下标回填作者） */
+  function startQuoteNote(it, n, snip) {
+    var idx = (it.notes || []).indexOf(n);
+    var nm = nameOfCidLocal(n.by) || ('设备' + String(n.by || '').slice(-4));
+    pendingQuote = {
+      id: it.id,
+      note: idx >= 0 ? idx : undefined,
+      by: n.by,
+      byName: nm,
+      snippet: String(snip || '').slice(0, 140),
+    };
+    renderQuoteChip();
+    var comp = $('composer');
+    if (comp) comp.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    var blocksEl = $('blocks');
+    var ta = blocksEl && blocksEl.querySelector('textarea');
+    if (ta) ta.focus();
+    toast('已引用这条补充，输入内容后发送');
+  }
+
   /* ---------------- 追加补充（所有人可补充，支持文字 / 表情 / 图片 / 文件） ---------------- */
   function notePartsOf(n) {
     if (n && n.parts && n.parts.length) return n.parts;
@@ -4186,9 +4194,41 @@
 
     files.forEach(function (p) { main.appendChild(fileRow(it, p)); });
 
+    // 每条补充都有「复制 / 引用」；可删时把删除按钮并列在行尾
+    var acts = document.createElement('div');
+    acts.className = 'note-acts';
+    var ntexts = parts.filter(function (p) { return p.kind === 'text'; });
+    var ntextFlat = ntexts.map(function (p) { return p.text || ''; }).join('\n\n');
+    if (ntexts.length) {
+      var cbtn = document.createElement('button');
+      cbtn.type = 'button'; cbtn.className = 'note-btn'; cbtn.title = '复制这条补充';
+      cbtn.setAttribute('aria-label', '复制补充');
+      cbtn.innerHTML = ICOPY;
+      cbtn.onclick = function (e) {
+        e.stopPropagation();
+        copyText(ntextFlat, '已复制补充内容');
+      };
+      acts.appendChild(cbtn);
+    }
+    var qbtn = document.createElement('button');
+    qbtn.type = 'button'; qbtn.className = 'note-btn'; qbtn.title = '引用这条补充';
+    qbtn.setAttribute('aria-label', '引用补充');
+    qbtn.innerHTML = IQUOTE;
+    qbtn.onclick = function (e) {
+      e.stopPropagation();
+      var snip = ntextFlat.replace(/\s+/g, ' ').trim();
+      if (!snip) {
+        var nI = imgs.length, nF = files.length;
+        snip = nI && nF ? '[图片 / 文件]' : (nI ? '[图片]' : (nF ? '[文件]' : '(无文字内容)'));
+      }
+      startQuoteNote(it, n, snip);
+    };
+    acts.appendChild(qbtn);
+    if (del) acts.appendChild(del);
+
     row.appendChild(ava);
     row.appendChild(main);
-    if (del) row.appendChild(del);
+    row.appendChild(acts);
     return row;
   }
 
@@ -4488,16 +4528,16 @@
     });
   }
 
-  function copyText(t) {
+  function copyText(t, okMsg) {
     if (navigator.clipboard && window.isSecureContext) {
-      navigator.clipboard.writeText(t).then(function () { toast('已复制'); }, function () { legacyCopy(t); });
-    } else legacyCopy(t);
+      navigator.clipboard.writeText(t).then(function () { toast(okMsg || '已复制'); }, function () { legacyCopy(t, okMsg); });
+    } else legacyCopy(t, okMsg);
   }
-  function legacyCopy(t) {
+  function legacyCopy(t, okMsg) {
     var ta = document.createElement('textarea');
     ta.value = t; ta.style.position = 'fixed'; ta.style.opacity = '0';
     document.body.appendChild(ta); ta.select();
-    try { document.execCommand('copy'); toast('已复制'); }
+    try { document.execCommand('copy'); toast(okMsg || '已复制'); }
     catch (e) { toast('复制失败，请长按选择'); }
     ta.remove();
   }
@@ -5066,11 +5106,10 @@
   }
   function syncWho() {
     if (!state.me) return;
-    var nm = (state.acc && state.acc.name) || state.me.name || '本机';
+    // 名字优先「主动设置的名字 / 原始设备名」，绝不拿角色标签（主控 / 访客）当名字
+    var nm = state.me.name || (state.acc && state.acc.name) || '本机';
     $('whoName').textContent = nm;
-    $('who').title = state.hostAdmin
-      ? nm + ' · 主控设备'
-      : nm + ' · ' + state.roleName + ' · 点这里切换账户';
+    $('who').title = state.acc ? nm + ' · 点这里切换账户' : nm + ' · 点击设置头像与昵称';
     paintAva($('whoAva'), state.cid, nm);
   }
 
@@ -5582,7 +5621,7 @@
       var r = await api('/api/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cid: state.cid, to: state.toCids, parts: parts, quote: pendingQuote ? { id: pendingQuote.id, snippet: pendingQuote.snippet } : undefined })
+        body: JSON.stringify({ cid: state.cid, to: state.toCids, parts: parts, quote: pendingQuote ? { id: pendingQuote.id, note: pendingQuote.note, snippet: pendingQuote.snippet } : undefined })
       });
 
       resetCompose();
@@ -5726,7 +5765,7 @@
       var sent = await api('/api/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cid: state.cid, to: state.toCids, parts: parts, quote: pendingQuote ? { id: pendingQuote.id, snippet: pendingQuote.snippet } : undefined })
+        body: JSON.stringify({ cid: state.cid, to: state.toCids, parts: parts, quote: pendingQuote ? { id: pendingQuote.id, note: pendingQuote.note, snippet: pendingQuote.snippet } : undefined })
       });
 
       resetCompose();
@@ -6936,8 +6975,9 @@
 
     var hint = document.createElement('div');
     hint.className = 'dev-hint';
-    hint.textContent = '账户是身份，设备只是入口：同一个账户能在多台设备上登录，头像和发出去的消息都跟着账户走。' +
-      '三档角色的区别 —— 成员能收发；管理员还能审批设备、删除他人内容；主控另外能改全局设置、管账户。没有访客身份，不登录进不来。';
+    hint.textContent = '账户是「跨设备的身份」：同一个账户能在多台设备上登录，头像和发出去的消息都跟着账户走。' +
+      '三档角色的区别 —— 成员能收发；管理员还能审批设备、删除他人内容；主控另外能改全局设置、管账户。' +
+      '不登录也能收发，只是以这台设备的名义，拿不到这些管理能力。';
     box.appendChild(hint);
 
     var cache = [];
@@ -7117,7 +7157,7 @@
         tr.className = 'track';
         var tx = document.createElement('span');
         tx.className = 'txt';
-        tx.innerHTML = '停用这个账户<small>停用后它登录不了，已经登录的设备会退回未登录</small>';
+        tx.innerHTML = '停用这个账户<small>停用后它登录不了，已经登录的设备会退回设备身份</small>';
         dis.appendChild(cb); dis.appendChild(tr); dis.appendChild(tx);
         box2.appendChild(dis);
       }
@@ -7132,13 +7172,13 @@
         delBtn.onclick = function () {
           Dialog.confirm({
             title: '删除账户「' + cur.name + '」？',
-            desc: '账户删掉后，正在用它登录的设备会立刻退回未登录；它发过的内容会保留。',
+            desc: '账户删掉后，正在用它登录的设备会立刻退回设备身份（照常收发，只是管理能力没了）；它发过的内容会保留。',
             ok: '删除', danger: true
           }).then(function (okd) {
             if (!okd) return;
             api('/api/accounts?id=' + encodeURIComponent(cur.id), { method: 'DELETE' })
               .then(function (d) {
-                toast(d.kicked ? '已删除，' + d.kicked + ' 台设备退回未登录' : '已删除账户');
+                toast(d.kicked ? '已删除，' + d.kicked + ' 台设备退回设备身份' : '已删除账户');
                 if (d.accounts) { cache = d.accounts; paint({ accounts: d.accounts }); }
                 poll(true);
               }).catch(function (e) { toast(e.message || '删除失败'); });
@@ -7597,7 +7637,7 @@
 
   function openWhoPop() {
     if (!whoPop.hidden) { closeWhoPop(); return; }
-    var nm = (state.acc && state.acc.name) || (state.me && state.me.name) || '本机';
+    var nm = (state.me && state.me.name) || (state.acc && state.acc.name) || '本机';
     whoPop.innerHTML = '';
 
     var head = document.createElement('div');
@@ -7610,14 +7650,7 @@
     var n = document.createElement('div');
     n.className = 'who-n';
     n.textContent = nm;
-    // 名字和角色撞了（比如就叫「主控」）就别重复挂一个一样的标签
-    if (state.roleName !== nm) {
-      var chip = document.createElement('span');
-      chip.className = 'role-chip ' + state.role;
-      chip.textContent = state.roleName;
-      n.appendChild(document.createTextNode(' '));
-      n.appendChild(chip);
-    }
+    // 身份弹窗只显示名字，不挂角色标签（主控 / 访客这些容易被误当成名字）
     var sub = document.createElement('div');
     sub.className = 'who-s';
     // 设备名里本来就带 IP，别再叠一遍
@@ -7634,8 +7667,13 @@
     }
     // 主控设备天然就是主控身份，没有「切换 / 退出」这回事
     if (!state.hostAdmin) {
-      whoPop.appendChild(whoMenuItem(IUSER, '切换账户', openLoginGate));
-      whoPop.appendChild(whoMenuItem(ILOGOUT, '退出登录', doLogout, 'danger'));
+      if (state.acc) {
+        whoPop.appendChild(whoMenuItem(IUSER, '切换账户', openLoginGate));
+        whoPop.appendChild(whoMenuItem(ILOGOUT, '退出登录', doLogout, 'danger'));
+      } else {
+        // 没登录：设备授权即可用，登录只是可选的「跨设备身份」
+        whoPop.appendChild(whoMenuItem(IUSER, '登录账户', openLoginGate));
+      }
     }
 
     whoPop.hidden = false;
@@ -7666,7 +7704,7 @@
   function doLogout() {
     Dialog.confirm({
       title: '退出登录？',
-      desc: '退出后这台设备回到未登录状态，必须重新登录账户才能发送内容。想再用这个身份，重新输一次密码即可。',
+      desc: '退出后回到设备身份，照常收发（只是不再算作某个人，管理能力也没了）。想再用那个身份，重新输一次密码即可。',
       ok: '退出登录', danger: true
     }).then(function (ok) {
       if (!ok) return;
@@ -7676,8 +7714,8 @@
         body: JSON.stringify({ cid: state.cid })
       }).then(function (d) {
         adoptIdentity(d);
-        openLoginGate();
-        toast('已退出登录，请重新登录');
+        poll(true);
+        toast('已退出登录，当前按设备身份使用');
       }).catch(function (e) { toast(e.message || '退出失败'); });
     });
   }
@@ -7981,13 +8019,11 @@
 
   /* ============================================================ 启动 */
   /**
-   * 已过接入许可、但还没说清「你是谁」时，强制选个账户登录。
-   * 没有访客身份：不登录就进不来，也不能用「记住访客」跳过。
+   * 已通过接入许可即可直接使用（设备身份），不再强制选账户登录。
+   * 账户登录是「跨设备身份」的可选增强，需要时从顶栏头像菜单里进。
    */
   function openLoginIfNeeded(d) {
-    if (d && d.authorized && !d.acc && !d.hostAdmin) {
-      Gate.open('login', { onPass: function () { poll(true); } });
-    }
+    // 故意留空：保留这个挂载点，以后要在某个时机引导登录（比如首次使用）再补。
   }
 
   /** 过了闸门之后统一走这里：先铺界面，再按需弹登录 */

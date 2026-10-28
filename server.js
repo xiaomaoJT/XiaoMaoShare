@@ -849,7 +849,7 @@ function peersPayload() {
  */
 function canSendType(req, kind, cid) {
   if (isHostRequest(req)) return true;
-  // 角色是第一道闸门：访客一律不能发，成员及以上能发文字和附件
+  // 角色是第一道闸门：设备身份（未登录）能发文字和附件，其余按角色放宽
   const rc = capsOfRole(roleOf(req, cid));
   if (!rc.send) return false;
   if ((kind === 'image' || kind === 'file') && !rc.attach) return false;
@@ -885,7 +885,7 @@ function capsPayload(req, cid) {
 }
 
 function denyReason(kind, cid) {
-  if (!capsOfRole(roleOf(null, cid)).send) return '当前是访客身份，登录账户后才能发送内容';
+  if (!capsOfRole(roleOf(null, cid)).send) return '这台设备没有发送权限';
   const p = permsOf(cid);
   if (!settings.allowSend) return '主设备已关闭其他设备的发送权限';
   if (!p.send) return '主设备已禁止这台设备发送内容';
@@ -1298,9 +1298,10 @@ function saveProfiles() {
 
 /* ---------------------------------------------------- 账户（身份，可跨设备） */
 /**
- * 身份 = 账户，设备只是入口：devices[cid].acc 记着「这台设备当前登录的是谁」，
- * 同一个账户可以在多台设备上登录，头像、颜色、消息归属都跟着账户走。
- * 没有访客：过了接入许可也必须有账户身份才能进，没登录的设备什么都看不到。
+ * 两种身份：设备身份（过了接入许可就算）和账户身份（登录后才有）。
+ * devices[cid].acc 记着「这台设备当前登录的是谁」，同一个账户可以在多台设备上登录，
+ * 头像、颜色、消息归属都跟着账户走。
+ * 不登录也能用：设备身份给基础能力（发 / 附件 / 私聊），管理类能力要账户角色。
  * 账户由主控在「设置 → 账户」里配置；密码只存 scrypt 派生值，明文不落盘、也不下发。
  */
 const ACCOUNTS_FILE = path.join(DATA_DIR, 'accounts.json');
@@ -1330,9 +1331,12 @@ function saveAccounts() {
   fs.writeFile(ACCOUNTS_FILE, JSON.stringify(accounts, null, 2), () => {});
 }
 
-const roleLabel = (r) => ROLE_LABEL[r] || '访客';
-const ZERO_CAPS = { send: 0, attach: 0, priv: 0, moderate: 0, devices: 0, config: 0, accounts: 0 };
-const capsOfRole = (r) => ROLE_CAPS[r] || ZERO_CAPS;
+const roleLabel = (r) => ROLE_LABEL[r] || '未登录';
+// 未登录、但已通过接入许可的设备：按「设备身份」给基础能力（发 / 附件 / 私聊），
+// 删改他人、设备管理、全局设置、账户管理仍要账户角色——所以这几项不给。
+// 安全性由入口的 authState 全局拦截兜底：未授权设备根本到不了这里。
+const DEVICE_CAPS = { send: 1, attach: 1, priv: 1, moderate: 0, devices: 0, config: 0, accounts: 0 };
+const capsOfRole = (r) => ROLE_CAPS[r] || DEVICE_CAPS;
 
 /** 密码只留派生值：scrypt + 每账户独立盐，比裸 sha256 抗字典 */
 function hashPass(pass, salt) {
@@ -1929,10 +1933,10 @@ const server = http.createServer((req, res) => {
             me: null,
             peers: [],
             settings,
-            // 还没进门也要能看到账户清单：通过许可后直接选账户登录
-            accounts: accountList(false),
+            // 未授权设备不下发任何账户清单（避免公开有哪些账户）
+            accounts: [],
             role: 'guest',
-            roleName: '访客',
+            roleName: '未登录',
           });
         }
 
@@ -1957,10 +1961,10 @@ const server = http.createServer((req, res) => {
           canConfig: canConfig(req, cidHere),
           // acc = 当前登录的账户；role 由服务端算好，前端不自己推
           acc: acc ? publicAcc(acc) : null,
-          needLogin: !acc,
+          needLogin: false,
           role,
           roleName: roleLabel(role),
-          accounts: accountList(false),
+          accounts: canConfig(req, cidHere) ? accountList(false) : [],
           caps: capsPayload(req, cidHere),
           limits: limitsPayload(),
           pending: effAdmin ? pendingList().length : 0,
@@ -2466,10 +2470,8 @@ const server = http.createServer((req, res) => {
     const host = isHostRequest(req);
     if (host && cid) bindHostDevice(cid, req);
     const me = cid ? touchClient(req, cid, '') : null;
-    // 没有访客：接入许可只是进门，进门后还必须登录账户才能看内容
-    if (!host && !accOfCid(cid)) {
-      return json(res, 401, { error: '请先登录账户', needLogin: true });
-    }
+    // 已通过接入许可即可看内容；账户登录是可选的「跨设备身份」，不再强制
+    // （未授权设备已在入口的 authState 全局拦截，进不到这里）
     // 私聊内容只有收发双方能看到；to 为空 = 全网可见
     // 「双方」按人算：同一个账户的另一台设备也该看得见自己发的私聊
     const visible = me
@@ -2495,7 +2497,7 @@ const server = http.createServer((req, res) => {
       acc: acc ? publicAcc(acc) : null,
       role,
       roleName: roleLabel(role),
-      accounts: accountList(false),
+      accounts: canConfig(req, cid) ? accountList(false) : [],
       caps: capsPayload(req, cid),
       profiles: publicProfiles(),
       limits: limitsPayload(),
@@ -2510,10 +2512,7 @@ const server = http.createServer((req, res) => {
     const ids = String(url.searchParams.get('ids') || '')
       .split(',').map((s) => s.trim()).filter(Boolean).slice(0, 300);
     const me = cid ? clients.get(cid) : null;
-    // 没有访客：打包下载也是内容操作，必须先登录账户
-    if (!isHostRequest(req) && !accOfCid(cid)) {
-      return json(res, 401, { error: '请先登录账户', needLogin: true });
-    }
+    // 已通过接入许可即可打包下载（未授权设备已在入口 authState 处被拦下）
     // 跟 /api/list 同一套可见性规则：私聊内容不能打包给别人
     const visible = me
       ? items.filter((it) => {
@@ -2622,8 +2621,17 @@ const server = http.createServer((req, res) => {
         try { body = JSON.parse(raw || '{}'); } catch { /* 空 body */ }
         const cidHere = cidOf(req, body.cid) || cid;
         const accId = String(body.acc || '').slice(0, 64);
-        const a = accounts[accId];
-        if (!a) return json(res, 404, { error: '账户不存在，可能已经被主控删掉了' });
+        const nmIn = String(body.name || '').trim().replace(/\s+/g, ' ').slice(0, 24);
+        let a = accounts[accId] || null;
+        // 按「账户名 + 密码」登录（前端不再列账户让人选）；也兼容旧的 accId 方式
+        if (!a && nmIn) {
+          a = Object.values(accounts).find((x) => x && !x.disabled && x.name === nmIn) || null;
+        }
+        if (!a) {
+          // 不区分「账户不存在」和「密码错」，免得被拿来枚举有哪些账户
+          loginFail(ip);
+          return json(res, 403, { error: '账户名或密码不正确' });
+        }
         if (a.disabled) return json(res, 403, { error: '这个账户已被主控停用' });
         // 没设密码的账户不放行：否则谁都能顶着「主控」的名义进来
         if (!a.hash) {
@@ -2636,7 +2644,7 @@ const server = http.createServer((req, res) => {
         if (loginBlocked(ip)) return json(res, 429, { error: '密码错太多次了，过 10 分钟再试' });
         if (!checkAccPass(a, body.password)) {
           loginFail(ip);
-          return json(res, 403, { error: '密码不正确' });
+          return json(res, 403, { error: '账户名或密码不正确' });
         }
         loginTries.delete(ip);
 
@@ -2663,14 +2671,15 @@ const server = http.createServer((req, res) => {
           canConfig: canConfig(req, cidHere),
           caps: capsPayload(req, cidHere),
           profiles: publicProfiles(),
-          accounts: accountList(false),
+          accounts: canConfig(req, cidHere) ? accountList(false) : [],
         });
       })
       .catch(() => json(res, 400, { error: 'bad request' }));
     return;
   }
 
-  // 退出登录：这台设备回到未登录状态（接入许可还在，不用重新输密码，但必须重新登录账户才能发内容）
+  // 退出登录：这台设备回到「设备身份」（接入许可还在，不用重新输接入密码；
+  // 收发照常，只是回到最基础那档能力，管理类接口会拒绝）
   if (method === 'POST' && pathname === '/api/logout') {
     readBody(req, 4096)
       .then((raw) => {
@@ -2679,7 +2688,7 @@ const server = http.createServer((req, res) => {
         const cidHere = cidOf(req, body.cid) || cid;
         const d = cidHere && devices[cidHere];
         if (d && d.acc) {
-          // 主控设备本身就是主控身份，退出只会把自己降成访客，没有意义
+          // 主控设备本身就是主控身份，退出只会把自己降成设备身份，没有意义
           if (d.acc === OWNER_ID && isHostRequest(req)) {
             return json(res, 400, { error: '主控设备本身就是主控身份，不用退出登录' });
           }
@@ -2699,7 +2708,7 @@ const server = http.createServer((req, res) => {
           canConfig: canConfig(req, cidHere),
           caps: capsPayload(req, cidHere),
           profiles: publicProfiles(),
-          accounts: accountList(false),
+          accounts: canConfig(req, cidHere) ? accountList(false) : [],
         });
       })
       .catch(() => json(res, 400, { error: 'bad request' }));
@@ -2792,7 +2801,8 @@ const server = http.createServer((req, res) => {
     if (!a) return json(res, 404, { error: '账户不存在' });
     if (a.role === 'owner') return json(res, 400, { error: '主控账户不能删除' });
 
-    // 正在用这个账户的设备退回未登录，别把它们留在不存在的身份上
+    // 正在用这个账户的设备退回设备身份（还能收发，但管理能力没了），
+    // 别把它们留在不存在的身份上
     let kicked = 0;
     for (const k of Object.keys(devices)) {
       if (devices[k].acc === id) { delete devices[k].acc; kicked++; }
@@ -2803,7 +2813,7 @@ const server = http.createServer((req, res) => {
     saveAccounts();
     saveDevices();
     saveProfiles();
-    console.log(`  主控删除了账户「${a.name}」` + (kicked ? `（${kicked} 台设备退回未登录）` : ''));
+    console.log(`  主控删除了账户「${a.name}」` + (kicked ? `（${kicked} 台设备退回设备身份）` : ''));
     json(res, 200, { ok: true, kicked, accounts: accountList(true) });
     return;
   }
@@ -3011,19 +3021,29 @@ const server = http.createServer((req, res) => {
         if (!parts.length) return json(res, 400, { error: '内容为空' });
         if (parts.length > MAX_PARTS * 2) parts.length = MAX_PARTS * 2;
 
-        // 发送时引用：仅记录被引用消息的 id，服务端回填发送者与片段，避免客户端伪造
+        // 发送时引用：只收 id，服务端回填发送者与片段，避免客户端伪造。
+        // 引用「补充」时前端会带 note（该条补充在 notes 里的下标），按那条的作者回填。
         let quote = null;
         if (body.quote && body.quote.id) {
           const qItem = items.find((x) => x.id === String(body.quote.id));
           if (qItem) {
-            const qtext = (qItem.parts || []).filter((p) => p.kind === 'text').map((p) => p.text || '').join('\n');
+            let qBy = qItem.owner;
+            let qByName = qItem.from;
+            let qtext = '';
+            const ni = Number(body.quote.note);
+            const note = Number.isInteger(ni) && ni >= 0 && qItem.notes ? qItem.notes[ni] : null;
+            if (note) {
+              const nparts = (note.parts && note.parts.length)
+                ? note.parts
+                : (note.text ? [{ kind: 'text', text: note.text }] : []);
+              qtext = nparts.filter((p) => p.kind === 'text').map((p) => p.text || '').join('\n');
+              qBy = note.by || qItem.owner;
+              qByName = nameOfCid(qBy) || qItem.from;
+            } else {
+              qtext = (qItem.parts || []).filter((p) => p.kind === 'text').map((p) => p.text || '').join('\n');
+            }
             const snip = String(body.quote.snippet || qtext || '').replace(/\s+/g, ' ').trim().slice(0, 140);
-            quote = {
-              id: qItem.id,
-              by: qItem.owner,
-              byName: qItem.from,
-              snippet: snip,
-            };
+            quote = { id: qItem.id, by: qBy, byName: qByName, snippet: snip };
           }
         }
 
