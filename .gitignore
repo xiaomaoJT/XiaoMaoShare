@@ -7,3 +7,6 @@ data/
 # 系统 / 编辑器
 .DS_Store
 node_modules/
+
+# 桌面端打包产物
+release/

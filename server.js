@@ -16,7 +16,12 @@ const { exec } = require('child_process');
 const pkg = require('./package.json'); // 版本号唯一来源，前端通过 /api/version 读取
 
 const ROOT = __dirname;
-const DATA_DIR = path.join(ROOT, 'data');
+/**
+ * 数据目录默认跟着代码走（./data），但可以被 XM_DATA_DIR 覆盖。
+ * 桌面壳打包后代码在只读的 asar 里，数据得放到用户目录（app.getPath('userData')），
+ * 否则写 index.json / 存文件都会失败。
+ */
+const DATA_DIR = process.env.XM_DATA_DIR ? path.resolve(process.env.XM_DATA_DIR) : path.join(ROOT, 'data');
 const FILES_DIR = path.join(DATA_DIR, 'files');
 const INDEX_FILE = path.join(DATA_DIR, 'index.json');
 const PUBLIC_DIR = path.join(ROOT, 'public');
@@ -3398,60 +3403,138 @@ const server = http.createServer((req, res) => {
 
 /* ------------------------------------------------------------------ 启动 */
 
-function listen(port, attempt = 0) {
-  server.once('error', (err) => {
-    if (err.code === 'EADDRINUSE' && attempt < 20) {
-      listen(port + 1, attempt + 1);
-    } else {
-      console.error('启动失败：', err.message);
-      process.exit(1);
-    }
-  });
-  server.listen(port, '0.0.0.0', () => {
-    sweepExpired();   // 开张前先把过期内容清掉，banner 上的条数才是真实存量
-    const actual = server.address().port;
-    const nets = lanAddresses();
-    const line = '─'.repeat(46);
-    const hostUrl = `http://localhost:${actual}/?host=${hostToken}`;
-    console.log('\n  XiaoMao 互传已启动\n' + line);
-    console.log(`  本机     ${hostUrl}`);
-    if (nets.length) {
-      for (const n of nets) console.log(`  局域网   http://${n.address}:${actual}   (${n.name})`);
-      console.log('\n  手机连同一个 Wi-Fi，在浏览器里打开上面「局域网」地址');
-    } else {
-      console.log('  未检测到局域网地址，请确认已连上 Wi-Fi / 网线');
-    }
-    console.log(line);
-    console.log(`  数据目录 ${DATA_DIR}`);
-    console.log(`  已有内容 ${items.length} 条`);
+/**
+ * 「启动」是一个可以被调用的动作，而不是文件末尾的一行副作用。
+ *
+ * 原因：桌面壳（Electron）要自己掌握生命周期 —— 它 require 本文件、调 startServer()
+ * 拿到端口，把窗口指到本机地址；退出时调 stopServer()。
+ * 所以这条路径上不 process.exit：宿主不是终端时，退不退出该由宿主决定，
+ * 一个端口被占不该把整个桌面程序带下线。
+ */
 
-    // 把已授权设备打到控制台，省得「到底谁被放行了」全靠猜
-    const approved = deviceList();
-    if (legacyDeviceIps.length) {
-      console.log(`  授权重置 旧版按 IP 记录的授权已作废 ${legacyDeviceIps.length} 条（${legacyDeviceIps.join('、')}）`);
-      console.log('            这些设备下次访问要重新输入密码并重新同意');
-    }
-    if (approved.length) {
-      console.log(`  已授权   ${approved.length} 台`);
-      for (const d of approved) console.log(`           ${d.name || d.ip}   ${d.ip}`);
-    } else {
-      console.log('  已授权   暂无（除主设备外，谁都要先过密码这一关）');
-    }
+/** 当前的实际地址信息（每次都重算：端口、在线情况、内容条数都会变） */
+function serverInfo() {
+  const addr = server.address();
+  const port = addr && typeof addr === 'object' ? addr.port : 0;
+  return {
+    running: !!server.listening,
+    port,
+    hostUrl: `http://localhost:${port}/?host=${hostToken}`, // 本机地址 = 主设备身份
+    localUrl: `http://localhost:${port}/`,
+    lan: lanAddresses().map((n) => ({
+      name: n.name, address: n.address, url: `http://${n.address}:${port}/`,
+    })),
+    dataDir: DATA_DIR,
+    count: items.length,
+  };
+}
 
-    console.log('  主设备   用上面的「本机」地址打开一次（带 ?host= 会自动记住），即拥有删除 / 权限设置');
-    console.log(`  其他设备 用「局域网」地址打开，输入密码 ${GATE_PASSWORD} 后需主设备同意；输入隐藏密码 ${AUTO_APPROVE_PASSWORD} 则自动授权`);
-    console.log(`  停止服务 ${IS_WIN ? '按 Ctrl+C，或双击「停止.bat」' : '按 Ctrl+C'}\n`);
+/** 终端里那套 banner。桌面壳不打印（它有自己的界面），所以消息体单独收敛在这里 */
+function printBanner(info) {
+  const line = '─'.repeat(46);
+  console.log('\n  XiaoMao 互传已启动\n' + line);
+  console.log(`  本机     ${info.hostUrl}`);
+  if (info.lan.length) {
+    for (const n of info.lan) console.log(`  局域网   ${n.url}   (${n.name})`);
+    console.log('\n  手机连同一个 Wi-Fi，在浏览器里打开上面「局域网」地址');
+  } else {
+    console.log('  未检测到局域网地址，请确认已连上 Wi-Fi / 网线');
+  }
+  console.log(line);
+  console.log(`  数据目录 ${info.dataDir}`);
+  console.log(`  已有内容 ${info.count} 条`);
 
-    if (IS_WIN && nets.length) {
-      console.log('  首次运行如果 Windows 弹出防火墙提示，请勾选「专用网络」并允许。\n');
-    }
-    if (OPEN_ON_START) openBrowser(hostUrl);
+  // 把已授权设备打到控制台，省得「到底谁被放行了」全靠猜
+  const approved = deviceList();
+  if (legacyDeviceIps.length) {
+    console.log(`  授权重置 旧版按 IP 记录的授权已作废 ${legacyDeviceIps.length} 条（${legacyDeviceIps.join('、')}）`);
+    console.log('            这些设备下次访问要重新输入密码并重新同意');
+  }
+  if (approved.length) {
+    console.log(`  已授权   ${approved.length} 台`);
+    for (const d of approved) console.log(`           ${d.name || d.ip}   ${d.ip}`);
+  } else {
+    console.log('  已授权   暂无（除主设备外，谁都要先过密码这一关）');
+  }
+
+  console.log('  主设备   用上面的「本机」地址打开一次（带 ?host= 会自动记住），即拥有删除 / 权限设置');
+  console.log(`  其他设备 用「局域网」地址打开，输入密码 ${GATE_PASSWORD} 后需主设备同意；输入隐藏密码 ${AUTO_APPROVE_PASSWORD} 则自动授权`);
+  console.log(`  停止服务 ${IS_WIN ? '按 Ctrl+C，或双击「停止.bat」' : '按 Ctrl+C'}\n`);
+
+  if (IS_WIN && info.lan.length) {
+    console.log('  首次运行如果 Windows 弹出防火墙提示，请勾选「专用网络」并允许。\n');
+  }
+}
+
+/** 在一个端口上 listen 一次；占用就抛 EADDRINUSE，由调用方决定要不要往上试 */
+function listenOnce(port) {
+  return new Promise((resolve, reject) => {
+    const onErr = (err) => {
+      server.removeListener('listening', onOk);
+      reject(err);
+    };
+    const onOk = () => {
+      server.removeListener('error', onErr);
+      resolve();
+    };
+    server.once('error', onErr);
+    server.once('listening', onOk);
+    server.listen(port, '0.0.0.0');
   });
 }
 
-listen(BASE_PORT);
+/**
+ * 启动服务。端口被占自动往后试（6767 → 6768 → …），和 CLI 的老行为一致。
+ * @param {{port?:number, tries?:number, banner?:boolean, open?:boolean}} [opts]
+ * @returns {Promise<ReturnType<typeof serverInfo>>}
+ */
+async function startServer(opts = {}) {
+  if (server.listening) return serverInfo();
 
-process.on('SIGINT', () => {
-  console.log('\n已停止。数据保留在 data/ 目录。');
-  process.exit(0);
-});
+  const base = Number(opts.port) || BASE_PORT;
+  const tries = Number.isInteger(opts.tries) ? opts.tries : 20;
+  let lastErr = null;
+
+  for (let i = 0; i < tries; i++) {
+    try {
+      await listenOnce(base + i);
+      lastErr = null;
+      break;
+    } catch (err) {
+      lastErr = err;
+      if (err.code !== 'EADDRINUSE') break; // 权限之类的问题，换端口也没用
+    }
+  }
+  if (lastErr) throw lastErr;
+
+  sweepExpired(); // 开张前先把过期内容清掉，banner 上的条数才是真实存量
+  const info = serverInfo();
+  if (opts.banner !== false) printBanner(info);
+  if (opts.open) openBrowser(info.hostUrl);
+  return info;
+}
+
+/** 关掉服务。先断掉 keep-alive 长连接，否则 close 会一直等着它们超时 */
+function stopServer() {
+  return new Promise((resolve) => {
+    if (!server.listening) return resolve();
+    if (typeof server.closeAllConnections === 'function') server.closeAllConnections();
+    server.close(() => resolve());
+    setTimeout(resolve, 1500).unref(); // 兜底，别让宿主退出时卡住
+  });
+}
+
+// 直接 `node server.js` 时保持原本的 CLI 行为；被 require（桌面壳）时什么都不做
+if (require.main === module) {
+  startServer({ open: OPEN_ON_START }).catch((err) => {
+    console.error('启动失败：', err.message);
+    process.exit(1);
+  });
+
+  process.on('SIGINT', () => {
+    console.log('\n已停止。数据保留在 data/ 目录。');
+    process.exit(0);
+  });
+}
+
+module.exports = { startServer, stopServer, serverInfo, hostToken, lanAddresses, DATA_DIR, FILES_DIR };

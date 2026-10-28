@@ -1991,6 +1991,79 @@
   @media (max-width:720px){
     .to-top{width:40px;height:40px;right:12px}
   }
+
+  /* ============================================================
+     桌面壳专属（只有 Electron 里才有 window.xmDesktop）
+     ============================================================ */
+  /* 顶栏当窗口标题栏用：空白处可拖动窗口，按钮仍然点得动 */
+  html.desktop .top{-webkit-app-region:drag}
+  html.desktop .top button,
+  html.desktop .top a,
+  html.desktop .top .mark{-webkit-app-region:no-drag}
+  /* macOS 的红绿灯压在左上角，窄窗口时别让 logo 被盖住 */
+  html.desktop-mac .top-in{padding-left:82px}
+
+  /* 设备互联面板 */
+  .dc{display:flex;flex-direction:column;gap:18px;padding-bottom:2px}
+  .dc-sec{display:flex;flex-direction:column;gap:9px}
+  .dc-h{
+    display:flex;align-items:center;gap:7px;
+    font-size:11.5px;font-weight:750;color:var(--faint);letter-spacing:.6px;
+  }
+  .dc-h .st{
+    margin-left:auto;font-size:11px;font-weight:600;letter-spacing:0;
+    color:var(--ok);background:color-mix(in srgb, var(--ok) 12%, transparent);
+    padding:2px 7px;border-radius:99px;
+  }
+  .dc-h .st.off{color:var(--faint);background:var(--line-soft)}
+
+  /* 本机地址：地址本身是主角，复制是配角 */
+  .dc-addr{
+    display:flex;align-items:center;gap:10px;padding:11px 12px;
+    background:var(--card-2);border:1px solid var(--line);border-radius:12px;
+  }
+  .dc-addr .u{
+    flex:1;min-width:0;font-size:14px;font-weight:650;color:var(--text);
+    letter-spacing:.2px;word-break:break-all;line-height:1.4;
+  }
+  .dc-addr .u small{display:block;font-size:11px;font-weight:500;color:var(--faint);letter-spacing:0;margin-top:2px}
+  .dc-cp{
+    flex:none;height:28px;padding:0 10px;border-radius:8px;
+    background:var(--card);border:1px solid var(--line);color:var(--sub);
+    font-size:12px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:5px;
+    transition:.14s;
+  }
+  .dc-cp:hover{background:var(--accent);border-color:var(--accent);color:#fff}
+  .dc-cp svg{width:12px;height:12px}
+
+  .dc-row{display:flex;gap:8px;align-items:center}
+  /* 输入框会被 `.dlg input[type=text]`（42px + margin-top:14px）命中，
+     这里同特异性覆盖掉，才能跟右边的按钮齐平 */
+  .dc-row input[type=text]{flex:1;min-width:0;margin-top:0;height:40px}
+  .dc-row .btn{flex:none;height:40px;padding:0 18px;justify-content:center}
+
+  /* 已连接 / 最近连过，都用同一套「一行一项」 */
+  .dc-item{
+    display:flex;align-items:center;gap:10px;padding:9px 11px;
+    background:var(--card-2);border:1px solid var(--line);border-radius:10px;
+    font-size:12.5px;
+  }
+  .dc-item .h{flex:1;min-width:0;font-weight:600;word-break:break-all}
+  .dc-item .h small{display:block;font-size:11px;font-weight:500;color:var(--faint);margin-top:1px}
+  .dc-item button{
+    flex:none;height:26px;padding:0 9px;border-radius:7px;
+    background:transparent;border:1px solid var(--line);color:var(--sub);
+    font-size:11.5px;font-weight:600;cursor:pointer;transition:.14s;
+  }
+  .dc-item button:hover{background:var(--card);color:var(--text);border-color:var(--faint)}
+  .dc-item button.danger:hover{background:transparent;color:var(--danger);border-color:var(--danger)}
+  .dc-item.recent{cursor:pointer;background:transparent;border-style:dashed}
+  .dc-item.recent:hover{background:var(--card-2);border-style:solid}
+  .dc-item.recent .h{color:var(--sub);font-weight:550}
+
+  .dc-err{font-size:12px;color:var(--danger);line-height:1.5;min-height:0}
+  .dc-err:empty{display:none}
+  .dc-tip{font-size:11.5px;color:var(--faint);line-height:1.6}
 </style>
 </head>
 <body>
@@ -2010,6 +2083,7 @@
       <span class="pstack" id="pstack"></span>
       <span class="count-pill" id="peerCount">0</span>
     </button>
+    <button class="ibtn" id="linkBtn" title="设备互联：本机主机 / 连到其他主机" aria-label="设备互联" aria-haspopup="dialog" hidden></button>
     <button class="ibtn" id="themeBtn" title="切换主题" aria-label="切换主题"></button>
     <button class="ibtn" id="qrBtn" title="生成扫码访问二维码" aria-label="生成二维码" hidden></button>
     <button class="ibtn" id="settingsBtn" title="主设备设置" aria-label="主设备设置" hidden></button>
@@ -2501,6 +2575,8 @@
       '" stroke-linecap="round" stroke-linejoin="round">' + path + '</svg>';
   }
   var ICOPY = svgIcon('<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>');
+  // 两台设备用一根线连起来 = 设备互联（本机当主机，同时能连别人）
+  var ILINK = svgIcon('<rect x="2.6" y="3.6" width="7.2" height="7.2" rx="1.9"/><rect x="14.2" y="13.2" width="7.2" height="7.2" rx="1.9"/><path d="M9.8 7.2h3.4a2 2 0 0 1 2 2v4"/><path d="M4.6 13.2v4.2a2 2 0 0 0 2 2h4.4"/>', 1.9);
   var IDEL = svgIcon('<path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/>');
   var IDL = svgIcon('<path d="M12 3v12m0 0l4-4m-4 4l-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>');
   var ILOCK = svgIcon('<rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>', 2);
@@ -2765,6 +2841,216 @@
         }).then(function (v) { return v === 'ok' ? inp.value.trim() : null; });
       }
     };
+  })();
+
+  /* ==================================================== 桌面壳（设备互联） */
+  /**
+   * 只有 Electron 里才有 window.xmDesktop。
+   * 浏览器打开时这段整块不激活：顶栏不会多出按钮，行为跟以前一模一样。
+   *
+   * 双角色的界面也就落在这里 —— 上半截是「我这台机器对外的地址」，
+   * 下半截是「我要连的别人的机器」，两个角色在同一块面板里说清楚。
+   */
+  var Desktop = (function () {
+    var api = window.xmDesktop || null;
+    var opened = false;   // 面板是否开着（关着就别白刷新）
+    var nodes = null;     // 面板里要复用的节点
+
+    function mk(tag, cls, text) {
+      var e = document.createElement(tag);
+      if (cls) e.className = cls;
+      if (text != null) e.textContent = text;
+      return e;
+    }
+
+    function hostOf(url) {
+      return String(url || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    }
+
+    /** 桌面壳的外观适配：顶栏当标题栏、给红绿灯留位、放出互联按钮 */
+    function applyShell() {
+      if (!api) return;
+      var html = document.documentElement;
+      html.classList.add('desktop');
+      if (api.insetTitlebar) html.classList.add('desktop-mac');
+      var btn = document.getElementById('linkBtn');
+      if (btn) { btn.hidden = false; btn.innerHTML = ILINK; }
+    }
+
+    /** 一行「地址 + 复制」 */
+    function addrRow(url, note) {
+      var w = mk('div', 'dc-addr');
+      var u = mk('div', 'u', url);
+      if (note) u.appendChild(mk('small', null, note));
+      var cp = mk('button', 'dc-cp');
+      cp.innerHTML = ICOPY + '<span>复制</span>';
+      cp.onclick = function () {
+        api.copy(url);
+        toast('已复制地址');
+      };
+      w.appendChild(u);
+      w.appendChild(cp);
+      return w;
+    }
+
+    function connect(raw) {
+      if (!api || !nodes) return;
+      var n = nodes;
+      n.err.textContent = '';
+      api.connect(raw).then(function (r) {
+        if (r && r.error) { n.err.textContent = r.error; return; }
+        n.inp.value = '';
+        toast(r && r.existed ? '这个主机的窗口已经开着了' : '已在新窗口打开');
+        paint();
+      }).catch(function () { n.err.textContent = '打不开这个地址'; });
+    }
+
+    /** 重绘动态部分：主机状态、地址、已连接、最近连过 */
+    function paint() {
+      if (!api || !opened || !nodes) return Promise.resolve();
+      var n = nodes;
+      return api.info().then(function (st) {
+        if (!opened || nodes !== n) return;
+
+        n.st.textContent = st.running ? '运行中 · 端口 ' + st.port : '没在运行';
+        n.st.className = 'st' + (st.running ? '' : ' off');
+
+        n.addrBox.innerHTML = '';
+        if (st.lan && st.lan.length) {
+          st.lan.slice(0, 3).forEach(function (x, i) {
+            n.addrBox.appendChild(addrRow(x.url, i === 0 ? '同一个 Wi-Fi 下，用这个地址连进来' : x.name));
+          });
+        } else {
+          var w = mk('div', 'dc-addr');
+          w.appendChild(mk('div', 'u', '没检测到局域网地址'));
+          n.addrBox.appendChild(w);
+        }
+
+        // 已经连着的别人：可以切过去，也可以断开
+        n.openBox.innerHTML = '';
+        if (st.links && st.links.length) {
+          var h = mk('div', 'dc-h');
+          h.appendChild(mk('span', null, '已连接的其他主机'));
+          n.openBox.appendChild(h);
+          st.links.forEach(function (l) {
+            var it = mk('div', 'dc-item');
+            var box = mk('div', 'h', l.host);
+            box.appendChild(mk('small', null, l.url));
+            it.appendChild(box);
+            var sw = mk('button', null, '切过去');
+            sw.onclick = function () { api.focusLink(l.id); };
+            var cl = mk('button', 'danger', '断开');
+            cl.onclick = function () { api.closeLink(l.id).then(paint); };
+            it.appendChild(sw);
+            it.appendChild(cl);
+            n.openBox.appendChild(it);
+          });
+        }
+
+        // 最近连过：整行可点，点了直接连
+        n.recentBox.innerHTML = '';
+        var rec = (st.recent || []).filter(function (u) {
+          return !(st.links || []).some(function (l) { return l.url === u; });
+        }).slice(0, 4);
+        if (rec.length) {
+          var h2 = mk('div', 'dc-h');
+          h2.appendChild(mk('span', null, '最近连过'));
+          n.recentBox.appendChild(h2);
+          rec.forEach(function (url) {
+            var it = mk('div', 'dc-item recent');
+            it.appendChild(mk('div', 'h', hostOf(url)));
+            var go = mk('div', null, '连接 →');
+            go.style.cssText = 'flex:none;font-size:11.5px;font-weight:600;color:var(--faint)';
+            it.appendChild(go);
+            it.onclick = function () { connect(url); };
+            n.recentBox.appendChild(it);
+          });
+        }
+      }).catch(function () { /* 拿不到状态就保持原样，别把面板搞成空白 */ });
+    }
+
+    function openPanel() {
+      if (!api || opened) return;
+      opened = true;
+
+      var body = mk('div', 'dc');
+      var n = nodes = {};
+
+      // ① 我的主机：我在对外提供服务
+      var s1 = mk('div', 'dc-sec');
+      var h1 = mk('div', 'dc-h');
+      h1.appendChild(mk('span', null, '我的主机'));
+      n.st = mk('span', 'st', '…');
+      h1.appendChild(n.st);
+      s1.appendChild(h1);
+      n.addrBox = mk('div');
+      s1.appendChild(n.addrBox);
+      s1.appendChild(mk('div', 'dc-tip',
+        '这台电脑一直在对外提供服务。别人在浏览器里打开上面这个地址就能连进来，第一次要输接入密码（或账户名密码）。'));
+      body.appendChild(s1);
+
+      // ② 连接其他主机：我去用别人的服务
+      var s2 = mk('div', 'dc-sec');
+      var h2 = mk('div', 'dc-h');
+      h2.appendChild(mk('span', null, '连接到其他主机'));
+      s2.appendChild(h2);
+
+      var row = mk('div', 'dc-row');
+      n.inp = mk('input');
+      n.inp.type = 'text';
+      n.inp.placeholder = '对方的地址，如 192.168.1.20:6767';
+      n.inp.setAttribute('aria-label', '对方主机的地址');
+      n.inp.maxLength = 300;
+      n.go = mk('button', 'btn primary', '连接');
+      row.appendChild(n.inp);
+      row.appendChild(n.go);
+      s2.appendChild(row);
+
+      n.err = mk('div', 'dc-err');
+      s2.appendChild(n.err);
+
+      n.openBox = mk('div', 'dc-sec');
+      s2.appendChild(n.openBox);
+
+      s2.appendChild(mk('div', 'dc-tip',
+        '连上之后会另开一个窗口，那边你是普通设备，互不影响。'));
+      body.appendChild(s2);
+
+      n.recentBox = mk('div', 'dc-sec');
+      body.appendChild(n.recentBox);
+
+      n.go.onclick = function () { connect(n.inp.value); };
+      // Enter 只用来发起连接，别让它冒泡到弹窗的「默认按钮」上（那会直接关面板）
+      n.inp.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          e.stopPropagation();
+          connect(n.inp.value);
+        }
+      });
+
+      Dialog.open({
+        title: '设备互联',
+        desc: '这台电脑一边当主机（别人能连进来），一边也能连到别的主机。两个角色同时在线，各开各的窗口。',
+        body: body,
+        actions: [{ label: '完成', value: true, kind: 'primary' }],
+        onReady: function () { paint(); },
+      }).then(function () {
+        opened = false;
+        nodes = null;
+      });
+    }
+
+    if (api) {
+      applyShell();
+      var btn = document.getElementById('linkBtn');
+      if (btn) btn.addEventListener('click', openPanel);
+      // 菜单里点「连接其他主机…」时由主进程通知过来，打开的是同一块面板
+      if (api.onOpenConnect) api.onOpenConnect(openPanel);
+      if (api.onLinks) api.onLinks(function () { paint(); });
+    }
+
+    return { available: !!api, applyShell: applyShell, open: openPanel };
   })();
 
   /* ============================================================ 状态 */

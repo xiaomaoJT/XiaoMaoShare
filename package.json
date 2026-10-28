@@ -1,14 +1,45 @@
 {
   "name": "xiaomao-share",
-  "version": "1.6.1",
+  "version": "1.7.0",
   "private": true,
   "description": "XiaoMao 互传 —— 局域网内文字 / 图片 / 文件互传，零依赖",
-  "main": "server.js",
+  "main": "desktop/main.js",
   "scripts": {
     "start": "node server.js --open",
-    "serve": "node server.js"
+    "serve": "node server.js",
+    "desktop": "node desktop/run.js",
+    "dist": "electron-builder"
   },
   "engines": {
     "node": ">=18"
+  },
+  "devDependencies": {
+    "electron": "^45.1.0"
+  },
+  "build": {
+    "appId": "cc.xiaomao.share",
+    "productName": "XiaoMao 互传",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "server.js",
+      "public/**",
+      "desktop/**",
+      "package.json"
+    ],
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.utilities",
+      "identity": null
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    }
   }
 }
