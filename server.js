@@ -72,6 +72,8 @@ function nameOfCid(cid) {
   const c = clients.get(cid);
   if (c) return displayName(c);
   const d = devices[cid];
+  const a = d && d.acc && accounts[d.acc];
+  if (a && !a.disabled) return a.name;   // 登录了账户就按账户显示
   return d ? (d.name || d.ip || cid) : cid.slice(-4);
 }
 
@@ -457,9 +459,20 @@ function isElevated(req, cid) {
   return !!elevateRec(cid);
 }
 
-/** 是否拥有管理级能力：跑服务的那台机器，或已用专属密码临时提权的设备 */
+/**
+ * 管理级能力 = 主控设备 / 专属密码提权 / 主控账户 / 管理员账户。
+ * 能审批设备、能删改别人的内容，但改不了全局设置和账户清单。
+ */
 function canManage(req, cid) {
-  return isHostRequest(req) || isElevated(req, cid);
+  if (isHostRequest(req) || isElevated(req, cid)) return true;
+  const r = roleOf(req, cid);
+  return r === 'owner' || r === 'admin';
+}
+
+/** 配置级能力：只有主控设备、专属密码提权、主控账户能改设置与账户 */
+function canConfig(req, cid) {
+  if (isHostRequest(req) || isElevated(req, cid)) return true;
+  return roleOf(req, cid) === 'owner';
 }
 
 /* ------------------------------------------------------ Telegram 远程 */
@@ -784,18 +797,31 @@ function touchClient(req, cidRaw, uaRaw) {
   if (model !== '设备' || !c.model) c.model = model;
   // 顺手记下提权状态：主设备永远是主设备，其它设备可能用专属密码提过权
   c.elevated = c.admin || !!elevateRec(cid);
+  // 这台设备登录的账户：身份就是它，换设备登录同一个账户还是同一个人
+  c.acc = (devices[cid] && devices[cid].acc) || '';
   c.lastSeen = now;
   c.autoName = autoNameFor(req, c.model);
   return c;
 }
 
-const displayName = (c) => c.customName || c.autoName;
+/** 展示名：登录了账户就用账户名，否则沿用设备自定义名 / 自动名 */
+function displayName(c) {
+  const a = c && c.acc && accounts[c.acc];
+  if (a && !a.disabled) return a.name;
+  return c.customName || c.autoName;
+}
 
 function publicClient(c) {
+  const a = c.acc && accounts[c.acc];
+  const role = a && !a.disabled ? a.role : 'guest';
   return {
     cid: c.cid, name: displayName(c), ip: c.ip, model: c.model,
     // admin = 跑服务的那台；elevated = 用专属密码临时提过权的
     admin: !!c.admin, elevated: !!c.elevated, since: c.firstSeen,
+    // acc = 登录的账户；role = 账户角色（没登录就是 guest）
+    acc: c.acc || '', role, roleName: roleLabel(role),
+    // dev = 这台设备自己的名字（账户名占了 name，设备名单独给，界面上好分层显示）
+    dev: c.customName || c.autoName || '',
   };
 }
 
@@ -823,6 +849,10 @@ function peersPayload() {
  */
 function canSendType(req, kind, cid) {
   if (isHostRequest(req)) return true;
+  // 角色是第一道闸门：访客一律不能发，成员及以上能发文字和附件
+  const rc = capsOfRole(roleOf(req, cid));
+  if (!rc.send) return false;
+  if ((kind === 'image' || kind === 'file') && !rc.attach) return false;
   const p = permsOf(cid);
   if (!settings.allowSend || !p.send) return false;
   if (kind === 'text') return settings.allowText && p.text;
@@ -830,17 +860,32 @@ function canSendType(req, kind, cid) {
   return settings.allowFile && p.file;
 }
 
-/** 一次性把三种能力的判定结果发给前端，UI 就不用重复推规则了 */
+/** 能不能发给指定的人（私聊） */
+function canSendPriv(req, cid) {
+  if (isHostRequest(req)) return true;
+  return !!capsOfRole(roleOf(req, cid)).priv;
+}
+
+/** 一次性把能力判定结果发给前端，UI 就不用重复推规则了 */
 function capsPayload(req, cid) {
+  const host = isHostRequest(req);
+  const role = roleOf(req, cid);
+  const rc = capsOfRole(role);
   return {
-    send: isHostRequest(req) || (settings.allowSend && permsOf(cid).send),
+    send: canSendType(req, 'text', cid) || canSendType(req, 'image', cid) || canSendType(req, 'file', cid),
     text: canSendType(req, 'text', cid),
     image: canSendType(req, 'image', cid),
     file: canSendType(req, 'file', cid),
+    // priv = 能不能只发给指定的人；moderate = 能不能删改别人的内容
+    priv: host || !!rc.priv,
+    moderate: host || !!rc.moderate,
+    devices: host || !!rc.devices,
+    role,
   };
 }
 
 function denyReason(kind, cid) {
+  if (!capsOfRole(roleOf(null, cid)).send) return '当前是访客身份，登录账户后才能发送内容';
   const p = permsOf(cid);
   if (!settings.allowSend) return '主设备已关闭其他设备的发送权限';
   if (!p.send) return '主设备已禁止这台设备发送内容';
@@ -1251,12 +1296,207 @@ function saveProfiles() {
   fs.writeFile(PROFILES_FILE, JSON.stringify(profiles, null, 2), () => {});
 }
 
-/** 给前端的精简版：颜色 + 头像版本号（用来破缓存） */
+/* ---------------------------------------------------- 账户（身份，可跨设备） */
+/**
+ * 身份 = 账户，设备只是入口：devices[cid].acc 记着「这台设备当前登录的是谁」，
+ * 同一个账户可以在多台设备上登录，头像、颜色、消息归属都跟着账户走。
+ * 没登录的设备是访客 —— 能看能下，不能发。
+ * 账户由主控在「设置 → 账户」里配置；密码只存 scrypt 派生值，明文不落盘、也不下发。
+ */
+const ACCOUNTS_FILE = path.join(DATA_DIR, 'accounts.json');
+const ROLES = ['owner', 'admin', 'member', 'guest'];
+const ROLE_LABEL = { owner: '主控', admin: '管理员', member: '成员', guest: '访客' };
+/**
+ * 四档角色各自能干什么：
+ *   send     发消息        attach   传图片 / 文件     priv   只发给指定的人
+ *   moderate 删改他人内容   devices  审批与管理设备    config 改全局设置
+ *   accounts 管理账户
+ */
+const ROLE_CAPS = {
+  owner: { send: 1, attach: 1, priv: 1, moderate: 1, devices: 1, config: 1, accounts: 1 },
+  admin: { send: 1, attach: 1, priv: 1, moderate: 1, devices: 1, config: 0, accounts: 0 },
+  member: { send: 1, attach: 1, priv: 1, moderate: 0, devices: 0, config: 0, accounts: 0 },
+  guest: { send: 0, attach: 0, priv: 0, moderate: 0, devices: 0, config: 0, accounts: 0 },
+};
+
+let accounts = {}; // accId -> { id, name, role, salt, hash, createdAt, lastLogin, disabled }
+try {
+  const saved = JSON.parse(fs.readFileSync(ACCOUNTS_FILE, 'utf8'));
+  if (saved && typeof saved === 'object') accounts = saved;
+} catch {
+  /* 首次运行 */
+}
+
+function saveAccounts() {
+  fs.writeFile(ACCOUNTS_FILE, JSON.stringify(accounts, null, 2), () => {});
+}
+
+const roleLabel = (r) => ROLE_LABEL[r] || '访客';
+const capsOfRole = (r) => ROLE_CAPS[r] || ROLE_CAPS.guest;
+
+/** 密码只留派生值：scrypt + 每账户独立盐，比裸 sha256 抗字典 */
+function hashPass(pass, salt) {
+  return crypto.scryptSync(String(pass), String(salt), 32).toString('hex');
+}
+function setAccPass(acc, pass) {
+  acc.salt = crypto.randomBytes(12).toString('hex');
+  acc.hash = hashPass(pass, acc.salt);
+}
+function checkAccPass(acc, pass) {
+  if (!acc || !acc.hash || !acc.salt) return false;
+  const a = Buffer.from(acc.hash, 'hex');
+  const b = Buffer.from(hashPass(pass, acc.salt), 'hex');
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+/**
+ * 主控账户：首次运行自动建一个，**先不设密码**。
+ * 主控设备（跑服务的这台）靠身份天然就是 owner，不用登录；
+ * 别的设备想登这个账户，必须先让主控在设置里设个密码，否则谁都能冒充。
+ */
+const OWNER_ID = (function ensureOwner() {
+  for (const a of Object.values(accounts)) {
+    if (a && a.role === 'owner') return a.id;
+  }
+  const id = 'u' + crypto.randomBytes(8).toString('hex');
+  accounts[id] = {
+    id, name: '主控', role: 'owner', salt: '', hash: '',
+    createdAt: Date.now(), lastLogin: 0,
+  };
+  saveAccounts();
+  console.log('  已创建主控账户（还没设密码，主控设备上可直接使用）');
+  return id;
+})();
+
+/** 这台设备当前登录的账户；账户被停用等同于没登录 */
+function accOfCid(cid) {
+  const d = cid && devices[cid];
+  const a = d && d.acc && accounts[d.acc];
+  return a && !a.disabled ? a : null;
+}
+
+/** 资料（头像 / 颜色）记在哪把钥匙上：登录了按账户记，没登录按设备记 */
+function keyOfCid(cid) {
+  const a = accOfCid(cid);
+  return a ? a.id : String(cid || '');
+}
+
+/** 当前请求的身份角色：主控设备 / 专属密码提权 = owner，未登录 = guest */
+function roleOf(req, cid) {
+  if (req && isHostRequest(req)) return 'owner';
+  if (elevateRec(cid)) return 'owner';
+  const a = accOfCid(cid);
+  return a ? a.role : 'guest';
+}
+
+/** 两个人是不是同一个人：同一个账户 = 同一个人（多设备登录同一账户） */
+function samePerson(a, b) {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const ka = keyOfCid(a), kb = keyOfCid(b);
+  return !!ka && ka === kb;
+}
+
+/** 主控设备也要有一条设备记录，否则它的资料没处挂、设备列表里也看不到它 */
+function ensureDeviceRec(cid, req) {
+  if (!cid) return null;
+  let d = devices[cid];
+  if (d) return d;
+  const ua = String((req && req.headers['user-agent']) || '').slice(0, 300);
+  const model = modelFromUA(ua);
+  d = devices[cid] = {
+    cid,
+    ip: clientIp(req),
+    name: autoNameFor(req, model),
+    model,
+    firstSeen: Date.now(),
+    approvedAt: Date.now(),
+    lastSeen: Date.now(),
+    perms: { send: true, text: true, image: true, file: true },
+  };
+  saveDevices();
+  return d;
+}
+
+/** 主控设备自动绑到主控账户：它本来就是这台机器的管理员，没必要再登录一次 */
+function bindHostDevice(cid, req) {
+  const d = ensureDeviceRec(cid, req);
+  if (!d) return d;
+  let dirty = false;
+  if (!d.host) { d.host = true; dirty = true; }
+  if (!d.acc) { d.acc = OWNER_ID; dirty = true; }
+  if (dirty) saveDevices();
+  return d;
+}
+
+/** 给前端的账户信息（不含盐和派生值） */
+function publicAcc(a) {
+  const p = profiles[a.id] || {};
+  return {
+    id: a.id,
+    name: a.name,
+    role: a.role,
+    roleName: roleLabel(a.role),
+    color: p.color || '',
+    avatar: p.avatar ? (p.at || 1) : 0,
+    hasPass: !!a.hash,
+    disabled: !!a.disabled,
+    lastLogin: a.lastLogin || 0,
+    createdAt: a.createdAt || 0,
+  };
+}
+
+const ROLE_RANK = { owner: 0, admin: 1, member: 2, guest: 3 };
+function accountList(includeDisabled) {
+  return Object.values(accounts)
+    .filter((a) => a && (includeDisabled || !a.disabled))
+    .sort((a, b) => (ROLE_RANK[a.role] ?? 9) - (ROLE_RANK[b.role] ?? 9) ||
+      (a.createdAt || 0) - (b.createdAt || 0))
+    .map(publicAcc);
+}
+
+// 登录也防爆破：同一个 IP 连错几次就锁一会儿
+const LOGIN_TRY_LIMIT = 6;
+const LOGIN_TRY_WINDOW = 10 * 60e3;
+const loginTries = new Map(); // ip -> { n, until }
+function loginBlocked(ip) {
+  const t = loginTries.get(ip);
+  if (!t) return false;
+  if (Date.now() > t.until) { loginTries.delete(ip); return false; }
+  return t.n >= LOGIN_TRY_LIMIT;
+}
+function loginFail(ip) {
+  const t = loginTries.get(ip) || { n: 0, until: 0 };
+  t.n += 1;
+  t.until = Date.now() + LOGIN_TRY_WINDOW;
+  loginTries.set(ip, t);
+}
+
+/** 某项资料的公开形态：颜色 + 头像版本号（版本号用来破缓存） */
+function profEntry(key) {
+  const p = profiles[key];
+  if (!p || (!p.color && !p.avatar)) return null;
+  return { color: p.color || '', avatar: p.avatar ? (p.at || 1) : 0 };
+}
+
+/**
+ * 给前端的资料表，仍然按 cid 索引（前端各处都拿消息的 owner=cid 去查，不用改）。
+ * 变的只是「这份资料属于谁」：登录了账户的设备，头像和颜色跟着账户走，
+ * 于是同一个账户在多台设备上显示成同一个人。
+ */
 function publicProfiles() {
   const out = {};
-  for (const [cid, p] of Object.entries(profiles)) {
-    if (!p) continue;
-    out[cid] = { color: p.color || '', avatar: p.avatar ? p.at || 1 : 0, name: (devices[cid] && devices[cid].name) || '' };
+  for (const cid of Object.keys(devices)) {
+    const key = keyOfCid(cid);
+    const e = profEntry(key);
+    if (!e) continue;
+    out[cid] = Object.assign(e, { name: nameOfCid(cid), key });
+  }
+  // 设备授权被撤销了，但历史消息还挂着它的 cid：资料照旧给出去，头像别突然变回首字
+  for (const cid of Object.keys(profiles)) {
+    if (out[cid] || accounts[cid]) continue;
+    const e = profEntry(cid);
+    if (e) out[cid] = Object.assign(e, { name: nameOfCid(cid), key: cid });
   }
   return out;
 }
@@ -1689,13 +1929,21 @@ const server = http.createServer((req, res) => {
             me: null,
             peers: [],
             settings,
+            // 还没进门也要能看到账户清单：通过许可后直接选账户登录
+            accounts: accountList(false),
+            role: 'guest',
+            roleName: '访客',
           });
         }
 
         const cidHere = cidOf(req, body.cid);
-        const c = touchClient(req, cidHere, body.ua);
         const host = isHostRequest(req);
-        const effAdmin = host || isElevated(req, cidHere);
+        // 主控设备自动就是主控账户的那个人，不用登录
+        if (host) bindHostDevice(cidHere, req);
+        const c = touchClient(req, cidHere, body.ua);
+        const effAdmin = canManage(req, cidHere);
+        const role = roleOf(req, cidHere);
+        const acc = accOfCid(cidHere);
         json(res, 200, {
           authorized: true,
           status: st.status,
@@ -1705,7 +1953,13 @@ const server = http.createServer((req, res) => {
           tg: publicTg(c),
           admin: effAdmin,
           hostAdmin: host,
-          elevated: !host && effAdmin,
+          elevated: !host && isElevated(req, cidHere),
+          canConfig: canConfig(req, cidHere),
+          // acc = 当前登录的账户；role 由服务端算好，前端不自己推
+          acc: acc ? publicAcc(acc) : null,
+          role,
+          roleName: roleLabel(role),
+          accounts: accountList(false),
           caps: capsPayload(req, cidHere),
           limits: limitsPayload(),
           pending: effAdmin ? pendingList().length : 0,
@@ -1734,7 +1988,8 @@ const server = http.createServer((req, res) => {
     const online = new Set();
     for (const c of clients.values()) online.add(c.cid);
     const list = deviceList().map((d) => ({
-      cid: d.cid, name: d.name || d.ip || d.cid, model: d.model || '', online: online.has(d.cid),
+      // 名字按人走：登录了账户就显示账户名（选接收人时认人比认机器直观）
+      cid: d.cid, name: nameOfCid(d.cid) || d.ip || d.cid, model: d.model || '', online: online.has(d.cid),
     }));
     return json(res, 200, { devices: list });
   }
@@ -1749,7 +2004,7 @@ const server = http.createServer((req, res) => {
       if (idx === -1) return json(res, 404, { error: '消息不存在' });
       const it = items[idx];
       const cidEdit = cidOf(req, body.cid);
-      const isOwner = cidEdit && it.owner === cidEdit;
+      const isOwner = samePerson(cidEdit, it.owner);
       if (!isHostRequest(req) && !isOwner) {
         return json(res, 403, { error: '只有发送者或主设备能修改可见范围' });
       }
@@ -1774,7 +2029,7 @@ const server = http.createServer((req, res) => {
       if (idx === -1) return json(res, 404, { error: '消息不存在' });
       const it = items[idx];
       const cidEdit = cidOf(req, body.cid);
-      if (!(it.owner && cidEdit && it.owner === cidEdit)) {
+      if (!samePerson(cidEdit, it.owner)) {
         return json(res, 403, { error: '只有发送者本人可以编辑' });
       }
       if (!Array.isArray(body.parts)) return json(res, 400, { error: '缺少 parts' });
@@ -1931,8 +2186,17 @@ const server = http.createServer((req, res) => {
 
     if (method === 'GET') {
       const list = deviceList();
+      // 每台设备当前登的是哪个账户：管理页要显示「谁在用这台机器」
+      const accInfo = {};
+      for (const v of list) {
+        const a = v.acc && accounts[v.acc];
+        accInfo[v.cid] = a
+          ? { id: a.id, name: a.name, role: a.role, roleName: roleLabel(a.role), disabled: !!a.disabled }
+          : null;
+      }
       return json(res, 200, {
         devices: list,
+        accInfo: accInfo,
         perms: list.reduce(function (m, v) { m[v.cid] = permsOf(v.cid); return m; }, {}),
         pending: pendingList(),
         rejected: [...pending.values()].filter((p) => p.status === 'rejected'),
@@ -1978,6 +2242,7 @@ const server = http.createServer((req, res) => {
           kept.push({ ip, cid: list[0].cid, name: list[0].name || '' });
           for (let i = 1; i < list.length; i++) {
             const v = list[i];
+            if (v.host) continue;   // 主控设备的授权永远留着
             delete devices[v.cid];
             if (elevated[v.cid]) delete elevated[v.cid];
             removed.push({ ip, cid: v.cid, name: v.name || '' });
@@ -1991,6 +2256,9 @@ const server = http.createServer((req, res) => {
         return json(res, 200, { ok: true, removed: removed.length, kept, list: removed });
       }
       const cidKey = String(url.searchParams.get('cid') || '').slice(0, 64);
+      if (devices[cidKey] && devices[cidKey].host) {
+        return json(res, 400, { error: '主控设备本身就是管理员，它的授权不能移除' });
+      }
       if (devices[cidKey]) {
         const nm = devices[cidKey].name || devices[cidKey].ip || cidKey;
         delete devices[cidKey];
@@ -2076,13 +2344,22 @@ const server = http.createServer((req, res) => {
         if (!self) return json(res, 403, { error: '只能修改自己的资料' });
 
         const c = touchClient(req, self, '');
+        const acc = accOfCid(self);
+        // 资料挂在身份上：登录了记在账户名下（多设备共用一份），没登录才记在这台设备上
+        const key = acc ? acc.id : self;
         if (typeof body.name === 'string') {
-          c.customName = String(body.name).trim().replace(/\s+/g, ' ').slice(0, 24);
-          // 顺手落到 devices 里：离线设备在「发送人 / 已读」里也能显示这个名字
-          if (devices[self]) { devices[self].name = c.customName || devices[self].name; saveDevices(); }
+          const nm = String(body.name).trim().replace(/\s+/g, ' ').slice(0, 24);
+          if (acc) {
+            // 账户名就是「你是谁」，改了所有设备一起变
+            if (nm) { acc.name = nm; saveAccounts(); }
+          } else {
+            c.customName = nm;
+            // 顺手落到 devices 里：离线设备在「发送人 / 已读」里也能显示这个名字
+            if (devices[self]) { devices[self].name = c.customName || devices[self].name; saveDevices(); }
+          }
         }
 
-        const p = profiles[self] || (profiles[self] = { color: '', avatar: '', at: 0 });
+        const p = profiles[key] || (profiles[key] = { color: '', avatar: '', at: 0 });
         if (typeof body.color === 'string') {
           const col = String(body.color).trim().toLowerCase();
           if (!col) p.color = '';
@@ -2091,7 +2368,7 @@ const server = http.createServer((req, res) => {
         }
 
         if (body.avatar === null || body.avatar === '') {
-          dropAvatar(self);
+          dropAvatar(key);
         } else if (typeof body.avatar === 'string' && body.avatar) {
           const m = /^data:image\/(png|jpe?g|webp);base64,([A-Za-z0-9+/=]+)$/i.exec(body.avatar);
           if (!m) return json(res, 400, { error: '头像只支持 PNG / JPG / WebP' });
@@ -2099,23 +2376,24 @@ const server = http.createServer((req, res) => {
           if (!buf.length) return json(res, 400, { error: '图片内容为空' });
           if (buf.length > 600 * 1024) return json(res, 413, { error: '头像太大了（上限 600 KB）' });
           const ext = m[1].toLowerCase().startsWith('png') ? 'png' : m[1].toLowerCase() === 'webp' ? 'webp' : 'jpg';
-          const file = `${self}-${Date.now().toString(36)}.${ext}`;
+          const file = `${key}-${Date.now().toString(36)}.${ext}`;
           try {
             fs.mkdirSync(AVATAR_DIR, { recursive: true });
             fs.writeFileSync(path.join(AVATAR_DIR, file), buf);
           } catch {
             return json(res, 500, { error: '头像保存失败，检查 data 目录权限' });
           }
-          dropAvatar(self);
+          dropAvatar(key);
           p.avatar = file;
         }
 
         p.at = Date.now();
-        if (!p.color && !p.avatar) delete profiles[self];
+        if (!p.color && !p.avatar) delete profiles[key];
         saveProfiles();
         json(res, 200, {
           ok: true, me: publicClient(c), peers: peersPayload(),
-          profile: profiles[self] || null, profiles: publicProfiles(),
+          acc: accOfCid(self) ? publicAcc(accOfCid(self)) : null,
+          profile: profiles[key] || null, profiles: publicProfiles(),
         });
       })
       .catch(() => json(res, 400, { error: 'bad request' }));
@@ -2147,7 +2425,7 @@ const server = http.createServer((req, res) => {
 
   // 主设备改权限（只作用于「其他设备」整体，单台设备的限制走 /api/devices/perms）
   if (method === 'POST' && pathname === '/api/settings') {
-    if (!manage) return json(res, 403, { error: '没有管理权限' });
+    if (!canConfig(req, cid)) return json(res, 403, { error: '没有管理权限，只有主控能改全局设置' });
     readBody(req, 8192)
       .then((raw) => {
         let body = {};
@@ -2184,12 +2462,20 @@ const server = http.createServer((req, res) => {
 
   // 列表 + 在线设备 + 当前权限
   if (method === 'GET' && pathname === '/api/list') {
+    const host = isHostRequest(req);
+    if (host && cid) bindHostDevice(cid, req);
     const me = cid ? touchClient(req, cid, '') : null;
     // 私聊内容只有收发双方能看到；to 为空 = 全网可见
+    // 「双方」按人算：同一个账户的另一台设备也该看得见自己发的私聊
     const visible = me
-      ? items.filter((it) => { const t = it.to || []; return t.length === 0 || t.includes(me.cid) || it.owner === me.cid; })
+      ? items.filter((it) => {
+        const t = it.to || [];
+        // 私聊也按「人」算：指定发给某个账户时，那个账户的每台设备都该看到
+        return t.length === 0 || t.some((x) => samePerson(me.cid, x)) || samePerson(me.cid, it.owner);
+      })
       : items.filter((it) => (it.to || []).length === 0);
-    const host = isHostRequest(req);
+    const role = roleOf(req, cid);
+    const acc = accOfCid(cid);
     json(res, 200, {
       items: visible,
       count: visible.length,
@@ -2200,6 +2486,11 @@ const server = http.createServer((req, res) => {
       admin: manage,
       hostAdmin: host,
       elevated: isElevated(req, cid),
+      canConfig: canConfig(req, cid),
+      acc: acc ? publicAcc(acc) : null,
+      role,
+      roleName: roleLabel(role),
+      accounts: accountList(false),
       caps: capsPayload(req, cid),
       profiles: publicProfiles(),
       limits: limitsPayload(),
@@ -2216,7 +2507,10 @@ const server = http.createServer((req, res) => {
     const me = cid ? clients.get(cid) : null;
     // 跟 /api/list 同一套可见性规则：私聊内容不能打包给别人
     const visible = me
-      ? items.filter((it) => { const t = it.to || []; return t.length === 0 || t.includes(me.cid) || it.owner === me.cid; })
+      ? items.filter((it) => {
+        const t = it.to || [];
+        return t.length === 0 || t.some((x) => samePerson(me.cid, x)) || samePerson(me.cid, it.owner);
+      })
       : items.filter((it) => (it.to || []).length === 0);
     const chosen = visible.filter((it) => ids.indexOf(it.id) !== -1);
     if (!chosen.length) return json(res, 404, { error: '没有可打包的内容' });
@@ -2307,6 +2601,204 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  /* ---------------- 账户：换个身份登录这台设备 ---------------- */
+
+  // 登录 = 选定一个账户 + 密码，成功后这台设备就代表那个人（多台设备可以登同一个账户）
+  if (method === 'POST' && pathname === '/api/login') {
+    const ip = clientIp(req);
+    if (loginBlocked(ip)) return json(res, 429, { error: '密码错太多次了，过 10 分钟再试' });
+    readBody(req, 4096)
+      .then((raw) => {
+        let body = {};
+        try { body = JSON.parse(raw || '{}'); } catch { /* 空 body */ }
+        const cidHere = cidOf(req, body.cid) || cid;
+        const accId = String(body.acc || '').slice(0, 64);
+        const a = accounts[accId];
+        if (!a) return json(res, 404, { error: '账户不存在，可能已经被主控删掉了' });
+        if (a.disabled) return json(res, 403, { error: '这个账户已被主控停用' });
+        // 没设密码的账户不放行：否则谁都能顶着「主控」的名义进来
+        if (!a.hash) {
+          return json(res, 403, {
+            error: a.role === 'owner'
+              ? '主控账户还没设密码，暂时只能在主控设备上使用'
+              : '这个账户还没设密码，请让主控在「设置 → 账户」里设一个',
+          });
+        }
+        if (loginBlocked(ip)) return json(res, 429, { error: '密码错太多次了，过 10 分钟再试' });
+        if (!checkAccPass(a, body.password)) {
+          loginFail(ip);
+          return json(res, 403, { error: '密码不正确' });
+        }
+        loginTries.delete(ip);
+
+        const d = ensureDeviceRec(cidHere, req);
+        if (!d) return json(res, 400, { error: '缺少设备指纹，刷新页面再试' });
+        d.acc = a.id;
+        d.lastSeen = Date.now();
+        saveDevices();
+        a.lastLogin = Date.now();
+        saveAccounts();
+
+        const c = touchClient(req, cidHere, body.ua);
+        console.log(`  ${autoNameFor(req, c.model)} 登录为「${a.name}」（${roleLabel(a.role)}）`);
+        const role = roleOf(req, cidHere);
+        json(res, 200, {
+          ok: true,
+          me: publicClient(c),
+          acc: publicAcc(a),
+          role,
+          roleName: roleLabel(role),
+          admin: canManage(req, cidHere),
+          hostAdmin: isHostRequest(req),
+          elevated: isElevated(req, cidHere),
+          canConfig: canConfig(req, cidHere),
+          caps: capsPayload(req, cidHere),
+          profiles: publicProfiles(),
+          accounts: accountList(false),
+        });
+      })
+      .catch(() => json(res, 400, { error: 'bad request' }));
+    return;
+  }
+
+  // 退出登录：这台设备回到访客状态（接入许可还在，不用重新输接入密码）
+  if (method === 'POST' && pathname === '/api/logout') {
+    readBody(req, 4096)
+      .then((raw) => {
+        let body = {};
+        try { body = JSON.parse(raw || '{}'); } catch { /* 空 body */ }
+        const cidHere = cidOf(req, body.cid) || cid;
+        const d = cidHere && devices[cidHere];
+        if (d && d.acc) {
+          // 主控设备本身就是主控身份，退出只会把自己降成访客，没有意义
+          if (d.acc === OWNER_ID && isHostRequest(req)) {
+            return json(res, 400, { error: '主控设备本身就是主控身份，不用退出登录' });
+          }
+          console.log(`  ${nameOfCid(cidHere)} 退出了账户登录`);
+          delete d.acc;
+          saveDevices();
+        }
+        const c = cidHere ? touchClient(req, cidHere, '') : null;
+        const role = roleOf(req, cidHere);
+        json(res, 200, {
+          ok: true,
+          me: c ? publicClient(c) : null,
+          acc: null,
+          role,
+          roleName: roleLabel(role),
+          admin: canManage(req, cidHere),
+          canConfig: canConfig(req, cidHere),
+          caps: capsPayload(req, cidHere),
+          profiles: publicProfiles(),
+          accounts: accountList(false),
+        });
+      })
+      .catch(() => json(res, 400, { error: 'bad request' }));
+    return;
+  }
+
+  // 账户清单：主控能看全部（含已停用），其他人只看得到能登录的那些
+  if (method === 'GET' && pathname === '/api/accounts') {
+    const full = canConfig(req, cid);
+    return json(res, 200, {
+      accounts: accountList(full),
+      full,
+      ownerId: OWNER_ID,
+      self: accOfCid(cid) ? accOfCid(cid).id : '',
+    });
+  }
+
+  // 新建 / 修改账户（只有主控）
+  if (method === 'POST' && pathname === '/api/accounts') {
+    if (!canConfig(req, cid)) return json(res, 403, { error: '只有主控能管理账户' });
+    readBody(req, 16 * 1024)
+      .then((raw) => {
+        let body = {};
+        try { body = JSON.parse(raw || '{}'); } catch { /* 空 body */ }
+        const id = String(body.id || '');
+        const isNew = !id;
+        let a = isNew ? null : accounts[id];
+        if (!isNew && !a) return json(res, 404, { error: '账户不存在' });
+
+        const name = String(body.name || '').trim().replace(/\s+/g, ' ').slice(0, 24);
+        if (!name) return json(res, 400, { error: '账户名不能为空' });
+        for (const k of Object.keys(accounts)) {
+          if (accounts[k].id !== id && accounts[k].name === name) {
+            return json(res, 400, { error: '已经有同名账户了，换一个名字' });
+          }
+        }
+
+        const role = String(body.role || '');
+        if (role && ROLES.indexOf(role) < 0) return json(res, 400, { error: '不认识这种角色' });
+        const pass = body.password == null ? null : String(body.password);
+
+        if (isNew) {
+          if (pass !== null && pass !== '' && pass.length < 4) {
+            return json(res, 400, { error: '密码至少 4 位' });
+          }
+          const nid = 'u' + crypto.randomBytes(8).toString('hex');
+          a = accounts[nid] = {
+            id: nid, name, role: role || 'member', salt: '', hash: '',
+            createdAt: Date.now(), lastLogin: 0,
+          };
+          // 新建时可以不设密码，之后由主控补；不设密码的账户登录会被挡回来
+          if (pass) setAccPass(a, pass);
+          saveAccounts();
+          console.log(`  主控新建账户「${name}」（${roleLabel(a.role)}）`);
+          return json(res, 200, { ok: true, account: publicAcc(a), accounts: accountList(true) });
+        }
+
+        // 修改：主控这个角色不允许改，避免出现两个主控或者没主控
+        if (a.role === 'owner' && role && role !== 'owner') {
+          return json(res, 400, { error: '主控账户的角色不能改' });
+        }
+        if (a.role !== 'owner' && role === 'owner') {
+          return json(res, 400, { error: '已经有主控账户了，不能再提一个' });
+        }
+        if (typeof body.disabled === 'boolean' && a.role === 'owner' && body.disabled) {
+          return json(res, 400, { error: '主控账户不能停用' });
+        }
+        a.name = name;
+        if (role) a.role = role;
+        if (pass) {
+          if (pass.length < 4) return json(res, 400, { error: '密码至少 4 位' });
+          setAccPass(a, pass);
+        } else if (body.clearPass === true && a.role !== 'owner') {
+          a.salt = '';
+          a.hash = '';
+        }
+        if (typeof body.disabled === 'boolean') a.disabled = body.disabled;
+        saveAccounts();
+        json(res, 200, { ok: true, account: publicAcc(a), accounts: accountList(true) });
+      })
+      .catch(() => json(res, 400, { error: 'bad request' }));
+    return;
+  }
+
+  // 删除账户（只有主控；主控账户本身删不掉）
+  if (method === 'DELETE' && pathname === '/api/accounts') {
+    if (!canConfig(req, cid)) return json(res, 403, { error: '只有主控能管理账户' });
+    const id = String(url.searchParams.get('id') || '');
+    const a = accounts[id];
+    if (!a) return json(res, 404, { error: '账户不存在' });
+    if (a.role === 'owner') return json(res, 400, { error: '主控账户不能删除' });
+
+    // 正在用这个账户的设备退回访客，别把它们留在不存在的身份上
+    let kicked = 0;
+    for (const k of Object.keys(devices)) {
+      if (devices[k].acc === id) { delete devices[k].acc; kicked++; }
+    }
+    dropAvatar(id);
+    if (profiles[id] && !profiles[id].avatar && !profiles[id].color) delete profiles[id];
+    delete accounts[id];
+    saveAccounts();
+    saveDevices();
+    saveProfiles();
+    console.log(`  主控删除了账户「${a.name}」` + (kicked ? `（${kicked} 台设备退回访客）` : ''));
+    json(res, 200, { ok: true, kicked, accounts: accountList(true) });
+    return;
+  }
+
   // 发文字。长度按 UTF-8 字节算，超限回 413 并带上可执行的建议
   if (method === 'POST' && pathname === '/api/text') {
     readBody(req, MAX_TEXT_BYTES + 8192)
@@ -2324,6 +2816,9 @@ const server = http.createServer((req, res) => {
         }
         cid = cidOf(req, cid) || cid;
         if (!canSendType(req, 'text', cid)) return json(res, 403, { error: denyReason('text', cid) });
+        if (toArr.length && !canSendPriv(req, cid)) {
+          return json(res, 403, { error: '当前身份不能只发给指定的人，请登录账户后再试' });
+        }
 
         text = text.replace(/\u0000/g, '').trim();
         if (!text) return json(res, 400, { error: '内容为空' });
@@ -2450,6 +2945,9 @@ const server = http.createServer((req, res) => {
         const owner = touchClient(req, ownerCid, '');
         // 多选发送：to 是 cid 数组；过滤掉自己（发送者本就可见），避免无意义项
         let to = asToArray(body.to).filter((c) => c !== owner.cid);
+        if (to.length && !canSendPriv(req, ownerCid)) {
+          return json(res, 403, { error: '当前身份不能只发给指定的人，请登录账户后再试' });
+        }
         const toName = to.map(nameOfCid).join('、');
 
         const wanted = Array.isArray(body.parts) ? body.parts.slice(0, MAX_PARTS * 2) : [];
@@ -2548,7 +3046,7 @@ const server = http.createServer((req, res) => {
 
   // 主设备：读写 Bot 配置（token 只回掩码，留空表示不改）
   if (method === 'POST' && pathname === '/api/tg/config') {
-    if (!manage) return json(res, 403, { error: '没有管理权限，只有主设备能配 Telegram' });
+    if (!canConfig(req, cid)) return json(res, 403, { error: '没有管理权限，只有主控能配 Telegram' });
     readBody(req, 8192)
       .then(async (raw) => {
         let body = {};
@@ -2596,7 +3094,7 @@ const server = http.createServer((req, res) => {
 
   // 主设备：发一条测试消息，确认握手成功
   if (method === 'POST' && pathname === '/api/tg/test') {
-    if (!manage) return json(res, 403, { error: '没有管理权限' });
+    if (!canConfig(req, cid)) return json(res, 403, { error: '没有管理权限，只有主控能测 Telegram' });
     if (!tgReady()) return json(res, 400, { error: '还没配置好 Token 或接收人' });
     tgCall('sendMessage', {
       chat_id: tg.chatId,
@@ -2745,7 +3243,7 @@ const server = http.createServer((req, res) => {
     const target = items[idx];
     const cidDel = cidOf(req, url.searchParams.get('cid'));
     const me = cidDel ? clients.get(cidDel) : null;
-    const isMine = me && me.ip === clientIp(req) && target.owner === me.cid;
+    const isMine = me && samePerson(me.cid, target.owner);
     if (!canManage(req, cidDel) && !isMine) {
       return json(res, 403, { error: '只能删除自己发送的内容' });
     }
