@@ -170,12 +170,17 @@
   .chip{
     display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 10px;border-radius:999px;
     background:var(--card); border:1px solid var(--line); color:var(--sub);
-    font-size:12.5px;cursor:pointer;white-space:nowrap;max-width:250px;min-width:0;flex:0 1 auto;
+    font-size:12.5px;cursor:pointer;white-space:nowrap;max-width:268px;min-width:0;flex:0 1 auto;
     box-shadow:var(--shadow-sm); transition:.15s; font-family:inherit;
   }
   .chip:hover{border-color:var(--accent);color:var(--text)}
   .chip b{color:var(--text);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
   .dot{width:6px;height:6px;border-radius:50%;background:var(--ok);flex:none;box-shadow:0 0 0 3px rgba(18,184,134,.16)}
+  .who-ava{
+    width:16px;height:16px;border-radius:50%;flex:none;display:grid;place-items:center;
+    font-size:8.5px;font-weight:800;color:#fff;line-height:1;overflow:hidden;
+    background-size:cover;background-position:50% 50%;
+  }
   .ibtn{
     width:32px;height:32px;flex:none;border-radius:10px;border:1px solid var(--line);
     background:var(--card);color:var(--sub);cursor:pointer;display:grid;place-items:center;
@@ -716,6 +721,31 @@
     color:var(--text);font:inherit;font-size:14px;padding:0 13px;margin-top:14px;outline:0;
   }
   .dlg input[type=text]:focus{border-color:var(--accent)}
+
+  /* ---- 头像与昵称 ---- */
+  .idn-top{display:flex;align-items:center;gap:14px;margin-top:16px}
+  .idn-pv{
+    width:64px;height:64px;border-radius:21px;flex:none;display:grid;place-items:center;
+    font-size:25px;font-weight:750;color:#fff;line-height:1;overflow:hidden;
+    background-size:cover;background-position:50% 50%;
+    box-shadow:0 10px 22px -12px rgba(16,24,40,.6);
+  }
+  .idn-main{flex:1;min-width:0}
+  .idn-lbl{
+    font-size:11px;font-weight:700;letter-spacing:.4px;color:var(--faint);
+    text-transform:uppercase;margin:16px 0 8px;
+  }
+  .idn-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:9px}
+  .idn-c{position:relative;aspect-ratio:1/1;border:0;border-radius:12px;cursor:pointer;padding:0;transition:.13s}
+  .idn-c:hover{transform:translateY(-1px)}
+  .idn-c.on{box-shadow:0 0 0 2px var(--card),0 0 0 4px var(--accent)}
+  .idn-c.on:after{content:'';position:absolute;inset:0;border-radius:12px;box-shadow:inset 0 0 0 2px rgba(255,255,255,.62)}
+  .idn-c .rec{
+    position:absolute;top:-5px;right:-5px;width:13px;height:13px;border-radius:50%;
+    background:var(--ok);border:2px solid var(--card);
+  }
+  .idn-acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:15px}
+  .idn-note{font-size:11.5px;color:var(--faint);line-height:1.65;margin-top:9px}
   @media (max-width:520px){
     .dlg-mask{align-items:flex-end;padding:0 0 calc(var(--kb,0px) + env(safe-area-inset-bottom,0px))}
     .dlg{
@@ -1565,10 +1595,14 @@
   @media (max-width:640px){
     .dlg.wide{max-width:none}
     .set-wrap{flex-direction:column;gap:11px}
-    /* 窄屏放不下竖排导航：改成顶部横向滚动的分段条 */
+    /* 窄屏放不下竖排导航：改成顶部横向滚动的分段条，并吸在内容区顶部 ——
+       翻设置内容时它不跟着滚走，随时能换页 */
     .set-nav{
       width:auto;flex-direction:row;gap:6px;overflow-x:auto;scrollbar-width:none;
-      padding:2px 0 4px;
+      position:sticky;top:0;z-index:3;
+      margin:0 -6px;padding:2px 6px 8px;
+      background:var(--card);
+      box-shadow:0 10px 14px -14px rgba(16,24,40,.62);
     }
     .set-nav::-webkit-scrollbar{display:none}
     .set-tab{
@@ -1578,6 +1612,10 @@
     .set-tab.on{border-color:var(--accent)}
     .set-tab .pg{display:none}
     .set-pane{width:100%}
+  }
+  /* 毛玻璃下吸顶的分段条要更实一点，否则内容从底下透出来 */
+  @media (max-width:640px){
+    :root[data-theme="glass"] .set-nav{background:var(--fill)}
   }
 
   /* ---- 单台设备的发送权限：一行小开关 ---- */
@@ -1736,8 +1774,8 @@
       <div class="addr" id="addr">连接中…</div>
     </div>
     <div class="spacer"></div>
-    <button class="chip" id="who" title="点击修改本机名称">
-      <span class="dot"></span><b id="whoName">…</b>
+    <button class="chip" id="who" title="点击设置头像与昵称">
+      <span class="who-ava" id="whoAva"></span><b id="whoName">…</b><span class="dot"></span>
     </button>
     <button class="peers-btn" id="peersBtn" title="在线设备" aria-haspopup="true" aria-expanded="false" aria-controls="peersPop">
       <span class="pstack" id="pstack"></span>
@@ -2160,6 +2198,53 @@
     for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
     return palette[h % palette.length];
   }
+
+  /* ---------------- 头像：本人可选颜色 / 上传图片，没设过就按名字哈希取色 ---------------- */
+  var AVA_PALETTE = ['#4c6ef5', '#8b5cf6', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444',
+    '#ec4899', '#14b8a6', '#6366f1', '#f97316', '#22c55e', '#64748b'];
+
+  function profOf(cid) {
+    return (cid && state.profiles && state.profiles[cid]) || null;
+  }
+  function profColor(cid, name) {
+    var p = profOf(cid);
+    return (p && p.color) || colorOf(name || cid || '?');
+  }
+  function profImg(cid) {
+    var p = profOf(cid);
+    return p && p.avatar ? '/a/' + encodeURIComponent(cid) + '?v=' + p.avatar : '';
+  }
+  /** 画一个头像：有上传图用图，否则用颜色 + 首字 */
+  function paintAva(el, cid, name) {
+    if (!el) return;
+    var nm = String(name || '');
+    el.dataset.ava = cid || '';
+    el.dataset.name = nm;
+    el.style.background = profColor(cid, nm);
+    var img = profImg(cid);
+    if (img) {
+      el.style.backgroundImage = 'url("' + img + '")';
+      el.style.backgroundSize = 'cover';
+      el.style.backgroundPosition = '50% 50%';
+      el.classList.add('has-img');
+      el.textContent = '';
+    } else {
+      el.style.backgroundImage = '';
+      el.classList.remove('has-img');
+      el.textContent = String(nm || '?').slice(0, 1).toUpperCase();
+    }
+  }
+  /** 字符串拼出来的头像：先带上属性，插进 DOM 后统一画 */
+  function avaAttr(cid, name) {
+    return ' data-ava="' + esc(cid || '') + '" data-name="' + esc(name || '') +
+      '" style="background:' + profColor(cid, name) + '"';
+  }
+  function paintAvasIn(root) {
+    if (!root || !root.querySelectorAll) return;
+    root.querySelectorAll('[data-ava]').forEach(function (el) {
+      paintAva(el, el.dataset.ava, el.dataset.name);
+    });
+  }
   function svgIcon(path, sw) {
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="' + (sw || 2) +
       '" stroke-linecap="round" stroke-linejoin="round">' + path + '</svg>';
@@ -2433,6 +2518,7 @@
     settings: { allowSend: true, allowText: true, allowImage: true, allowFile: true },
     tg: { ready: false, enabled: false, configured: false, unlocked: false, bot: '', target: '' },
     tgOn: localStorage.getItem('xm.tg') === '1',
+  profiles: {},
     peers: [],
     // admin = 拥有管理能力（主设备，或用专属密码临时提过权的设备）
     admin: false,
@@ -2658,8 +2744,7 @@
     peers.slice(0, max).forEach(function (p) {
       var a = document.createElement('span');
       a.className = 'pava';
-      a.style.background = colorOf(p.name);
-      a.textContent = String(p.name || '?').slice(0, 1).toUpperCase();
+      paintAva(a, p.cid, p.name);
       pstack.appendChild(a);
     });
     if (!peers.length) {
@@ -2679,8 +2764,7 @@
       el.title = p.name + (p.ip ? ' · ' + p.ip : '');
       var ava = document.createElement('span');
       ava.className = 'pava';
-      ava.style.background = colorOf(p.name);
-      ava.textContent = String(p.name || '?').slice(0, 1).toUpperCase();
+      paintAva(ava, p.cid, p.name);
       var name = document.createElement('span');
       name.className = 'pname';
       name.textContent = p.name;
@@ -2823,11 +2907,12 @@
         row.type = 'button';
         row.className = 'pick-row' + (sel ? ' on' : '') + (o.cid ? '' : ' all');
         row.innerHTML =
-          '<span class="pick-ava" style="background:' + (o.cid ? colorOf(o.name) : '#94a3b8') + '">' +
+          '<span class="pick-ava"' + (o.cid ? avaAttr(o.cid, o.name) : ' style="background:#94a3b8"') + '>' +
           esc(o.cid ? String(o.name).slice(0, 1).toUpperCase() : '全') + '</span>' +
           '<span class="pick-txt"><span class="pick-name">' + esc(o.name) + '</span>' +
           (o.sub ? '<span class="pick-sub">' + esc(o.sub) + '</span>' : '') + '</span>' +
           (sel ? '<span class="pick-check">' + ICHECK + '</span>' : '<span class="pick-box"></span>');
+        if (o.cid) paintAva(row.querySelector('.pick-ava'), o.cid, o.name);
         row.onclick = function () {
           if (o.cid === '') {
             current = [];
@@ -3146,8 +3231,7 @@
     meta.className = 'meta';
     var ava = document.createElement('span');
     ava.className = 'ava';
-    ava.style.background = colorOf(it.from || '?');
-    ava.textContent = String(it.from || '?').slice(0, 1).toUpperCase();
+    paintAva(ava, it.owner, it.from || '匿名设备');
     var who = document.createElement('span');
     who.className = 'who';
     who.textContent = it.from || '匿名设备';
@@ -3771,8 +3855,7 @@
 
     var ava = document.createElement('span');
     ava.className = 'note-ava';
-    ava.style.background = colorOf(nm);
-    ava.textContent = String(nm).slice(0, 1).toUpperCase();
+    paintAva(ava, n.by, nm);
 
     var main = document.createElement('div');
     main.className = 'note-main';
@@ -4191,17 +4274,18 @@
     if (!readPop) return;
     var cids = (it.readBy || []).filter(Boolean);
     if (it.owner && cids.indexOf(it.owner) === -1) cids = cids.concat(it.owner);
-    var seen = {}, names = [];
+    var seen = {}, ppl = [];
     cids.forEach(function (c) {
       var nm = nameOfCidLocal(c) || ('设备' + c.slice(-4));
-      if (!seen[nm]) { seen[nm] = 1; names.push(nm); }
+      if (!seen[nm]) { seen[nm] = 1; ppl.push({ cid: c, name: nm }); }
     });
-    var avas = names.map(function (nm) {
-      var ch = String(nm).slice(0, 1).toUpperCase();
-      return '<div class="read-ava" data-name="' + esc(nm) + '" style="background:' + colorOf(nm) + '">' + esc(ch) + '</div>';
+    var avas = ppl.map(function (o) {
+      return '<div class="read-ava"' + avaAttr(o.cid, o.name) + '>' +
+        esc(String(o.name).slice(0, 1).toUpperCase()) + '</div>';
     }).join('');
-    readPop.innerHTML = '<div class="read-pop-h">谁已读（' + names.length + '）</div>' +
+    readPop.innerHTML = '<div class="read-pop-h">谁已读（' + ppl.length + '）</div>' +
       '<div class="read-avas">' + avas + '</div>';
+    paintAvasIn(readPop);
     readPop.hidden = false;
     readPopIt = it;
     readPopAnchor = anchor;
@@ -4347,7 +4431,7 @@
 
   function senderRow(cid, name, on, color) {
     return '<button class="fpop-i' + (on ? ' on' : '') + '" type="button" role="option" aria-selected="' + on + '" data-cid="' + esc(cid) + '">' +
-      '<span class="fpop-ava" style="background:' + (color || 'var(--faint)') + '">' + esc(firstChar(name)) + '</span>' +
+      '<span class="fpop-ava"' + (cid ? avaAttr(cid, name) : ' style="background:' + (color || 'var(--faint)') + '"') + '>' + esc(firstChar(name)) + '</span>' +
       '<span class="fpop-nm">' + esc(name) + '</span>' +
       '<svg class="fpop-ck" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>' +
       '</button>';
@@ -4676,6 +4760,16 @@
     if (d.caps) state.caps = d.caps;
     if (d.limits) state.limits = d.limits;
     if (d.tg) state.tg = d.tg;
+    if (d.profiles) {
+      state.profiles = d.profiles;
+      // 别人换了头像 / 颜色：整页头像重画一遍（不动卡片结构）
+      var psig = JSON.stringify(d.profiles);
+      if (psig !== state._psig) {
+        state._psig = psig;
+        paintAvasIn(document);
+        syncWho();
+      }
+    }
     if (d.peers) { state.peers = d.peers; renderPeers(d.peers); }
     // 授权设备清单拉一次用于选接收人；节流，约每 15s 刷新一次
     if (d.me && Date.now() - state._dl > 15000) {
@@ -4695,7 +4789,8 @@
   function syncWho() {
     if (!state.me) return;
     $('whoName').textContent = state.me.name || '本机';
-    $('who').title = (state.me.name || '') + ' · ' + (state.me.ip || '') + '（点击改名）';
+    $('who').title = (state.me.name || '') + ' · ' + (state.me.ip || '') + '（点击设置头像与昵称）';
+    paintAva($('whoAva'), state.cid, state.me.name || '本机');
   }
 
   /* ============================================================ 输入区（块） */
@@ -5831,13 +5926,12 @@
     hint.textContent = '每台设备按自己的指纹单独记账，同一个 IP 上同时挂多台设备也互不影响。新授权的设备默认全开，可以在下面逐台收紧：单独关掉它的文字 / 图片 / 文件发送；移除后那台设备要重新输密码并由你再同意一次。';
     box.appendChild(hint);
 
-    function row(name, sub, actions) {
+    function row(name, sub, actions, cid) {
       var el = document.createElement('div');
       el.className = 'dev-row';
       var ava = document.createElement('span');
       ava.className = 'dev-ava';
-      ava.style.background = colorOf(name || '?');
-      ava.textContent = String(name || '?').slice(0, 1).toUpperCase();
+      paintAva(ava, cid, name || '?');
       var txt = document.createElement('div');
       txt.className = 'dev-txt';
       var nm = document.createElement('div');
@@ -5940,7 +6034,7 @@
         listEl.appendChild(row(p.name || p.ip, (p.ip || '') + ' · 正在申请接入', [
           { label: '同意', cls: 'ok', fn: function () { act('approve', p.cid); } },
           { label: '拒绝', cls: 'bad', fn: function () { act('reject', p.cid); } }
-        ]));
+        ], p.cid));
       });
       if (devs.length) {
         devs.forEach(function (v) {
@@ -5952,7 +6046,7 @@
           if (elev.indexOf(v.cid) > -1) sub += ' · 已提权';
           item.appendChild(row(v.name || v.ip, sub, [
             { label: '移除', cls: 'bad', fn: function () { removeDevice(v); } }
-          ]));
+          ], v.cid));
           item.appendChild(permRow(v, perms[v.cid] || {}));
           listEl.appendChild(item);
         });
@@ -6639,25 +6733,203 @@
     });
   }
 
-  async function renameSelf() {
-    var v = await Dialog.prompt({
-      title: '给这台设备改名',
-      desc: '留空则恢复自动名称（设备型号 + IP，保证不重名）。',
-      value: state.me ? state.me.name : '',
-      placeholder: '例如 小毛的 MacBook'
+  /** 方形裁切 + 缩到 160px：头像不用用户自己裁，传上来就是正好的尺寸 */
+  function squareAvatar(file) {
+    return new Promise(function (resolve, reject) {
+      if (!file || !/^image\//.test(file.type)) return reject(new Error('请选一张图片'));
+      var url = URL.createObjectURL(file);
+      var im = new Image();
+      im.onload = function () {
+        try {
+          var side = Math.min(im.naturalWidth, im.naturalHeight);
+          var cv = document.createElement('canvas');
+          cv.width = cv.height = 160;
+          var ctx = cv.getContext('2d');
+          ctx.drawImage(im, (im.naturalWidth - side) / 2, (im.naturalHeight - side) / 2, side, side, 0, 0, 160, 160);
+          URL.revokeObjectURL(url);
+          resolve(cv.toDataURL('image/jpeg', 0.86));
+        } catch (e) {
+          URL.revokeObjectURL(url);
+          reject(new Error('这张图处理不了'));
+        }
+      };
+      im.onerror = function () { URL.revokeObjectURL(url); reject(new Error('图片读不出来')); };
+      im.src = url;
     });
-    if (v === null) return;
+  }
+
+  /** 头像与昵称：改自己的颜色 / 上传头像 / 改名，改完所有设备立刻同步 */
+  async function openIdentity() {
+    if (!state.me) return;
+    var myCid = state.cid;
+    var myName = state.me.name || '本机';
+    var cur = profOf(myCid) || {};
+    var pick = cur.color || '';
+    var upload = null;   // 新上传的 dataURL
+    var drop = false;    // 主动清掉已上传的头像
+
+    // 别人用掉的颜色：推荐时避开，一眼就能分清楚谁是谁
+    var used = {};
+    Object.keys(state.profiles || {}).forEach(function (c) {
+      if (c === myCid) return;
+      var col = (state.profiles[c] || {}).color;
+      if (col) used[col.toLowerCase()] = 1;
+    });
+    var reco = '';
+    for (var i = 0; i < AVA_PALETTE.length; i++) {
+      if (!used[AVA_PALETTE[i].toLowerCase()]) { reco = AVA_PALETTE[i]; break; }
+    }
+    if (!pick && reco) pick = reco;   // 没设过就先选中推荐色（保存才生效）
+
+    var box = document.createElement('div');
+
+    var top = document.createElement('div');
+    top.className = 'idn-top';
+    var pv = document.createElement('div');
+    pv.className = 'idn-pv';
+    var main = document.createElement('div');
+    main.className = 'idn-main';
+    var nameInp = document.createElement('input');
+    nameInp.type = 'text';
+    nameInp.className = 'idn-inp';
+    nameInp.maxLength = 24;
+    nameInp.placeholder = '例如 小毛的 MacBook';
+    nameInp.value = myName;
+    nameInp.style.marginTop = '0';
+    var nameTip = document.createElement('div');
+    nameTip.className = 'idn-note';
+    nameTip.textContent = '留空则恢复自动名称（型号 + IP，保证不重名）。';
+    main.appendChild(nameInp);
+    main.appendChild(nameTip);
+    top.appendChild(pv);
+    top.appendChild(main);
+    box.appendChild(top);
+
+    function drawPv() {
+      var nm = nameInp.value.trim() || myName;
+      var img = upload || (!drop && profImg(myCid)) || '';
+      var color = pick || colorOf(nm);
+      pv.style.background = color;
+      if (img) {
+        pv.style.backgroundImage = 'url("' + img + '")';
+        pv.classList.add('has-img');
+        pv.textContent = '';
+      } else {
+        pv.style.backgroundImage = '';
+        pv.classList.remove('has-img');
+        pv.textContent = String(nm || '?').slice(0, 1).toUpperCase();
+      }
+    }
+
+    var lb1 = document.createElement('div');
+    lb1.className = 'idn-lbl';
+    lb1.textContent = '头像颜色';
+    box.appendChild(lb1);
+
+    var grid = document.createElement('div');
+    grid.className = 'idn-grid';
+    var chips = [];
+    AVA_PALETTE.forEach(function (col) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'idn-c';
+      b.style.background = col;
+      b.title = col;
+      if (col.toLowerCase() === pick.toLowerCase()) b.classList.add('on');
+      if (col === reco) {
+        var r = document.createElement('span');
+        r.className = 'rec';
+        r.title = '推荐：还没人用过这个颜色';
+        b.appendChild(r);
+      }
+      b.onclick = function () {
+        pick = col;
+        chips.forEach(function (c) { c.classList.remove('on'); });
+        b.classList.add('on');
+        drawPv();
+      };
+      chips.push(b);
+      grid.appendChild(b);
+    });
+    box.appendChild(grid);
+
+    var lb2 = document.createElement('div');
+    lb2.className = 'idn-note';
+    lb2.textContent = reco
+      ? '绿点标的是还没人用的颜色，优先选它最容易区分。'
+      : '颜色都被用过了，挑一个顺眼的就行。';
+    box.appendChild(lb2);
+
+    var acts = document.createElement('div');
+    acts.className = 'idn-acts';
+    var pickFile = document.createElement('input');
+    pickFile.type = 'file';
+    pickFile.accept = 'image/*';
+    pickFile.hidden = true;
+    var upBtn = document.createElement('button');
+    upBtn.type = 'button';
+    upBtn.className = 'mini';
+    upBtn.textContent = '上传头像图片';
+    upBtn.onclick = function () { pickFile.click(); };
+    var resetBtn = document.createElement('button');
+    resetBtn.type = 'button';
+    resetBtn.className = 'mini ghost';
+    resetBtn.textContent = '恢复默认';
+    resetBtn.title = '清掉上传的图片和自选颜色，回到按名字取色';
+    resetBtn.onclick = function () {
+      upload = null;
+      drop = true;
+      pick = '';
+      chips.forEach(function (c) { c.classList.remove('on'); });
+      drawPv();
+    };
+    acts.appendChild(upBtn);
+    acts.appendChild(resetBtn);
+    acts.appendChild(pickFile);
+    box.appendChild(acts);
+
+    pickFile.onchange = function () {
+      var f = pickFile.files && pickFile.files[0];
+      pickFile.value = '';
+      if (!f) return;
+      if (f.size > 8 * 1024 * 1024) { toast('图片太大了，换一张小一点的'); return; }
+      squareAvatar(f).then(function (dataUrl) {
+        upload = dataUrl;
+        drop = false;
+        drawPv();
+      }).catch(function (e) { toast(e.message || '图片处理失败'); });
+    };
+
+    nameInp.addEventListener('input', drawPv);
+    drawPv();
+
+    var ok = await Dialog.open({
+      title: '头像与昵称',
+      desc: '只改你自己这台设备，保存后其他设备立刻看到。',
+      body: box,
+      actions: [{ label: '取消', value: null }, { label: '保存', value: 'save', kind: 'primary' }]
+    });
+    if (ok !== 'save') return;
+
+    var payload = { cid: myCid, name: nameInp.value.trim(), color: pick };
+    if (upload) payload.avatar = upload;
+    else if (drop) payload.avatar = '';
     try {
-      var d = await api('/api/rename', {
+      var d = await api('/api/me/profile?cid=' + encodeURIComponent(myCid), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cid: state.cid, name: v })
+        body: JSON.stringify(payload)
       });
       if (d.me) state.me = d.me;
+      if (d.profiles) {
+        state.profiles = d.profiles;
+        state._psig = JSON.stringify(d.profiles);
+      }
+      paintAvasIn(document);
       syncWho();
       poll(true);
-      toast(v ? '已改名' : '已恢复自动名称');
-    } catch (e) { toast(e.message || '改名失败'); }
+      toast('已保存');
+    } catch (e) { toast(e.message || '保存失败'); }
   }
 
   /* ============================================================ 事件 */
@@ -6667,7 +6939,7 @@
     if (state.admin) openSettings();
     else askElevate();
   });
-  $('who').addEventListener('click', renameSelf);
+  $('who').addEventListener('click', openIdentity);
   $('toBtn').addEventListener('click', openTargetPicker);
 
   // 筛选 + 搜索

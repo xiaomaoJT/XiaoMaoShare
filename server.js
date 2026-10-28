@@ -1233,6 +1233,43 @@ function saveDevices() {
 if (legacyDeviceIps.length || permsMigrated) saveDevices();
 
 /**
+ * 个人资料：头像颜色 / 上传的头像。
+ * 按设备指纹（cid）记账，和 devices 一样是「谁就是谁」，不走 IP。
+ * 头像图存成文件，只留文件名；没设过就不在表里出现（前端按名字哈希取色兜底）。
+ */
+const PROFILES_FILE = path.join(DATA_DIR, 'profiles.json');
+const AVATAR_DIR = path.join(DATA_DIR, 'avatars');
+let profiles = {};
+try {
+  const saved = JSON.parse(fs.readFileSync(PROFILES_FILE, 'utf8'));
+  if (saved && typeof saved === 'object') profiles = saved;
+} catch {
+  /* 首次运行 */
+}
+
+function saveProfiles() {
+  fs.writeFile(PROFILES_FILE, JSON.stringify(profiles, null, 2), () => {});
+}
+
+/** 给前端的精简版：颜色 + 头像版本号（用来破缓存） */
+function publicProfiles() {
+  const out = {};
+  for (const [cid, p] of Object.entries(profiles)) {
+    if (!p) continue;
+    out[cid] = { color: p.color || '', avatar: p.avatar ? p.at || 1 : 0, name: (devices[cid] && devices[cid].name) || '' };
+  }
+  return out;
+}
+
+/** 删掉某台设备当前的头像文件（换新图 / 恢复默认时用） */
+function dropAvatar(cid) {
+  const p = profiles[cid];
+  if (!p || !p.avatar) return;
+  try { fs.unlinkSync(path.join(AVATAR_DIR, p.avatar)); } catch { /* 文件已不在就算了 */ }
+  p.avatar = '';
+}
+
+/**
  * 主设备身份不能只看 IP：
  * 走端口转发 / 容器 / 反向代理时，局域网其他设备的请求会被中转成 127.0.0.1 或主机 LAN IP，
  * 于是「陌生设备被当成主设备」。这里改成：本机浏览器用 localhost 打开，或者带着主设备令牌。
@@ -1680,7 +1717,7 @@ const server = http.createServer((req, res) => {
 
   /* ---------------- 准入闸门：以下接口都要求已授权 ---------------- */
   // /f/ 下载和二维码是 <img>/<a> 直接发起的，带不了设备指纹，只能按 IP 认
-  const lenient = pathname.startsWith('/f/') || pathname === '/api/qr' || pathname === '/api/info';
+  const lenient = pathname.startsWith('/f/') || pathname.startsWith('/a/') || pathname === '/api/qr' || pathname === '/api/info';
   const auth = authState(req, url.searchParams.get('cid') || undefined, !lenient);
   if (!auth.authorized) {
     return json(res, 401, {
@@ -2024,6 +2061,67 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  /**
+   * 本人的资料：名字 / 头像颜色 / 上传的头像。只能改自己。
+   * 头像走 base64 内联上传（前端已裁成方形小图），省掉一套 multipart 解析。
+   */
+  if (method === 'POST' && pathname === '/api/me/profile') {
+    readBody(req, 1024 * 1024)
+      .then((raw) => {
+        let body = {};
+        try { body = JSON.parse(raw || '{}'); } catch {}
+        const self = String(cid || body.cid || '').slice(0, 64);
+        // 请求里带了指纹就以它为准，防止替别人改资料
+        if (cid && body.cid && String(body.cid) !== cid) return json(res, 403, { error: '只能修改自己的资料' });
+        if (!self) return json(res, 403, { error: '只能修改自己的资料' });
+
+        const c = touchClient(req, self, '');
+        if (typeof body.name === 'string') {
+          c.customName = String(body.name).trim().replace(/\s+/g, ' ').slice(0, 24);
+          // 顺手落到 devices 里：离线设备在「发送人 / 已读」里也能显示这个名字
+          if (devices[self]) { devices[self].name = c.customName || devices[self].name; saveDevices(); }
+        }
+
+        const p = profiles[self] || (profiles[self] = { color: '', avatar: '', at: 0 });
+        if (typeof body.color === 'string') {
+          const col = String(body.color).trim().toLowerCase();
+          if (!col) p.color = '';
+          else if (/^#[0-9a-f]{6}$/.test(col)) p.color = col;
+          else return json(res, 400, { error: '颜色格式不对' });
+        }
+
+        if (body.avatar === null || body.avatar === '') {
+          dropAvatar(self);
+        } else if (typeof body.avatar === 'string' && body.avatar) {
+          const m = /^data:image\/(png|jpe?g|webp);base64,([A-Za-z0-9+/=]+)$/i.exec(body.avatar);
+          if (!m) return json(res, 400, { error: '头像只支持 PNG / JPG / WebP' });
+          const buf = Buffer.from(m[2], 'base64');
+          if (!buf.length) return json(res, 400, { error: '图片内容为空' });
+          if (buf.length > 600 * 1024) return json(res, 413, { error: '头像太大了（上限 600 KB）' });
+          const ext = m[1].toLowerCase().startsWith('png') ? 'png' : m[1].toLowerCase() === 'webp' ? 'webp' : 'jpg';
+          const file = `${self}-${Date.now().toString(36)}.${ext}`;
+          try {
+            fs.mkdirSync(AVATAR_DIR, { recursive: true });
+            fs.writeFileSync(path.join(AVATAR_DIR, file), buf);
+          } catch {
+            return json(res, 500, { error: '头像保存失败，检查 data 目录权限' });
+          }
+          dropAvatar(self);
+          p.avatar = file;
+        }
+
+        p.at = Date.now();
+        if (!p.color && !p.avatar) delete profiles[self];
+        saveProfiles();
+        json(res, 200, {
+          ok: true, me: publicClient(c), peers: peersPayload(),
+          profile: profiles[self] || null, profiles: publicProfiles(),
+        });
+      })
+      .catch(() => json(res, 400, { error: 'bad request' }));
+    return;
+  }
+
   // 主设备：单独给某台设备设定能发什么
   if (method === 'POST' && pathname === '/api/devices/perms') {
     if (!manage) return json(res, 403, { error: '没有管理权限' });
@@ -2103,6 +2201,7 @@ const server = http.createServer((req, res) => {
       hostAdmin: host,
       elevated: isElevated(req, cid),
       caps: capsPayload(req, cid),
+      profiles: publicProfiles(),
       limits: limitsPayload(),
       pending: manage ? pendingList().length : 0,
       now: Date.now(),
@@ -2575,6 +2674,29 @@ const server = http.createServer((req, res) => {
         }
       })
       .catch(() => json(res, 400, { error: 'bad request' }));
+    return;
+  }
+
+  // 头像：/a/<cid>?v=<版本号>。由 <img>/background-image 直接取，带不了请求头，走宽松准入
+  if (method === 'GET' && pathname.startsWith('/a/')) {
+    const who = decodeURIComponent(pathname.slice(3)).slice(0, 64);
+    const p = profiles[who];
+    if (!p || !p.avatar) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('没有头像');
+      return;
+    }
+    const abs = path.join(AVATAR_DIR, p.avatar);
+    let st;
+    try { st = fs.statSync(abs); } catch { res.writeHead(404); res.end(); return; }
+    const ext = path.extname(p.avatar).slice(1).toLowerCase();
+    const mime = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+    res.writeHead(200, {
+      'Content-Type': mime,
+      'Content-Length': st.size,
+      'Cache-Control': 'private, max-age=604800',
+    });
+    fs.createReadStream(abs).pipe(res);
     return;
   }
 
