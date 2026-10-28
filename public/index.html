@@ -187,7 +187,7 @@
     font-size:8.5px;font-weight:800;color:#fff;line-height:1;overflow:hidden;
     background-size:cover;background-position:50% 50%;
   }
-  /* 访客态：虚线圈 + 灰头像，一眼看出「这台设备还没登录」 */
+  /* 未登录态：虚线圈 + 灰头像，一眼看出「这台设备还没登录」 */
   .chip#who.guest{border-style:dashed}
   .chip#who.guest .who-ava{background:var(--card-2)!important;color:var(--faint)!important;background-image:none!important;box-shadow:inset 0 0 0 1px var(--line)}
   .chip#who.guest b{color:var(--faint)}
@@ -1029,7 +1029,7 @@
   .role-opt:disabled{opacity:.5;cursor:not-allowed}
   .acc-form-lbl{font-size:11px;font-weight:700;letter-spacing:.4px;color:var(--faint);text-transform:uppercase;margin:16px 0 0}
   .acc-del{display:flex;justify-content:flex-end;margin-top:14px}
-  /* 访客提示条上的「登录」按钮贴右边 */
+  /* 输入区提示条上的「登录」按钮贴右边 */
   .locked .mini{margin-left:auto;flex:none}
   .chip.guest{color:var(--faint)}
   .chip.guest .dot{background:var(--faint);box-shadow:0 0 0 3px rgba(120,132,150,.14)}
@@ -2651,9 +2651,9 @@
     hostAdmin: false,
     elevated: false,
     canConfig: false,
-    // 身份：role = 主控/管理员/成员/访客，acc = 当前登录的账户（未登录 = null）
-    role: 'guest',
-    roleName: '访客',
+    // 身份：role = 主控/管理员/成员，acc = 当前登录的账户（未登录 = null）
+    role: '',
+    roleName: '',
     acc: null,
     accounts: [],            // 可登录的账户清单，登录页和设置页共用
     // caps = 这台设备实际能发什么，由服务端按「角色 ∩ 全局开关 ∩ 本机权限」算好
@@ -2859,7 +2859,7 @@
 
     function loginForm(errMsg) {
       stopPoll();
-      shell('选择账户登录', '设备已经通过接入许可。选一个账户登录，发出去的内容才会记在「你」名下；也可以先当访客看看。');
+      shell('选择账户登录', '设备已经通过接入许可。选一个账户登录，发出去的内容才会记在「你」名下。');
       bodyEl.innerHTML = '<div class="spin"></div>';
       api('/api/accounts')
         .then(function (d) { drawLogin((d && d.accounts) || [], errMsg); })
@@ -2870,11 +2870,6 @@
       bodyEl.innerHTML = '';
       if (!list.length) {
         shell('还没有可用的账户', '让主控先在「设置 → 账户」里建一个账户（或给主控账户设个密码），再回来登录。');
-        var only = document.createElement('button');
-        only.className = 'gate-link';
-        only.textContent = '先以访客身份浏览 →';
-        only.onclick = guestGo;
-        bodyEl.appendChild(only);
         return;
       }
 
@@ -2964,12 +2959,6 @@
       wrap.appendChild(err);
       bodyEl.appendChild(wrap);
 
-      var back = document.createElement('button');
-      back.className = 'gate-link';
-      back.textContent = '以访客身份浏览（只能看，不能发）';
-      back.onclick = guestGo;
-      bodyEl.appendChild(back);
-
       syncSel();
       setTimeout(function () { if (!pwd.disabled) { try { pwd.focus(); } catch (e) {} } }, 90);
 
@@ -2985,7 +2974,6 @@
           body: JSON.stringify({ cid: state.cid, acc: picked, password: v })
         }).then(function (d) {
           adoptIdentity(d);
-          try { localStorage.removeItem('xm.visitor'); } catch (e) {}
           toast('已登录为「' + ((d.acc && d.acc.name) || '') + '」');
           pass(d);
         }).catch(function (e) {
@@ -2999,13 +2987,6 @@
       pwd.addEventListener('keydown', function (e) {
         if (e.key === 'Enter') { e.preventDefault(); submit(); }
       });
-    }
-
-    function guestGo() {
-      stopPoll();
-      try { localStorage.setItem('xm.visitor', '1'); } catch (e) {}
-      el.classList.remove('on');
-      if (onPass) onPass(null);
     }
 
     return {
@@ -3293,9 +3274,7 @@
     }
 
     var msg = '';
-    if (state.role === 'guest') {
-      msg = '当前是访客身份，登录后即可发送';
-    } else if (!state.admin) {
+    if (!state.admin) {
       if (!textOK && !attachOK) msg = '这台设备的发送权限已被关闭，当前只能查看和下载';
       else if (!textOK) msg = '这台设备当前只能发送图片或文件';
       else if (!attachOK) msg = '这台设备当前只能发送文字';
@@ -3305,14 +3284,6 @@
     }
     lockedEl.hidden = !msg;
     lockedEl.innerHTML = msg ? (ILOCK + '<span>' + esc(msg) + '</span>') : '';
-    if (msg && state.role === 'guest') {
-      var go = document.createElement('button');
-      go.type = 'button';
-      go.className = 'mini ok';
-      go.textContent = '登录账户';
-      go.onclick = function () { openLoginGate(); };
-      lockedEl.appendChild(go);
-    }
 
     if (msg) hintEl.hidden = true;
     else syncSend();
@@ -5015,10 +4986,15 @@
   function poll(force) {
     var url = '/api/list' + (state.cid ? '?cid=' + encodeURIComponent(state.cid) : '');
     fetch(url, { cache: 'no-store' }).then(function (r) {
-      // 授权被主设备移除：立刻退回准入界面
+      // 授权被主设备移除，或登录态丢失：根据情况退回对应界面
       if (r.status === 401) {
         stopPolling();
         return r.json().catch(function () { return {}; }).then(function (d) {
+          // 接入许可还在，只是没登录账户：退回登录页（不用重输接入密码）
+          if (d.needLogin) {
+            Gate.open('login', { onPass: function () { poll(true); } });
+            throw new Error('unauthorized');
+          }
           var msg = d.status === 'rejected' ? '' : '这台设备的授权已被主设备移除，请重新验证。';
           Gate.open(d.status || 'none', { message: msg, onPass: launch });
           throw new Error('unauthorized');
@@ -5090,15 +5066,12 @@
   }
   function syncWho() {
     if (!state.me) return;
-    var guest = state.role === 'guest';
     var nm = (state.acc && state.acc.name) || state.me.name || '本机';
-    $('whoName').textContent = guest ? '访客' : nm;
-    $('who').title = guest
-      ? '还没登录账户 · 点这里登录（登录后才能发送）'
-      : state.hostAdmin
-        ? nm + ' · 主控设备'
-        : nm + ' · ' + state.roleName + ' · 点这里切换账户';
-    paintAva($('whoAva'), state.cid, guest ? '访客' : nm);
+    $('whoName').textContent = nm;
+    $('who').title = state.hostAdmin
+      ? nm + ' · 主控设备'
+      : nm + ' · ' + state.roleName + ' · 点这里切换账户';
+    paintAva($('whoAva'), state.cid, nm);
   }
 
   /**
@@ -5117,8 +5090,6 @@
       state.acc = d.acc || null;
     }
     if (Array.isArray(d.accounts)) state.accounts = d.accounts;
-    var who = $('who');
-    if (who) who.classList.toggle('guest', state.role === 'guest');
     if (changed) {
       // 换了个人：头像、资料、发送能力都要重算
       state._psig = '';
@@ -6395,7 +6366,7 @@
           var bits = [v.ip || ''];
           // 谁在用这台机器，比「已授权」有用得多
           if (info) bits.push('账户 ' + info.name + '（' + info.roleName + '）');
-          else bits.push('未登录 · 访客');
+          else bits.push('未登录');
           if (v.host) bits.push('主控设备');
           // 授权绑定了设备指纹：显示后 4 位，方便确认到底放行了哪台
           if (v.cid) bits.push('指纹 ' + String(v.cid).slice(-4));
@@ -6966,7 +6937,7 @@
     var hint = document.createElement('div');
     hint.className = 'dev-hint';
     hint.textContent = '账户是身份，设备只是入口：同一个账户能在多台设备上登录，头像和发出去的消息都跟着账户走。' +
-      '四档角色的区别 —— 访客只能看；成员能收发；管理员还能审批设备、删除他人内容；主控另外能改全局设置、管账户。';
+      '三档角色的区别 —— 成员能收发；管理员还能审批设备、删除他人内容；主控另外能改全局设置、管账户。没有访客身份，不登录进不来。';
     box.appendChild(hint);
 
     var cache = [];
@@ -7087,7 +7058,6 @@
       var RL = [
         ['member', '成员', '能收发消息和文件'],
         ['admin', '管理员', '还能审批设备、删他人内容'],
-        ['guest', '访客', '只能看，不能发'],
         ['owner', '主控', '全部权限，只能有一个']
       ];
       var hasOwner = cache.some(function (x) { return x.role === 'owner'; });
@@ -7147,7 +7117,7 @@
         tr.className = 'track';
         var tx = document.createElement('span');
         tx.className = 'txt';
-        tx.innerHTML = '停用这个账户<small>停用后它登录不了，已经登录的设备会退回访客</small>';
+        tx.innerHTML = '停用这个账户<small>停用后它登录不了，已经登录的设备会退回未登录</small>';
         dis.appendChild(cb); dis.appendChild(tr); dis.appendChild(tx);
         box2.appendChild(dis);
       }
@@ -7162,13 +7132,13 @@
         delBtn.onclick = function () {
           Dialog.confirm({
             title: '删除账户「' + cur.name + '」？',
-            desc: '账户删掉后，正在用它登录的设备会立刻退回访客；它发过的内容会保留。',
+            desc: '账户删掉后，正在用它登录的设备会立刻退回未登录；它发过的内容会保留。',
             ok: '删除', danger: true
           }).then(function (okd) {
             if (!okd) return;
             api('/api/accounts?id=' + encodeURIComponent(cur.id), { method: 'DELETE' })
               .then(function (d) {
-                toast(d.kicked ? '已删除，' + d.kicked + ' 台设备退回访客' : '已删除账户');
+                toast(d.kicked ? '已删除，' + d.kicked + ' 台设备退回未登录' : '已删除账户');
                 if (d.accounts) { cache = d.accounts; paint({ accounts: d.accounts }); }
                 poll(true);
               }).catch(function (e) { toast(e.message || '删除失败'); });
@@ -7627,8 +7597,7 @@
 
   function openWhoPop() {
     if (!whoPop.hidden) { closeWhoPop(); return; }
-    var guest = state.role === 'guest';
-    var nm = guest ? '访客' : ((state.acc && state.acc.name) || (state.me && state.me.name) || '本机');
+    var nm = (state.acc && state.acc.name) || (state.me && state.me.name) || '本机';
     whoPop.innerHTML = '';
 
     var head = document.createElement('div');
@@ -7642,7 +7611,7 @@
     n.className = 'who-n';
     n.textContent = nm;
     // 名字和角色撞了（比如就叫「主控」）就别重复挂一个一样的标签
-    if (!guest && state.roleName !== nm) {
+    if (state.roleName !== nm) {
       var chip = document.createElement('span');
       chip.className = 'role-chip ' + state.role;
       chip.textContent = state.roleName;
@@ -7652,26 +7621,21 @@
     var sub = document.createElement('div');
     sub.className = 'who-s';
     // 设备名里本来就带 IP，别再叠一遍
-    if (guest) sub.textContent = '未登录 · 只能查看和下载';
-    else if (state.me) sub.textContent = state.me.dev || state.me.ip || '';
+    if (state.me) sub.textContent = state.me.dev || state.me.ip || '';
     hi.appendChild(n);
     hi.appendChild(sub);
     head.appendChild(ava);
     head.appendChild(hi);
     whoPop.appendChild(head);
 
-    if (guest) {
-      whoPop.appendChild(whoMenuItem(IUSER, '登录账户', openLoginGate));
-    } else {
-      whoPop.appendChild(whoMenuItem(IEDIT, '编辑头像与昵称', openIdentity));
-      if (state.canConfig) {
-        whoPop.appendChild(whoMenuItem(IUSERS, '账户管理', function () { openSettings('account'); }));
-      }
-      // 主控设备天然就是主控身份，没有「切换 / 退出」这回事
-      if (!state.hostAdmin) {
-        whoPop.appendChild(whoMenuItem(IUSER, '切换账户', openLoginGate));
-        whoPop.appendChild(whoMenuItem(ILOGOUT, '退出登录', doLogout, 'danger'));
-      }
+    whoPop.appendChild(whoMenuItem(IEDIT, '编辑头像与昵称', openIdentity));
+    if (state.canConfig) {
+      whoPop.appendChild(whoMenuItem(IUSERS, '账户管理', function () { openSettings('account'); }));
+    }
+    // 主控设备天然就是主控身份，没有「切换 / 退出」这回事
+    if (!state.hostAdmin) {
+      whoPop.appendChild(whoMenuItem(IUSER, '切换账户', openLoginGate));
+      whoPop.appendChild(whoMenuItem(ILOGOUT, '退出登录', doLogout, 'danger'));
     }
 
     whoPop.hidden = false;
@@ -7693,7 +7657,7 @@
   window.addEventListener('resize', closeWhoPop);
   window.addEventListener('scroll', closeWhoPop, { passive: true });
 
-  /** 打开登录页（顶栏菜单、访客提示条都用它） */
+  /** 打开登录页（顶栏菜单、退出登录后都用它） */
   function openLoginGate() {
     closeWhoPop();
     Gate.open('login', { onPass: function () { poll(true); } });
@@ -7702,7 +7666,7 @@
   function doLogout() {
     Dialog.confirm({
       title: '退出登录？',
-      desc: '这台设备会退回访客状态，只能查看和下载。想再用你的身份，重新输一次密码就行。',
+      desc: '退出后这台设备回到未登录状态，必须重新登录账户才能发送内容。想再用这个身份，重新输一次密码即可。',
       ok: '退出登录', danger: true
     }).then(function (ok) {
       if (!ok) return;
@@ -7712,9 +7676,8 @@
         body: JSON.stringify({ cid: state.cid })
       }).then(function (d) {
         adoptIdentity(d);
-        try { localStorage.setItem('xm.visitor', '1'); } catch (e) {}
-        poll(true);
-        toast('已退出登录，现在是访客身份');
+        openLoginGate();
+        toast('已退出登录，请重新登录');
       }).catch(function (e) { toast(e.message || '退出失败'); });
     });
   }
@@ -8018,13 +7981,10 @@
 
   /* ============================================================ 启动 */
   /**
-   * 已过接入许可、但还没说清「你是谁」时，请人选个账户。
-   * 选过一次「访客」就记住，别每次刷新都弹（随时能从顶栏或提示条重新登录）。
+   * 已过接入许可、但还没说清「你是谁」时，强制选个账户登录。
+   * 没有访客身份：不登录就进不来，也不能用「记住访客」跳过。
    */
   function openLoginIfNeeded(d) {
-    var skip = false;
-    try { skip = localStorage.getItem('xm.visitor') === '1'; } catch (e) {}
-    if (skip) return;
     if (d && d.authorized && !d.acc && !d.hostAdmin) {
       Gate.open('login', { onPass: function () { poll(true); } });
     }

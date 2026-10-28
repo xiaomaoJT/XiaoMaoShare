@@ -200,7 +200,7 @@
   </div>
 
   <h1>把同一 Wi-Fi 下的设备，<br>变成一块<span>共享剪贴板</span></h1>
-  <p class="lead">一个零依赖的 Node 服务，跑起来就是完整的互传面板。手机、电脑打开同一个地址，文字、图片、文件随手互传；<b>图文混排成一条消息</b>、<b>Markdown</b>、<b>私聊</b>、<b>扫码</b>、<b>Telegram 远程同步</b>都在这一个页面里，不用装 App，不用连外网。现在还有 <b>账户体系</b>（主控 / 管理员 / 成员 / 访客四档角色）、<b>图片画廊</b>、<b>已读回执</b>、<b>按人 / 按日筛选</b> 和 <b>彩色工具栏</b>。</p>
+  <p class="lead">一个零依赖的 Node 服务，跑起来就是完整的互传面板。手机、电脑打开同一个地址，文字、图片、文件随手互传；<b>图文混排成一条消息</b>、<b>Markdown</b>、<b>私聊</b>、<b>扫码</b>、<b>Telegram 远程同步</b>都在这一个页面里，不用装 App，不用连外网。现在还有 <b>账户体系</b>（主控 / 管理员 / 成员三档角色）、<b>图片画廊</b>、<b>已读回执</b>、<b>按人 / 按日筛选</b> 和 <b>彩色工具栏</b>。</p>
 
   <div class="chips">
     <span class="chip hot"><i></i>零依赖</span>
@@ -208,7 +208,7 @@
     <span class="chip"><i></i>单文件服务端</span>
     <span class="chip"><i></i>单页前端 · 无框架</span>
     <span class="chip"><i></i>macOS / Windows / Linux</span>
-    <span class="chip hot"><i></i>账户 + 四档角色</span>
+    <span class="chip hot"><i></i>账户 + 三档角色</span>
     <span class="chip"><i></i>密码 scrypt 存派生值</span>
   </div>
 
@@ -249,13 +249,12 @@
         <div class="wtxt">
           <div class="n">04 · 账户与登录</div>
           <h3>选一个账户，说清自己是谁</h3>
-          <p>过完接入许可就是登录页：账户列表带角色标签，选一个人输密码，发出去的内容才会记在「你」名下。懒得登记就先点「以访客身份浏览」——只看不发，随时从提示条补登。</p>
+          <p>过完接入许可就是登录页：账户列表带角色标签，选一个人输密码，发出去的内容才会记在「你」名下。没有账户就进不来——先让主控在「设置 → 账户」给你开一个。</p>
           <p style="margin-top:10px;color:var(--faint);font-size:12.5px">同一账户在手机、电脑同时登录就是同一个人：头像、消息归属、私聊可见范围都跟着账户走，换台设备登录还是同一张脸。</p>
           <div class="role-row">
             <span class="rchip own">主控 · 全局 + 账户</span>
             <span class="rchip">管理员 · 审批 + 删人内容</span>
             <span class="rchip">成员 · 只发自己的</span>
-            <span class="rchip dim">访客 · 只看不发</span>
           </div>
         </div>
         <div class="frame"><img src="assets/shot-login.png" alt="账户登录页"></div>
@@ -283,7 +282,7 @@
   <div class="sect">
     <div class="sect-head">
       <h2>功能</h2>
-      <p>九件事，都在一个页面里</p>
+      <p>十五项功能，都在一个页面里</p>
     </div>
     <div class="rule"></div>
 
@@ -333,6 +332,36 @@
         <h4>Telegram 远程</h4>
         <p>主设备配置 Bot，各端输密码解锁后，消息同时同步到手机，支持走代理。</p>
       </div>
+      <div class="feat warm">
+        <div class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.6"/><path d="M4.5 20c1.3-3.8 4-5.8 7.5-5.8s6.2 2 7.5 5.8"/><path d="M17.5 6.5h3M19 5v3"/></svg></div>
+        <h4>账户登录</h4>
+        <p>主控建账户，别人用「账户 + 密码」登进来；同一个账户在手机和电脑上登录都是同一个人。</p>
+      </div>
+      <div class="feat">
+        <div class="ico"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v5.5c0 4.3-3 7.6-7 9-4-1.4-7-4.7-7-9V6l7-3Z"/><path d="M9.2 12l2 2 3.6-3.8"/></svg></div>
+        <h4>三档角色权限</h4>
+        <p>主控管全局与账户；管理员能审批设备、删除他人内容；成员只发自己的。越权请求服务端直接 403。</p>
+      </div>
+      <div class="feat">
+        <div class="ico"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/><circle cx="18.5" cy="18" r="1.8"/></svg></div>
+        <h4>账户管理面板</h4>
+        <p>设置里新建 / 编辑 / 停用 / 删除账户，选角色、设密码。每行标出「角色 · 是否设了密码 · 几台设备在用」。</p>
+      </div>
+      <div class="feat warm">
+        <div class="ico"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0 1 13.7-5.6L20 8"/><path d="M20 4v4h-4"/><path d="M20 12a8 8 0 0 1-13.7 5.6L4 16"/><path d="M4 20v-4h4"/></svg></div>
+        <h4>切换账户 / 退出</h4>
+        <p>顶栏点自己的名字就能切换或退出，不用重输接入密码。主控设备本身就是主控，不提供退出。</p>
+      </div>
+      <div class="feat">
+        <div class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="9" r="3.2"/><path d="M5 19.5c1.2-3.2 3.8-4.9 7-4.9s5.8 1.7 7 4.9"/><path d="M18.5 4.5l2 2-2 2"/></svg></div>
+        <h4>资料跟着账户走</h4>
+        <p>头像颜色与上传的头像挂在账户上，换台设备登录同一个人还是同一张脸；私聊也按人算。</p>
+      </div>
+      <div class="feat">
+        <div class="ico"><svg viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/><circle cx="12" cy="15" r="1.4"/></svg></div>
+        <h4>密码不留明文</h4>
+        <p>scrypt + 每账户独立盐存派生值，比较用恒定时间；同一 IP 连错 6 次锁 10 分钟。</p>
+      </div>
     </div>
   </div>
 
@@ -351,8 +380,8 @@
       </div>
       <div class="feat">
         <div class="ico"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v5.5c0 4.3-3 7.6-7 9-4-1.4-7-4.7-7-9V6l7-3Z"/><path d="M9.2 12l2 2 3.6-3.8"/></svg></div>
-        <h4>四档角色</h4>
-        <p>主控管全局与账户；管理员能审批设备、删除他人内容；成员只发自己的；访客只看不发。越权请求服务端直接 403。</p>
+        <h4>三档角色</h4>
+        <p>主控管全局与账户；管理员能审批设备、删除他人内容；成员只发自己的。越权请求服务端直接 403。</p>
       </div>
       <div class="feat">
         <div class="ico"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/><circle cx="18.5" cy="18" r="1.8"/></svg></div>
@@ -432,7 +461,7 @@
   <div class="foot">
     <div class="urls">
       <div class="u">启动后终端会打印：本机 <code>http://localhost:6767/?host=…</code></div>
-      <div class="u">手机连同一个 Wi-Fi，打开局域网地址 <code>http://192.168.1.12:6767</code></div>
+      <div class="u">手机连同一个 Wi-Fi，打开局域网地址 <code>http://192.168.x.x:6767</code></div>
     </div>
     <div class="sign">
       <b><em>XM</em> 互传 <span style="display:inline;font-size:12px;color:var(--faint);font-weight:500">轻量 · 够快 · 不外传</span></b>

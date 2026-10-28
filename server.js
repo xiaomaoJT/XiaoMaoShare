@@ -1300,14 +1300,14 @@ function saveProfiles() {
 /**
  * 身份 = 账户，设备只是入口：devices[cid].acc 记着「这台设备当前登录的是谁」，
  * 同一个账户可以在多台设备上登录，头像、颜色、消息归属都跟着账户走。
- * 没登录的设备是访客 —— 能看能下，不能发。
+ * 没有访客：过了接入许可也必须有账户身份才能进，没登录的设备什么都看不到。
  * 账户由主控在「设置 → 账户」里配置；密码只存 scrypt 派生值，明文不落盘、也不下发。
  */
 const ACCOUNTS_FILE = path.join(DATA_DIR, 'accounts.json');
-const ROLES = ['owner', 'admin', 'member', 'guest'];
-const ROLE_LABEL = { owner: '主控', admin: '管理员', member: '成员', guest: '访客' };
+const ROLES = ['owner', 'admin', 'member'];
+const ROLE_LABEL = { owner: '主控', admin: '管理员', member: '成员' };
 /**
- * 四档角色各自能干什么：
+ * 三档角色各自能干什么：
  *   send     发消息        attach   传图片 / 文件     priv   只发给指定的人
  *   moderate 删改他人内容   devices  审批与管理设备    config 改全局设置
  *   accounts 管理账户
@@ -1316,7 +1316,6 @@ const ROLE_CAPS = {
   owner: { send: 1, attach: 1, priv: 1, moderate: 1, devices: 1, config: 1, accounts: 1 },
   admin: { send: 1, attach: 1, priv: 1, moderate: 1, devices: 1, config: 0, accounts: 0 },
   member: { send: 1, attach: 1, priv: 1, moderate: 0, devices: 0, config: 0, accounts: 0 },
-  guest: { send: 0, attach: 0, priv: 0, moderate: 0, devices: 0, config: 0, accounts: 0 },
 };
 
 let accounts = {}; // accId -> { id, name, role, salt, hash, createdAt, lastLogin, disabled }
@@ -1332,7 +1331,8 @@ function saveAccounts() {
 }
 
 const roleLabel = (r) => ROLE_LABEL[r] || '访客';
-const capsOfRole = (r) => ROLE_CAPS[r] || ROLE_CAPS.guest;
+const ZERO_CAPS = { send: 0, attach: 0, priv: 0, moderate: 0, devices: 0, config: 0, accounts: 0 };
+const capsOfRole = (r) => ROLE_CAPS[r] || ZERO_CAPS;
 
 /** 密码只留派生值：scrypt + 每账户独立盐，比裸 sha256 抗字典 */
 function hashPass(pass, salt) {
@@ -1446,7 +1446,7 @@ function publicAcc(a) {
   };
 }
 
-const ROLE_RANK = { owner: 0, admin: 1, member: 2, guest: 3 };
+const ROLE_RANK = { owner: 0, admin: 1, member: 2 };
 function accountList(includeDisabled) {
   return Object.values(accounts)
     .filter((a) => a && (includeDisabled || !a.disabled))
@@ -1957,6 +1957,7 @@ const server = http.createServer((req, res) => {
           canConfig: canConfig(req, cidHere),
           // acc = 当前登录的账户；role 由服务端算好，前端不自己推
           acc: acc ? publicAcc(acc) : null,
+          needLogin: !acc,
           role,
           roleName: roleLabel(role),
           accounts: accountList(false),
@@ -2465,6 +2466,10 @@ const server = http.createServer((req, res) => {
     const host = isHostRequest(req);
     if (host && cid) bindHostDevice(cid, req);
     const me = cid ? touchClient(req, cid, '') : null;
+    // 没有访客：接入许可只是进门，进门后还必须登录账户才能看内容
+    if (!host && !accOfCid(cid)) {
+      return json(res, 401, { error: '请先登录账户', needLogin: true });
+    }
     // 私聊内容只有收发双方能看到；to 为空 = 全网可见
     // 「双方」按人算：同一个账户的另一台设备也该看得见自己发的私聊
     const visible = me
@@ -2505,6 +2510,10 @@ const server = http.createServer((req, res) => {
     const ids = String(url.searchParams.get('ids') || '')
       .split(',').map((s) => s.trim()).filter(Boolean).slice(0, 300);
     const me = cid ? clients.get(cid) : null;
+    // 没有访客：打包下载也是内容操作，必须先登录账户
+    if (!isHostRequest(req) && !accOfCid(cid)) {
+      return json(res, 401, { error: '请先登录账户', needLogin: true });
+    }
     // 跟 /api/list 同一套可见性规则：私聊内容不能打包给别人
     const visible = me
       ? items.filter((it) => {
@@ -2661,7 +2670,7 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // 退出登录：这台设备回到访客状态（接入许可还在，不用重新输接入密码）
+  // 退出登录：这台设备回到未登录状态（接入许可还在，不用重新输密码，但必须重新登录账户才能发内容）
   if (method === 'POST' && pathname === '/api/logout') {
     readBody(req, 4096)
       .then((raw) => {
@@ -2783,7 +2792,7 @@ const server = http.createServer((req, res) => {
     if (!a) return json(res, 404, { error: '账户不存在' });
     if (a.role === 'owner') return json(res, 400, { error: '主控账户不能删除' });
 
-    // 正在用这个账户的设备退回访客，别把它们留在不存在的身份上
+    // 正在用这个账户的设备退回未登录，别把它们留在不存在的身份上
     let kicked = 0;
     for (const k of Object.keys(devices)) {
       if (devices[k].acc === id) { delete devices[k].acc; kicked++; }
@@ -2794,7 +2803,7 @@ const server = http.createServer((req, res) => {
     saveAccounts();
     saveDevices();
     saveProfiles();
-    console.log(`  主控删除了账户「${a.name}」` + (kicked ? `（${kicked} 台设备退回访客）` : ''));
+    console.log(`  主控删除了账户「${a.name}」` + (kicked ? `（${kicked} 台设备退回未登录）` : ''));
     json(res, 200, { ok: true, kicked, accounts: accountList(true) });
     return;
   }
