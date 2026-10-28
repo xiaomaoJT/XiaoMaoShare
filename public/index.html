@@ -2936,12 +2936,28 @@
       }).catch(function () { n.err.textContent = '打不开这个地址'; });
     }
 
+    /** 从「最近连过」里抽网段前缀（如 192.168.），抽不到返回空 */
+    function prefixOf(recent) {
+      var list = recent || [];
+      for (var i = 0; i < list.length; i++) {
+        var m = /^https?:\/\/(\d{1,3}\.\d{1,3})\./.exec(list[i]);
+        if (m) return m[1] + '.';
+      }
+      return '';
+    }
+
     /** 重绘动态部分：主机状态、地址、已连接、最近连过 */
     function paint() {
       if (!api || !opened || !nodes) return Promise.resolve();
       var n = nodes;
       return api.info().then(function (st) {
         if (!opened || nodes !== n) return;
+
+        // 用户还没开始输入时，把预填前缀换成最近连过的网段，更贴近真实环境
+        if (n.auto && n.inp.value === '192.168.') {
+          var pre = prefixOf(st.recent);
+          if (pre && pre !== '192.168.') n.inp.value = pre;
+        }
 
         n.st.textContent = st.running ? '运行中 · 端口 ' + st.port : '没在运行';
         n.st.className = 'st' + (st.running ? '' : ' off');
@@ -3038,9 +3054,14 @@
       var row = mk('div', 'dc-row');
       n.inp = mk('input');
       n.inp.type = 'text';
-      n.inp.placeholder = '对方的地址，如 192.168.1.20:6767';
+      n.inp.placeholder = '接着填后面的，如 1.20 或 1.20:8080';
       n.inp.setAttribute('aria-label', '对方主机的地址');
       n.inp.maxLength = 300;
+      // 网段前缀预填：局域网地址大多以 192.168. / 10.x. 开头，先填上让用户少敲一截；
+      // paint() 会按「最近连过」的网段换成更准的前缀（用户一旦开始输入就不再动）
+      n.inp.value = '192.168.';
+      n.auto = true;
+      n.inp.addEventListener('input', function () { n.auto = false; });
       n.go = mk('button', 'btn primary', '连接');
       row.appendChild(n.inp);
       row.appendChild(n.go);
@@ -3053,7 +3074,7 @@
       s2.appendChild(n.openBox);
 
       s2.appendChild(mk('div', 'dc-tip',
-        '连上之后会另开一个窗口，那边你是普通设备，互不影响。'));
+        '输入框已按网段预填好前缀，接着填后面就行；端口不填默认 6767。连上之后会另开一个窗口，那边你是普通设备，互不影响。'));
       body.appendChild(s2);
 
       n.recentBox = mk('div', 'dc-sec');

@@ -28,8 +28,14 @@ const PUBLIC_DIR = path.join(ROOT, 'public');
 
 const ARGS = process.argv.slice(2);
 const OPEN_ON_START = ARGS.includes('--open') || ARGS.includes('-o');
+// `--port 8080` 优先于 PORT 环境变量，都写就是命令行说了算
+const PORT_ARG = (() => {
+  const i = ARGS.indexOf('--port');
+  const n = i >= 0 ? Number(ARGS[i + 1]) : NaN;
+  return Number.isInteger(n) && n > 0 && n < 65536 ? n : 0;
+})();
 
-const BASE_PORT = Number(process.env.PORT || 6767);
+const BASE_PORT = PORT_ARG || Number(process.env.PORT || 6767);
 const MAX_FILE = 4 * 1024 * 1024 * 1024; // 4GB 单文件上限
 const MAX_PARTS = 30;                    // 一条消息最多带 30 个附件
 const MAX_STAGED = 120;                  // 暂存区上限，防内存/磁盘被灌爆

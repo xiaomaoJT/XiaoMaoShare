@@ -2,7 +2,7 @@
 
 ![XM 互传 · 系统介绍](docs/xm-intro.png)
 
-> 当前版本：**v1.8.0** · [更新日志](CHANGELOG.md)
+> 当前版本：**v1.9.0** · [更新日志](CHANGELOG.md)
 
 ## 目录
 
@@ -370,6 +370,12 @@ npm run desktop
 
 两边的窗口用不同地址、互不干扰：你在给别人当服务器的同时，也能用别人的服务器。连接列表、最近地址都在「设备互联」面板里管理，断开即关对应窗口。
 
+### 端口
+
+- 默认 `6767`，被占用会自动顺延（最多试 20 个）；**实际跑起来的端口会被记住**，下次启动直接用，手机上存的书签不会隔天失效
+- 菜单「我的主机 → 更改端口…」随时可换（会自动停服重启、主窗口跟着换地址；换完会提示新的局域网地址）
+- 启动彻底失败（端口段被占满等）时不再直接退出，会弹窗让你输入一个新端口重试
+
 ### 数据与打包
 
 - 桌面版的数据不放在项目 `data/` 里，而在系统用户目录（macOS `~/Library/Application Support/xiaomao-share/data`，Windows `%APPDATA%/xiaomao-share/data`），和命令行方式跑的服务互相独立。菜单「我的主机 → 打开数据目录」可以直接跳过去。
@@ -660,7 +666,7 @@ HTTPS_PROXY=http://127.0.0.1:7890 node server.js
 
 | 项 | 说明 |
 | --- | --- |
-| `PORT` | 端口，默认 `6767`。被占用会自动顺延 +1 |
+| `PORT` / `--port` | 端口，默认 `6767`。被占用会自动顺延 +1；命令行 `--port 9000` 优先于环境变量 |
 | `SHARE_PASSWORD` | 陌生设备的接入密码，默认 `XM` |
 | `SHARE_AUTO_PASSWORD` | 隐藏密码，输它即免主设备确认直接接入，默认 `XiaoMao` |
 | `ELEVATE_PASSWORD` | 临时提权的专属密码，默认 `xiaomao` |
@@ -681,6 +687,7 @@ HTTPS_PROXY=http://127.0.0.1:7890 node server.js
 ```bash
 PORT=9000 node server.js         # macOS / Linux
 set PORT=9000 && 启动.bat         # Windows
+node server.js --port 9000       # 或者直接用参数，优先级最高
 ```
 
 想清空所有内容：页面右上角「清空全部」，或直接删掉 `data/` 目录。
@@ -867,4 +874,4 @@ XiaoMaoShare/
 
 个人自用的小工具。账户 + 密码是「分清谁是谁」，安全性仍然依赖「局域网本身是可信的」这个前提 —— 没有 TLS、没有限流、没有审计日志。请勿直接暴露到公网。
 
-版本号与每次发布的变更见 [CHANGELOG.md](CHANGELOG.md)；当前版本：**v1.8.0**。
+版本号与每次发布的变更见 [CHANGELOG.md](CHANGELOG.md)；当前版本：**v1.9.0**。

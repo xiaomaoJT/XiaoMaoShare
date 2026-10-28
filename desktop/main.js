@@ -332,6 +332,28 @@ function buildMenu() {
         },
         { type: 'separator' },
         {
+          label: '更改端口…',
+          click: async () => {
+            const cur = server.serverInfo().port || readPortPref() || DEFAULT_PORT;
+            const p = await askPort(cur);
+            if (!p || p === server.serverInfo().port) return;
+            try {
+              const info = await restartWithPort(p);
+              dialog.showMessageBox({
+                message: '已换到端口 ' + p,
+                detail: '新的局域网地址：\n' +
+                  (info.lan.length ? info.lan.map((n) => n.url).join('\n') : info.localUrl) +
+                  '\n\n之前连过的设备要用新地址重新访问。',
+                buttons: ['好'],
+                noLink: true,
+              });
+            } catch (e) {
+              dialog.showErrorBox('换端口失败', e.message + '\n\n已尝试恢复原端口。');
+            }
+          },
+        },
+        { type: 'separator' },
+        {
           label: '打开数据目录',
           click: () => shell.openPath(server.DATA_DIR),
         },
@@ -381,6 +403,115 @@ function buildMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(tmpl));
 }
 
+/* ------------------------------------------------------- 端口偏好 */
+
+/**
+ * 用户上次选的端口记在 userData/settings.json。
+ * 存的是「实际跑起来的端口」：6767 被占自动挪到 6768 的话，下次直接用 6768，
+ * 地址才稳定——手机上存的书签不会隔天失效。
+ */
+const SETTINGS_FILE = () => path.join(app.getPath('userData'), 'settings.json');
+
+function readPortPref() {
+  try {
+    const s = JSON.parse(require('node:fs').readFileSync(SETTINGS_FILE(), 'utf8'));
+    const p = Number(s && s.port);
+    return Number.isInteger(p) && p > 0 && p < 65536 ? p : 0;
+  } catch { return 0; }
+}
+
+function writePortPref(port) {
+  try {
+    let s = {};
+    try { s = JSON.parse(require('node:fs').readFileSync(SETTINGS_FILE(), 'utf8')) || {}; } catch { /* 覆盖就好 */ }
+    s.port = port;
+    require('node:fs').writeFileSync(SETTINGS_FILE(), JSON.stringify(s, null, 2));
+  } catch { /* 写不了就算了，下次从头试 */ }
+}
+
+/**
+ * 弹一个小窗让用户输入端口号，返回 Promise<number | null>（取消 = null）。
+ * 启动彻底失败、或用户主动想换端口时用。
+ */
+function askPort(current) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (v) => { if (!done) { done = true; resolve(v); w.close(); } };
+
+    const w = new BrowserWindow({
+      width: 380,
+      height: 190,
+      parent: hostWin && !hostWin.isDestroyed() ? hostWin : undefined,
+      modal: !!(hostWin && !hostWin.isDestroyed()),
+      title: '选择端口',
+      resizable: false,
+      show: false,
+      webPreferences: { contextIsolation: true, nodeIntegration: false },
+    });
+
+    w.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(`<!doctype html><meta charset="utf-8">
+<style>
+  body{margin:0;padding:18px 20px;font:13px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;color:#3d4450;background:#f4f6f9}
+  label{font-weight:600}
+  input{width:100%;box-sizing:border-box;margin-top:8px;height:36px;padding:0 10px;
+        border:1px solid #d4d9e2;border-radius:8px;font-size:14px;outline:none;background:#fff}
+  input:focus{border-color:#4c6ef5}
+  .err{color:#c0392b;font-size:12px;min-height:18px;margin-top:4px}
+  .btns{display:flex;justify-content:flex-end;gap:8px;margin-top:6px}
+  button{height:30px;padding:0 14px;border-radius:7px;border:1px solid #d4d9e2;
+         background:#fff;color:#3d4450;font-size:12.5px;cursor:pointer}
+  button.ok{background:#4c6ef5;border-color:#4c6ef5;color:#fff}
+</style>
+<label>服务端口号</label>
+<input id="p" type="text" inputmode="numeric" value="${Number(current) || 6767}">
+<div class="err" id="e"></div>
+<div class="btns">
+  <button id="c">取消</button>
+  <button id="o" class="ok">确定</button>
+</div>
+<script>
+  const i = document.getElementById('p'), e = document.getElementById('e');
+  function submit(){
+    const n = Number(i.value);
+    if (!Number.isInteger(n) || n <= 0 || n > 65535) { e.textContent = '端口要是 1–65535 的整数'; return; }
+    // 把合法端口写进标题，主进程从 page-title-updated 里收
+    document.title = 'PORT:' + n;
+  }
+  document.getElementById('o').onclick = submit;
+  document.getElementById('c').onclick = () => window.close();
+  i.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); submit(); } });
+  i.focus(); i.select();
+<\/script>`));
+
+    // 校验和取值都在页面里做：输入合法后关闭窗口，主进程从 title 里拿结果最稳；
+    // 这里改用「页面把合法端口写进 window.title」的方式传回
+    w.webContents.on('page-title-updated', (e2, title) => {
+      const m = /^PORT:(\d+)$/.exec(title || '');
+      if (m) { e2.preventDefault(); w.setTitle(title); finish(Number(m[1])); }
+    });
+    w.on('closed', () => finish(null));
+    w.once('ready-to-show', () => w.show());
+  });
+}
+
+/** 换端口：停服 → 用新端口起 → 存偏好 → 主窗口跟着换地址 */
+async function restartWithPort(p) {
+  const old = server.serverInfo().port;
+  await server.stopServer();
+  try {
+    hostInfo = await server.startServer({ port: p });
+  } catch (err) {
+    // 新端口没起来就把旧的拉回来，别让服务悬空
+    if (old) { try { hostInfo = await server.startServer({ port: old }); } catch { /* 尽力而为 */ } }
+    throw err;
+  }
+  writePortPref(hostInfo.port);
+  buildMenu();
+  if (hostWin && !hostWin.isDestroyed()) hostWin.loadURL(hostInfo.hostUrl);
+  broadcastLinks();
+  return hostInfo;
+}
+
 /* ------------------------------------------------------------ 生命周期 */
 
 if (!app.requestSingleInstanceLock()) {
@@ -389,14 +520,35 @@ if (!app.requestSingleInstanceLock()) {
   app.on('second-instance', () => { ensureHostWindow(); });
 
   app.whenReady().then(async () => {
+    // 上次用过的端口优先（哪怕是被占用后自动挪过位的），地址才稳定
+    const pref = readPortPref() || DEFAULT_PORT;
+    let err = null;
     try {
-      hostInfo = await server.startServer({ port: DEFAULT_PORT });
-    } catch (err) {
-      dialog.showErrorBox('服务起不来', `${err.message}\n\n可能是端口全被占用了，换个网络或重启电脑再试。`);
-      app.exit(1);
-      return;
+      hostInfo = await server.startServer({ port: pref });
+    } catch (e) {
+      err = e;
     }
 
+    // 起不来（端口段被占满、权限不够等）：给一次「换个端口重试」的机会，而不是直接死
+    while (!hostInfo) {
+      const choice = dialog.showMessageBoxSync({
+        type: 'warning',
+        title: '服务起不来',
+        message: '端口被占用或不可用',
+        detail: (err && err.message) + '\n\n可以换个端口再试，默认 6767。',
+        buttons: ['换个端口', '退出'],
+        defaultId: 0,
+        cancelId: 1,
+      });
+      if (choice !== 0) { app.exit(1); return; }
+      const p = await askPort(pref);
+      if (!p) { app.exit(1); return; }
+      try {
+        hostInfo = await server.startServer({ port: p });
+      } catch (e) { err = e; }
+    }
+
+    writePortPref(hostInfo.port); // 记住实际跑起来的端口（可能因占用偏移过）
     buildMenu();
     createHostWindow();
 
