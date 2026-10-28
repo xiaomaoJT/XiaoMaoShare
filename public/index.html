@@ -696,16 +696,20 @@
   .dl:hover{background:var(--accent);border-color:var(--accent);color:#fff}
   .dl svg{width:13px;height:13px;flex:none}
 
-  /* 文件行：能在线看的文件多一个「预览」，和「下载」并排靠右 */
-  .pv{
-    flex:none;height:32px;padding:0 12px;border-radius:9px;white-space:nowrap;margin-left:auto;
-    background:var(--accent-soft);border:1px solid transparent;color:var(--accent);
-    font-size:12.5px;font-weight:600;display:inline-flex;align-items:center;gap:5px;
-    cursor:pointer;transition:.15s;
+  /* 文件行：能在线看的文件多一个「预览」。它是附加能力，不该和「下载」抢位置：
+     做成无底色的图标按钮，默认淡出，悬停才浮起来（触屏补回点按尺寸）。 */
+  .file-pv{
+    flex:none;margin-left:auto;width:26px;height:26px;padding:0;border:0;border-radius:7px;
+    background:transparent;color:var(--faint);opacity:.7;
+    display:inline-flex;align-items:center;justify-content:center;
+    cursor:pointer;transition:opacity .13s, background .13s, color .13s;
   }
-  .pv:hover{background:var(--accent);color:#fff}
-  .pv svg{width:13px;height:13px;flex:none}
-  .pv + .dl{margin-left:0}
+  .file-pv svg{width:13px;height:13px;flex:none;display:block}
+  .file-pv:hover{background:var(--line-soft);color:var(--sub);opacity:1}
+  .file-pv:focus-visible{outline:2px solid var(--accent);outline-offset:1px;opacity:1}
+  /* .file 自身有 11px gap，这里收一点，图标和按钮才不会隔太远 */
+  .file-pv + .dl{margin-left:-4px}
+  @media (hover:none){ .file-pv{width:32px;height:32px;opacity:.85} }
 
   /* ---- 文件预览弹层（文本类在内嵌面板里看，媒体类交给浏览器） ---- */
   .fpv{
@@ -3788,14 +3792,15 @@
     dl.onclick = function () { markRead(it); };   // 下载即算读过
     row.appendChild(fico);
     row.appendChild(info);
-    // 能在线看的给一个「预览」：文本类进弹出面板，PDF / 视频 / 音频交给浏览器
+    // 能在线看的给一个小「预览」图标：文本类进弹出面板，PDF / 视频 / 音频交给浏览器
     var pkind = filePreviewKind(p);
     if (pkind) {
       var pvbtn = document.createElement('button');
       pvbtn.type = 'button';
-      pvbtn.className = 'pv';
-      pvbtn.innerHTML = IVIS + '<span>预览</span>';
-      pvbtn.title = pkind === 'text' ? '在线查看内容' : '用浏览器打开';
+      pvbtn.className = 'file-pv';
+      pvbtn.innerHTML = IVIS;
+      pvbtn.title = pkind === 'text' ? '预览：在线查看内容' : '预览：用浏览器打开';
+      pvbtn.setAttribute('aria-label', '预览 ' + nm);
       pvbtn.onclick = function (e) { e.stopPropagation(); markRead(it); openFilePreview(p); };
       row.appendChild(pvbtn);
     }
