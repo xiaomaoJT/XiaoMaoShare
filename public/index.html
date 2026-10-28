@@ -1279,14 +1279,32 @@
   .read-pill.detail::after{content:"";width:0;height:0;margin-left:3px;border-left:4px solid transparent;border-right:4px solid transparent;border-top:5px solid currentColor;opacity:.9}
   .read-pill.detail:hover{background:var(--brand-soft);color:var(--brand)}
   .read-pop{
-    position:fixed;z-index:120;min-width:160px;max-width:280px;
+    position:fixed;z-index:120;min-width:160px;max-width:300px;
     background:var(--card);border:1px solid var(--line);border-radius:14px;
-    box-shadow:0 18px 44px rgba(0,0,0,.22);padding:10px 12px;
+    box-shadow:0 18px 44px rgba(0,0,0,.22);padding:12px 14px;
   }
-  .read-pop-h{font-size:12px;font-weight:700;color:var(--text);margin-bottom:6px}
-  .read-pop-list{display:flex;flex-direction:column;gap:3px;max-height:50vh;overflow:auto}
-  .read-pop-i{font-size:13px;color:var(--muted);padding:2px 0;border-top:1px solid var(--line-soft)}
-  .read-pop-i:first-child{border-top:0}
+  .read-pop-h{font-size:12px;font-weight:700;color:var(--text);margin-bottom:10px}
+  /* 已读名单改用头像墙：每行并排圆头像，鼠标移入显示具体名称 */
+  .read-avas{display:flex;flex-wrap:wrap;gap:8px}
+  .read-ava{
+    width:30px;height:30px;border-radius:50%;flex:none;
+    display:grid;place-items:center;color:#fff;font-size:12px;font-weight:700;
+    cursor:default;position:relative;box-shadow:0 0 0 2px var(--card);
+    transition:transform .14s ease, box-shadow .14s ease;
+  }
+  .read-ava:hover{transform:translateY(-3px) scale(1.08);z-index:2}
+  /* 精致气泡：移入头像即显示其具体名称（深色底 / 自适应主题） */
+  .read-ava[data-name]:hover::after{
+    content:attr(data-name);
+    position:absolute;left:50%;bottom:calc(100% + 8px);transform:translateX(-50%);
+    background:var(--text);color:var(--card);font-size:11.5px;font-weight:600;line-height:1.4;
+    padding:4px 9px;border-radius:8px;white-space:nowrap;z-index:5;
+    box-shadow:0 6px 16px rgba(0,0,0,.28);pointer-events:none;
+  }
+  .read-ava[data-name]:hover::before{
+    content:"";position:absolute;left:50%;bottom:calc(100% + 3px);transform:translateX(-50%);
+    border:5px solid transparent;border-top-color:var(--text);z-index:5;pointer-events:none;
+  }
 
   /* 双击头像收起：保留元信息 + 一行文字预览 + 「点击展开」入口 */
   .card.collapsed .shots,
@@ -3032,9 +3050,16 @@
     var cids = (it.readBy || []).filter(Boolean);
     if (it.owner && cids.indexOf(it.owner) === -1) cids = cids.concat(it.owner);
     var seen = {}, names = [];
-    cids.forEach(function (c) { if (!seen[c]) { seen[c] = 1; names.push(nameOfCidLocal(c) || ('设备' + c.slice(-4))); } });
+    cids.forEach(function (c) {
+      var nm = nameOfCidLocal(c) || ('设备' + c.slice(-4));
+      if (!seen[nm]) { seen[nm] = 1; names.push(nm); }
+    });
+    var avas = names.map(function (nm) {
+      var ch = String(nm).slice(0, 1).toUpperCase();
+      return '<div class="read-ava" data-name="' + esc(nm) + '" style="background:' + colorOf(nm) + '">' + esc(ch) + '</div>';
+    }).join('');
     readPop.innerHTML = '<div class="read-pop-h">谁已读（' + names.length + '）</div>' +
-      '<div class="read-pop-list">' + names.map(function (n) { return '<div class="read-pop-i">' + esc(n) + '</div>'; }).join('') + '</div>';
+      '<div class="read-avas">' + avas + '</div>';
     readPop.hidden = false;
     var r = anchor.getBoundingClientRect();
     var left = Math.min(r.left, window.innerWidth - readPop.offsetWidth - 10);
