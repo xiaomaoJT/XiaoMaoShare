@@ -3036,15 +3036,25 @@
       pill.title = '点击查看谁已读';
       pill.addEventListener('click', function (e) {
         e.stopPropagation();
-        openReadPop(it, pill);
+        if (!readPop.hidden && readPopIt === it) closeReadPop();
+        else openReadPop(it, pill);
       });
     } else {
       pill.title = '已读设备数（含发送者，按设备去重）';
     }
     return pill;
   }
-  // 主设备 / 提权设备：弹出已读名单
+  // 主设备 / 提权设备：已读名单（头像墙）
   var readPop = $('readPop');
+  var readPopIt = null;
+  var readPopAnchor = null;
+  function placeReadPop(anchor) {
+    if (!readPop || !anchor) return;
+    var r = anchor.getBoundingClientRect();
+    var left = Math.min(r.left, window.innerWidth - readPop.offsetWidth - 10);
+    readPop.style.top = (r.bottom + 8) + 'px';
+    readPop.style.left = Math.max(8, left) + 'px';
+  }
   function openReadPop(it, anchor) {
     if (!readPop) return;
     var cids = (it.readBy || []).filter(Boolean);
@@ -3061,18 +3071,22 @@
     readPop.innerHTML = '<div class="read-pop-h">谁已读（' + names.length + '）</div>' +
       '<div class="read-avas">' + avas + '</div>';
     readPop.hidden = false;
-    var r = anchor.getBoundingClientRect();
-    var left = Math.min(r.left, window.innerWidth - readPop.offsetWidth - 10);
-    readPop.style.top = (r.bottom + 8) + 'px';
-    readPop.style.left = Math.max(8, left) + 'px';
-    setTimeout(function () { document.addEventListener('click', closeReadPopOnce); }, 0);
+    readPopIt = it;
+    readPopAnchor = anchor;
+    placeReadPop(anchor);
   }
-  function closeReadPopOnce(e) {
-    if (readPop && !readPop.contains(e.target) && !(e.target.classList && e.target.classList.contains('read-pill'))) {
-      readPop.hidden = true;
-      document.removeEventListener('click', closeReadPopOnce);
-    }
+  function closeReadPop() {
+    if (!readPop || readPop.hidden) return;
+    readPop.hidden = true;
+    readPopIt = null;
+    readPopAnchor = null;
   }
+  // 点击浮层内部不关闭；点外部 / ESC / 页面滚动（错位）时收起，窗口缩放则重新贴齐
+  readPop.addEventListener('click', function (e) { e.stopPropagation(); });
+  document.addEventListener('click', function () { if (!readPop.hidden) closeReadPop(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !readPop.hidden) closeReadPop(); });
+  window.addEventListener('scroll', function () { if (!readPop.hidden) closeReadPop(); }, { passive: true });
+  window.addEventListener('resize', function () { if (!readPop.hidden && readPopAnchor) placeReadPop(readPopAnchor); });
 
   function markRead(it) {
     if (!it || !it.id) return;
