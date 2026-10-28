@@ -2,7 +2,7 @@
 
 ![XM 互传 · 系统介绍](docs/xm-intro.png)
 
-> 当前版本：**v1.9.0** · [更新日志](CHANGELOG.md)
+> 当前版本：**v2.0.0** · [更新日志](CHANGELOG.md)
 
 ## 目录
 
@@ -524,7 +524,28 @@ npm run desktop
 
 ## 手机添加到主屏幕（PWA）
 
-项目带 `manifest.webmanifest` 和 `icon.png` / `apple-touch-icon.png`。在 iOS Safari「分享 → 添加到主屏幕」、或 Android Chrome「安装应用」后，会以**全屏、无地址栏**的方式打开，像个原生 App。主题色跟随当前皮肤。
+项目带 `manifest.webmanifest` 和 `icon.png` / `apple-touch-icon.png`。在 iOS Safari「分享 → 添加到主屏幕」、或 Android Chrome「安装应用」后，会以**全屏、无地址栏**的方式打开，像个原生 App。主题色跟随当前皮肤。**这是 iOS 端的推荐安装方式**（iOS 真 App 壳因签名门槛作为预留能力，见 `ios/README.md`）。
+
+## 四端打包与发布（v2.0.0 起）
+
+| 端 | 形态 | 打包方式 | 产物 |
+| --- | --- | --- | --- |
+| macOS | Electron | GitHub Actions（或本机 `npm run dist`） | `XiaoMaoShare-*-mac.dmg` |
+| Windows | Electron | GitHub Actions（或本机 `npx electron-builder --win`） | `XiaoMaoShare-*-win.exe` |
+| Android | WebView 薄壳（`android/`） | GitHub Actions（ubuntu 自带 SDK，gradle 打包） | `XiaoMaoShare-*-android.apk`（debug 签名，直接装） |
+| iOS | **PWA 为主**；WKWebView 壳为预留（`ios/`） | 免费账号自签需 Xcode，见 [ios/README.md](ios/README.md) | — |
+
+**发布一次 = 推一个 tag**（Actions 自动构建三端并创建 GitHub Release）：
+
+```bash
+git tag v2.0.0 && git push origin v2.0.0
+```
+
+细节：
+
+- 应用图标统一用 `public/icon.png`（小毛集团 logo）：Electron 由 electron-builder 自动转 `.icns` / `.ico`；Android 的各密度 mipmap 已由它生成
+- Android 壳零第三方依赖（纯 SDK 类），地址输入预填 `192.168.`、端口默认 6767，支持文件上传与系统下载管理器
+- iOS 自签：免费 Apple ID 签一次管 7 天，到期重签数据不丢；完整步骤与坑见 `ios/README.md`
 
 ## 文字长度上限
 
@@ -786,6 +807,10 @@ XiaoMaoShare/
 │   ├── main.js            # 主进程：起服务、开窗口、管连接
 │   ├── preload.js         # 桥：页面可用的桌面 API
 │   └── run.js             # 启动器（清掉 ELECTRON_RUN_AS_NODE 再拉 Electron）
+├── android/               # Android WebView 薄壳（零第三方依赖，Actions 云端打包）
+├── ios/                   # iOS 壳源码 + 自签指南（预留能力，主线走 PWA）
+├── build/                 # electron-builder 资源（icon.png → icns/ico）
+├── .github/workflows/     # release.yml：打 tag 自动出三端包并发 Release
 ├── public/
 │   ├── index.html         # 单页界面（内联 CSS / JS）
 │   ├── logo.gif           # 顶栏动图 logo
@@ -874,4 +899,4 @@ XiaoMaoShare/
 
 个人自用的小工具。账户 + 密码是「分清谁是谁」，安全性仍然依赖「局域网本身是可信的」这个前提 —— 没有 TLS、没有限流、没有审计日志。请勿直接暴露到公网。
 
-版本号与每次发布的变更见 [CHANGELOG.md](CHANGELOG.md)；当前版本：**v1.9.0**。
+版本号与每次发布的变更见 [CHANGELOG.md](CHANGELOG.md)；当前版本：**v2.0.0**。

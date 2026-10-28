@@ -1,0 +1,86 @@
+name: 四端发布
+
+# 用法：打一个 v 开头的 tag 推上来，自动出 mac dmg + win exe + android apk 并创建 GitHub Release
+#   git tag v2.0.0 && git push origin v2.0.0
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  # ---------- 桌面端：mac runner 一台机器同时出 dmg 和 exe ----------
+  desktop:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 打包 mac + windows（electron-builder，用 build/icon.png 自动转 icns/ico）
+        run: npm run dist -- --mac --win --publish never
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop
+          if-no-files-found: error
+          path: |
+            release/*.dmg
+            release/*.exe
+
+  # ---------- Android：ubuntu runner 自带 Android SDK，出 debug 签名 apk（可直接安装） ----------
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v3
+
+      - name: 打包 apk（debug 签名，自用免上架）
+        run: gradle -p android assembleDebug --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          if-no-files-found: error
+          path: android/app/build/outputs/apk/debug/*.apk
+
+  # ---------- 汇总发布 ----------
+  release:
+    needs: [desktop, android]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: desktop
+          path: rel
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: android
+          path: rel
+
+      - name: apk 改成带版本号的正式名字
+        run: mv rel/*-debug.apk "rel/XiaoMaoShare-${{ github.ref_name }}-android.apk"
+
+      - name: 提取 CHANGELOG 最上面一节做发布说明
+        run: awk '/^## \[/{n++} n==1' CHANGELOG.md > notes.md
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: rel/*
+          body_path: notes.md

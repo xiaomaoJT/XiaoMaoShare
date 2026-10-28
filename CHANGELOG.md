@@ -6,6 +6,21 @@
 
 ---
 
+## [2.0.0] - 2026-10-28
+
+> 四端齐了：mac / Windows（Electron）+ Android（WebView 薄壳）+ iOS（PWA，壳作预留）。图标统一用小毛集团 logo，发布走 GitHub Actions。
+
+### 新增
+- **Android WebView 薄壳**（`android/`）：零第三方依赖（纯 Android SDK），首次启动输入主机地址——预填 `192.168.`、端口不填默认 6767；支持 `<input type=file>` 上传、下载走系统下载管理器；工具条可改地址 / 刷新 / 用浏览器打开
+- **GitHub Actions 自动发布**（`.github/workflows/release.yml`）：推 `v*` tag 自动构建 mac dmg + win exe + android apk 并创建 GitHub Release，发布说明取自 CHANGELOG 最上面一节
+- **iOS 壳预留能力**（`ios/`）：SwiftUI + WKWebView 源码与免费账号自签（7 天续期）完整指南；当前主线仍为 PWA「添加到主屏幕」
+- README 新增「四端打包与发布」章节
+
+### 改进
+- 应用图标统一用 `public/icon.png`（骑车形象）：Electron 打包自动转 `.icns` / `.ico`，Android 生成五档密度 mipmap
+
+---
+
 ## [1.9.0] - 2026-10-28
 
 > 围绕「少打字、能自定」的小改造：接入地址**预填网段**、服务端**端口可选**（命令行参数 + 桌面版菜单/弹窗）。
