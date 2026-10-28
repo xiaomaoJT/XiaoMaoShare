@@ -946,6 +946,84 @@
     .about-link{font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .about-copy{height:28px;padding:0 10px;font-size:11.5px}
   }
+
+  /* 已编辑标记 */
+  .edited-badge{
+    font-size:11.5px;color:var(--sub);margin-left:6px;cursor:pointer;
+    border:1px solid var(--line);border-radius:8px;padding:1px 7px;white-space:nowrap;
+    transition:color .15s ease,border-color .15s ease,background .15s ease;
+  }
+  .edited-badge:hover{color:var(--text);border-color:var(--line-soft);background:var(--card-2)}
+  .edited-badge:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+
+  /* 内联编辑态 */
+  .card.editing .meta{transition:opacity .15s ease}
+  .edit-area{margin-top:2px}
+  .edit-ta{
+    display:block;width:100%;box-sizing:border-box;resize:vertical;margin-bottom:10px;
+    font:inherit;font-size:14.5px;line-height:1.6;color:var(--text);
+    background:var(--card-2);border:1px solid var(--line);border-radius:12px;padding:10px 12px;
+    white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;
+  }
+  .edit-ta:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  .edit-cap{
+    font-size:12px;color:var(--sub);background:var(--card-2);border:1px dashed var(--line);
+    border-radius:10px;padding:8px 12px;margin-bottom:10px;
+  }
+  .edit-bar{display:flex;gap:10px;justify-content:flex-end;margin-top:4px}
+  .edit-bar .btn{height:34px;padding:0 18px;font-size:13px}
+
+  /* 修订历史弹窗 */
+  .edit-pop{
+    position:fixed;inset:0;z-index:210;display:none;place-items:center;padding:24px;
+    background:rgba(12,16,24,.46);
+    -webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);
+  }
+  .edit-pop.on{display:grid}
+  .edit-pop-card{
+    position:relative;width:100%;max-width:440px;max-height:80vh;overflow:auto;
+    padding:22px 22px 18px;background:var(--card);border:1px solid var(--line);
+    border-radius:20px;box-shadow:0 30px 72px -32px rgba(16,24,40,.6);
+    animation:aboutIn .16s ease both;
+  }
+  .edit-x{
+    position:absolute;top:12px;right:12px;width:30px;height:30px;padding:0;
+    border:0;border-radius:50%;background:var(--card-2);color:var(--sub);
+    font-size:15px;line-height:1;cursor:pointer;transition:background .15s ease,color .15s ease;
+  }
+  .edit-x:hover{background:var(--line);color:var(--text)}
+  .edit-pop-title{font-size:17px;font-weight:700;letter-spacing:.2px}
+  .edit-pop-sub{margin:5px 0 14px;font-size:12px;color:var(--sub);line-height:1.55}
+  .edit-hist-list{display:flex;flex-direction:column;gap:10px}
+  .eh-row{
+    border:1px solid var(--line);border-radius:13px;padding:11px 13px;background:var(--card-2);
+    transition:border-color .15s ease;
+  }
+  .eh-row.current{border-color:var(--accent);background:var(--accent-soft)}
+  .eh-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .eh-label{font-size:13.5px;font-weight:650;color:var(--text)}
+  .eh-when{font-size:11.5px;color:var(--faint);white-space:nowrap}
+  .eh-by{font-size:11.5px;color:var(--sub);margin-top:2px}
+  .eh-sum{
+    margin-top:7px;font-size:13px;color:var(--text);line-height:1.55;white-space:pre-wrap;
+    word-break:break-word;overflow-wrap:anywhere;cursor:pointer;
+  }
+  .eh-sum::after{content:'';display:inline-block;width:0;height:0;margin-left:5px;vertical-align:middle;
+    border-left:4px solid transparent;border-right:4px solid transparent;border-top:5px solid var(--sub)}
+  .eh-row.open .eh-sum::after{transform:rotate(180deg)}
+  .eh-full{
+    display:none;margin:8px 0 0;padding:9px 11px;font:inherit;font-size:12.5px;line-height:1.55;
+    color:var(--text);background:var(--card);border:1px solid var(--line);border-radius:9px;
+    white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;
+  }
+  .eh-row.open .eh-full{display:block}
+  :root[data-theme="glass"] .edit-pop-card{ -webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px); }
+  @media (max-width:430px){
+    .edit-pop{padding:18px}
+    .edit-pop-card{max-width:100%;padding:18px 16px 16px}
+    .edit-pop-title{font-size:16px}
+  }
+
   .spin{
     width:27px;height:27px;margin:20px auto 14px;border-radius:50%;
     border:2.5px solid var(--line);border-top-color:var(--accent);animation:spin .8s linear infinite;
@@ -1623,6 +1701,15 @@
   </div>
 </div>
 
+<div class="edit-pop" id="editPop" hidden>
+  <div class="edit-pop-card" role="dialog" aria-modal="true" aria-labelledby="editHistTitle">
+    <button class="edit-x" id="editHistX" type="button" aria-label="关闭">✕</button>
+    <div class="edit-pop-title" id="editHistTitle">修订历史</div>
+    <p class="edit-pop-sub">仅文字内容可编辑，以下按时间倒序展示每次编辑前的版本；点文字可展开全文。</p>
+    <div class="edit-hist-list"></div>
+  </div>
+</div>
+
 <div class="gate" id="gate">
   <div class="gate-card">
     <div class="gate-logo"><img src="/logo.gif" alt="XiaoMao"></div>
@@ -1844,6 +1931,7 @@
   var IQR = svgIcon('<rect x="3.2" y="3.2" width="6.6" height="6.6" rx="1.3"/><rect x="14.2" y="3.2" width="6.6" height="6.6" rx="1.3"/><rect x="3.2" y="14.2" width="6.6" height="6.6" rx="1.3"/><path d="M14.2 14.2h2.6v2.6h-2.6zM18.2 18.2h2.6v2.6h-2.6zM14.2 20.8h1.2M20.8 14.2v1.2"/>', 1.9);
   var ICHECK = svgIcon('<path d="M20 6L9 17l-5-5"/>', 2.6);
   var IVIS = svgIcon('<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>', 1.8);
+  var IEDIT = svgIcon('<path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/><path d="M14.5 5.5l3 3"/>', 1.8);
   var ISHIELD = svgIcon('<path d="M12 3l7 3v5.4c0 4.2-2.9 7.6-7 8.6-4.1-1-7-4.4-7-8.6V6l7-3z"/><path d="M9.4 12.1l1.9 1.9 3.3-3.3"/>', 1.9);
   var ISHIELD_OPEN = svgIcon('<path d="M12 3l7 3v5.4c0 4.2-2.9 7.6-7 8.6-4.1-1-7-4.4-7-8.6V6l7-3z"/>', 1.9);
   var IDEV = svgIcon('<rect x="2" y="5" width="14" height="10" rx="2"/><path d="M6 19h6M11 15v1"/><path d="M18 9h2v6"/>', 1.8);
@@ -2720,6 +2808,37 @@
     });
   }
 
+  /* ============================================================ 文件行（卡片与编辑态共用） */
+  function fileRow(it, p) {
+    var row = document.createElement('div');
+    row.className = 'file';
+    var nm = String(p.name || '未命名文件');
+    var ext = nm.split('.').pop();
+    var fico = document.createElement('div');
+    fico.className = 'fico';
+    fico.textContent = ext && ext !== nm ? ext.slice(0, 4) : 'FILE';
+    var info = document.createElement('div');
+    info.style.minWidth = '0';
+    var fname = document.createElement('div');
+    fname.className = 'fname';
+    fname.textContent = nm;
+    var fsize = document.createElement('div');
+    fsize.className = 'fsize';
+    fsize.textContent = fmtSize(p.size);
+    info.appendChild(fname);
+    info.appendChild(fsize);
+    var dl = document.createElement('a');
+    dl.className = 'dl';
+    dl.href = '/f/' + p.fid + '?dl=1&cid=' + encodeURIComponent(state.cid);
+    dl.setAttribute('download', nm);
+    dl.innerHTML = IDL + '<span>下载</span>';
+    dl.onclick = function () { markRead(it); };   // 下载即算读过
+    row.appendChild(fico);
+    row.appendChild(info);
+    row.appendChild(dl);
+    return row;
+  }
+
   /* ============================================================ 卡片 */
   function makeCard(it) {
     var el = document.createElement('article');
@@ -2776,6 +2895,13 @@
       vbtn.onclick = function (e) { e.stopPropagation(); openTargetPicker({ item: it }); };
       acts.appendChild(vbtn);
     }
+    // 仅发送者本人、且含文字段时可编辑（图片/文件不可改，要改就删了重发）
+    if (it.owner && it.owner === state.cid && texts.length) {
+      var ebtn = document.createElement('button');
+      ebtn.className = 'icon'; ebtn.innerHTML = IEDIT; ebtn.title = '编辑';
+      ebtn.onclick = function (e) { e.stopPropagation(); startEdit(el._it || it, el); };
+      acts.appendChild(ebtn);
+    }
 
     ava.title = '双击收起 / 展开这条消息';
     ava.addEventListener('dblclick', function (e) {
@@ -2807,75 +2933,8 @@
     if (rpill) meta.appendChild(rpill);
     meta.appendChild(time); meta.appendChild(acts);
     el.appendChild(meta);
-    // 片段按顺序铺开：文字段、图片组、文件行
-    var run = [];
-    function flushImages() {
-      if (!run.length) return;
-      var grid = document.createElement('div');
-      grid.className = 'shots n' + Math.min(run.length, 3);
-      run.forEach(function (p) {
-        var img = document.createElement('img');
-        img.className = 'thumb';
-        img.loading = 'lazy';
-        img.decoding = 'async';
-        img.src = '/f/' + p.fid + '?cid=' + encodeURIComponent(state.cid);
-        img.alt = p.name || '图片';
-        img.title = (p.name || '图片') + ' · ' + fmtSize(p.size);
-        img.onclick = function () { openLb(it, imgParts.indexOf(p)); markRead(it); };
-        img.onerror = function () {
-          img.remove();
-          if (!grid.querySelector('img')) {
-            grid.className = 'shots n1';
-            var note = document.createElement('div');
-            note.className = 'img-broken';
-            note.textContent = '图片无法显示（文件可能已损坏或不完整）';
-            grid.appendChild(note);
-          }
-        };
-        grid.appendChild(img);
-      });
-      el.appendChild(grid);
-      run = [];
-    }
-
-    parts.forEach(function (p) {
-      if (p.kind === 'text') {
-        flushImages();
-        var body = document.createElement('div');
-        body.className = 'text-body';
-        body.innerHTML = mdToHtml(p.text);
-        el.appendChild(body);
-      } else if (p.kind === 'image') {
-        run.push(p);
-      } else {
-        flushImages();
-        el.appendChild(fileRow(it, p));
-      }
-    });
-    flushImages();
-
-    // 收起态的说明条：告诉用户内容只是被折叠了，并给一个明确的「展开」入口
-    var nImg = 0, nFile = 0;
-    parts.forEach(function (p) {
-      if (p.kind === 'image') nImg++;
-      else if (p.kind !== 'text') nFile++;
-    });
-    var bits = [];
-    if (texts.length) bits.push('文字');
-    if (nImg) bits.push(nImg + ' 张图片');
-    if (nFile) bits.push(nFile + ' 个文件');
-    var note = document.createElement('button');
-    note.type = 'button';
-    note.className = 'collapsed-note';
-    note.title = '展开这条消息';
-    note.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>'
-      + '<span>已收起' + (bits.length ? '（' + bits.join('、') + '）' : '') + ' · 点击展开</span>';
-    note.addEventListener('click', function (e) {
-      e.stopPropagation();
-      resetClamp(el);
-      el.classList.remove('collapsed');
-    });
-    el.appendChild(note);
+    // 内容区（文字 / 图片 / 文件 / 收起说明）抽成 buildBody，便于编辑后增量重建
+    buildBody(el, it);
 
     // 选择模式下点整张卡切换选中；卡片里本来就有按钮/链接，那些照旧各干各的
     el.addEventListener('click', function (e) {
@@ -2884,6 +2943,8 @@
       togglePick(it.id);
     });
 
+    el._it = it;
+    refreshEditedBadge(el, it);
     return el;
   }
 
@@ -2941,36 +3002,6 @@
     }
   }
 
-  function fileRow(it, p) {
-    var row = document.createElement('div');
-    row.className = 'file';
-    var nm = String(p.name || '未命名文件');
-    var ext = nm.split('.').pop();
-    var fico = document.createElement('div');
-    fico.className = 'fico';
-    fico.textContent = ext && ext !== nm ? ext.slice(0, 4) : 'FILE';
-    var info = document.createElement('div');
-    info.style.minWidth = '0';
-    var fname = document.createElement('div');
-    fname.className = 'fname';
-    fname.textContent = nm;
-    var fsize = document.createElement('div');
-    fsize.className = 'fsize';
-    fsize.textContent = fmtSize(p.size);
-    info.appendChild(fname);
-    info.appendChild(fsize);
-    var dl = document.createElement('a');
-    dl.className = 'dl';
-    dl.href = '/f/' + p.fid + '?dl=1&cid=' + encodeURIComponent(state.cid);
-    dl.setAttribute('download', nm);
-    dl.innerHTML = IDL + '<span>下载</span>';
-    dl.onclick = function () { markRead(it); };   // 下载即算读过
-    row.appendChild(fico);
-    row.appendChild(info);
-    row.appendChild(dl);
-    return row;
-  }
-
   /** 长内容默认折叠：超过约 7 行才收起并给「展开全文」 */
   function maybeClamp(el) {
     el.querySelectorAll('.text-body').forEach(function (body) {
@@ -3001,6 +3032,263 @@
       if (b._resetClamp) b._resetClamp();
     });
   }
+
+  /* ---------------- 消息编辑 ---------------- */
+  // 内容区（文字 / 图片 / 文件 / 收起说明）抽成 buildBody，便于编辑后增量重建。
+  // 顶层内容节点统一打 .bnode，maybeClamp 生成的「展开全文」按钮打 .more，重建时一并清除。
+  function buildBody(el, it) {
+    Array.prototype.slice.call(el.querySelectorAll('.bnode, .more')).forEach(function (n) { n.remove(); });
+    var parts = it.parts || (it.text ? [{ kind: 'text', text: it.text }] : []);
+    var imgParts = parts.filter(function (p) { return p.kind === 'image'; });
+    var run = [];
+    function flushImages() {
+      if (!run.length) return;
+      var grid = document.createElement('div');
+      grid.className = 'shots n' + Math.min(run.length, 3);
+      run.forEach(function (p) {
+        var img = document.createElement('img');
+        img.className = 'thumb';
+        img.loading = 'lazy';
+        img.decoding = 'async';
+        img.src = '/f/' + p.fid + '?cid=' + encodeURIComponent(state.cid);
+        img.alt = p.name || '图片';
+        img.title = (p.name || '图片') + ' · ' + fmtSize(p.size);
+        img.onclick = function () { openLb(it, imgParts.indexOf(p)); markRead(it); };
+        img.onerror = function () {
+          img.remove();
+          if (!grid.querySelector('img')) {
+            grid.className = 'shots n1';
+            var note = document.createElement('div');
+            note.className = 'img-broken';
+            note.textContent = '图片无法显示（文件可能已损坏或不完整）';
+            grid.appendChild(note);
+          }
+        };
+        grid.appendChild(img);
+      });
+      grid.classList.add('bnode');
+      el.appendChild(grid);
+      run = [];
+    }
+    parts.forEach(function (p) {
+      if (p.kind === 'text') {
+        flushImages();
+        var body = document.createElement('div');
+        body.className = 'text-body bnode';
+        body.innerHTML = mdToHtml(p.text);
+        el.appendChild(body);
+      } else if (p.kind === 'image') {
+        run.push(p);
+      } else {
+        flushImages();
+        var fr = fileRow(it, p);
+        fr.classList.add('bnode');
+        el.appendChild(fr);
+      }
+    });
+    flushImages();
+    var nImg = 0, nFile = 0;
+    parts.forEach(function (p) { if (p.kind === 'image') nImg++; else if (p.kind !== 'text') nFile++; });
+    var texts = parts.filter(function (p) { return p.kind === 'text'; });
+    var bits = [];
+    if (texts.length) bits.push('文字');
+    if (nImg) bits.push(nImg + ' 张图片');
+    if (nFile) bits.push(nFile + ' 个文件');
+    var note = document.createElement('button');
+    note.type = 'button';
+    note.className = 'collapsed-note bnode';
+    note.title = '展开这条消息';
+    note.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>'
+      + '<span>已收起' + (bits.length ? '（' + bits.join('、') + '）' : '') + ' · 点击展开</span>';
+    note.addEventListener('click', function (e) {
+      e.stopPropagation();
+      resetClamp(el);
+      el.classList.remove('collapsed');
+    });
+    el.appendChild(note);
+  }
+
+  // 在 meta 里补「已编辑 · 时间」标记；点它打开修订历史弹窗
+  function refreshEditedBadge(el, it) {
+    var meta = el.querySelector('.meta');
+    if (!meta) return;
+    var old = el.querySelector('.edited-badge');
+    if (old) old.remove();
+    if (it.editCount && it.editedAt) {
+      var b = document.createElement('span');
+      b.className = 'edited-badge';
+      b.textContent = '已编辑 · ' + fmtTime(it.editedAt);
+      b.title = '内容已编辑，点击查看修订历史';
+      b.setAttribute('role', 'button');
+      b.setAttribute('tabindex', '0');
+      b.onclick = function (e) { e.stopPropagation(); openEditHist(it); };
+      b.onkeydown = function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openEditHist(it); } };
+      var when = el.querySelector('.when');
+      if (when && when.parentNode === meta) meta.insertBefore(b, when.nextSibling);
+      else meta.appendChild(b);
+    }
+  }
+
+  // 进入内联编辑态：每段文字各一个 textarea 回填，图片/文件只读提示不可改
+  function startEdit(it, el) {
+    if (el.classList.contains('editing')) return;
+    el.classList.add('editing');
+    var parts = it.parts || (it.text ? [{ kind: 'text', text: it.text }] : []);
+    var wrap = document.createElement('div');
+    wrap.className = 'edit-area';
+    var tareas = [];
+    parts.forEach(function (p) {
+      if (p.kind === 'text') {
+        var ta = document.createElement('textarea');
+        ta.className = 'edit-ta';
+        ta.value = p.text || '';
+        ta.rows = Math.min(14, Math.max(2, (p.text || '').split('\n').length + 1));
+        wrap.appendChild(ta);
+        tareas.push(ta);
+      } else if (p.kind === 'image') {
+        var cap1 = document.createElement('div');
+        cap1.className = 'edit-cap';
+        cap1.textContent = '图片（不可编辑，保留）';
+        wrap.appendChild(cap1);
+      } else {
+        var cap2 = document.createElement('div');
+        cap2.className = 'edit-cap';
+        cap2.textContent = (p.name || '文件') + '（不可编辑，保留）';
+        wrap.appendChild(cap2);
+      }
+    });
+    var bar = document.createElement('div');
+    bar.className = 'edit-bar';
+    var save = document.createElement('button');
+    save.className = 'btn primary'; save.type = 'button'; save.textContent = '保存';
+    var cancel = document.createElement('button');
+    cancel.className = 'btn ghost'; cancel.type = 'button'; cancel.textContent = '取消';
+    bar.appendChild(save); bar.appendChild(cancel);
+    wrap.appendChild(bar);
+
+    Array.prototype.slice.call(el.querySelectorAll('.bnode, .more')).forEach(function (n) { n.remove(); });
+    el.appendChild(wrap);
+    var meta = el.querySelector('.meta');
+    if (meta) meta.style.opacity = '.45';
+    if (tareas[0]) { tareas[0].focus(); tareas[0].setSelectionRange(tareas[0].value.length, tareas[0].value.length); }
+
+    function collectParts() {
+      var ti = 0;
+      return parts.map(function (p) {
+        if (p.kind === 'text') return { kind: 'text', text: tareas[ti++].value };
+        return { kind: p.kind, fid: p.fid, name: p.name, size: p.size, type: p.type, mime: p.mime };
+      });
+    }
+    function exitEdit() {
+      el.classList.remove('editing');
+      if (meta) meta.style.opacity = '';
+      wrap.remove();
+      buildBody(el, it);
+      maybeClamp(el);
+    }
+    cancel.onclick = function (e) { e.stopPropagation(); exitEdit(); };
+    save.onclick = function (e) {
+      if (e && e.stopPropagation) e.stopPropagation();
+      save.disabled = true; save.textContent = '保存中…';
+      api('/api/item/edit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: it.id, cid: state.cid, parts: collectParts() })
+      }).then(function (r) {
+        if (r && r.item) {
+          var idx = -1;
+          for (var i = 0; i < allItems.length; i++) if (allItems[i].id === it.id) { idx = i; break; }
+          if (idx >= 0) allItems[idx] = r.item;
+          it = r.item;
+          el._it = r.item;
+          el.classList.remove('editing');
+          if (meta) meta.style.opacity = '';
+          wrap.remove();
+          buildBody(el, it);
+          maybeClamp(el);
+          refreshEditedBadge(el, it);
+          toast('已更新');
+        } else {
+          save.disabled = false; save.textContent = '保存';
+          toast('保存失败');
+        }
+      }).catch(function (e2) {
+        save.disabled = false; save.textContent = '保存';
+        toast((e2 && e2.message) || '保存失败');
+      });
+    };
+    wrap.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') { e.preventDefault(); exitEdit(); }
+      else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); save.onclick({ stopPropagation: function () {} }); }
+    });
+  }
+
+  // 别人编辑后，本次轮询增量刷新该卡片内容区 + 已编辑标记（保留 meta/acts/收起态）
+  function updateEditBadge(id) {
+    var el = nodes.get(id);
+    if (!el || el.classList.contains('editing')) return;
+    var it = null;
+    for (var i = 0; i < allItems.length; i++) if (allItems[i].id === id) { it = allItems[i]; break; }
+    if (!it) return;
+    if (el._it !== it) el._it = it;
+    buildBody(el, it);
+    maybeClamp(el);
+    refreshEditedBadge(el, it);
+  }
+
+  // poll 在内容列表不变时仍检测「别人编辑了某条」（editCount / editedAt 变化）
+  var lastEdits = {};
+  function detectEdits() {
+    allItems.forEach(function (it) {
+      var key = it.id;
+      var ec = (it.editCount || 0) + '|' + (it.editedAt || 0);
+      if (lastEdits[key] !== undefined && lastEdits[key] !== ec) updateEditBadge(it.id);
+      lastEdits[key] = ec;
+    });
+  }
+
+  function summarizeParts(parts) {
+    return (parts || []).filter(function (p) { return p.kind === 'text'; }).map(function (p) { return p.text || ''; }).join('\n');
+  }
+  function editHistRow(label, by, at, parts) {
+    var txt = summarizeParts(parts);
+    var lines = txt.split('\n');
+    var summary = lines.slice(0, 3).join('\n');
+    var name = nameOfCidLocal(by) || ('设备' + String(by || '').slice(-4));
+    return '<div class="eh-row">' +
+      '<div class="eh-head"><span class="eh-label">' + esc(label) + '</span>' +
+      '<span class="eh-when">' + esc(fmtTime(at)) + '</span></div>' +
+      '<div class="eh-by">编辑者：' + esc(name) + '</div>' +
+      '<div class="eh-sum">' + esc(summary) + (lines.length > 3 ? '…' : '') + '</div>' +
+      '<pre class="eh-full">' + esc(txt) + '</pre>' +
+      '</div>';
+  }
+  function openEditHist(it) {
+    var pop = $('editPop');
+    if (!pop) return;
+    var list = pop.querySelector('.edit-hist-list');
+    if (!list) return;
+    var hist = (it.history || []).slice().reverse();
+    var rows = [editHistRow('当前版本', it.owner, it.editedAt || it.time, it.parts)];
+    hist.forEach(function (h, i) {
+      rows.push(editHistRow('第 ' + (hist.length - i) + ' 次编辑前', h.by, h.at, h.parts));
+    });
+    list.innerHTML = rows.join('');
+    Array.prototype.slice.call(list.querySelectorAll('.eh-sum')).forEach(function (sum) {
+      sum.onclick = function () { sum.parentNode.classList.toggle('open'); };
+    });
+    pop.hidden = false;
+    requestAnimationFrame(function () { pop.classList.add('on'); });
+    document.addEventListener('keydown', editHistKey);
+  }
+  function closeEditHist() {
+    var pop = $('editPop');
+    if (!pop) return;
+    pop.classList.remove('on');
+    document.removeEventListener('keydown', editHistKey);
+    setTimeout(function () { if (!pop.classList.contains('on')) pop.hidden = true; }, 160);
+  }
+  function editHistKey(e) { if (e.key === 'Escape') closeEditHist(); }
 
   function copyText(t) {
     if (navigator.clipboard && window.isSecureContext) {
@@ -3515,7 +3803,7 @@
       markOnline();
       allItems = d.items || [];
       var sig = allItems.map(function (x) { return x.id; }).join(',');
-      if (!force && sig === lastSig) { tickTimes(); return; }
+      if (!force && sig === lastSig) { detectEdits(); tickTimes(); return; }
       lastSig = sig;
       refreshSenders();
       refreshDates();
@@ -5804,6 +6092,15 @@
         setTimeout(function () { btn.textContent = old; btn.classList.remove('done'); }, 1400);
       });
     });
+  })();
+
+  /* 修订历史弹窗关闭：✕ / 点遮罩 */
+  (function () {
+    var pop = $('editPop'), x = $('editHistX');
+    if (pop && x) {
+      x.addEventListener('click', closeEditHist);
+      pop.addEventListener('click', function (e) { if (e.target === pop) closeEditHist(); });
+    }
   })();
 })();
 </script>

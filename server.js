@@ -1718,6 +1718,43 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // 编辑已发消息：仅发送者本人可改；只改文字段内容，图片/文件保持原样不可改。
+  // 编辑前的完整 parts 快照压入 history，editCount++、editedAt=now，其余字段（含 readBy 已读）不变。
+  if (method === 'POST' && pathname === '/api/item/edit') {
+    readBody(req, 1 << 20).then((raw) => {
+      let body = {};
+      try { body = JSON.parse(raw || '{}'); } catch {}
+      const id = String(body.id || '');
+      const idx = items.findIndex((it) => it.id === id);
+      if (idx === -1) return json(res, 404, { error: '消息不存在' });
+      const it = items[idx];
+      const cidEdit = cidOf(req, body.cid);
+      if (!(it.owner && cidEdit && it.owner === cidEdit)) {
+        return json(res, 403, { error: '只有发送者本人可以编辑' });
+      }
+      if (!Array.isArray(body.parts)) return json(res, 400, { error: '缺少 parts' });
+      const base = Array.isArray(it.parts) && it.parts.length
+        ? it.parts
+        : (it.text ? [{ kind: 'text', text: it.text }] : []);
+      const np = body.parts;
+      // 段数、各段类型必须一致；附件引用不得变动，只能改文字内容
+      if (np.length !== base.length) return json(res, 400, { error: '段落结构不一致' });
+      for (let i = 0; i < base.length; i++) {
+        if (np[i].kind !== base[i].kind) return json(res, 400, { error: '段落类型不一致' });
+        if (base[i].kind !== 'text' && np[i].fid !== base[i].fid) return json(res, 400, { error: '附件不能修改' });
+        if (base[i].kind === 'text' && typeof np[i].text !== 'string') return json(res, 400, { error: '文字内容格式错误' });
+      }
+      if (!Array.isArray(it.history)) it.history = [];
+      it.history.push({ at: it.editedAt || it.time, by: it.owner, parts: JSON.parse(JSON.stringify(base)) });
+      it.parts = JSON.parse(JSON.stringify(np));
+      it.editCount = (it.editCount || 0) + 1;
+      it.editedAt = Date.now();
+      saveIndex();
+      json(res, 200, { ok: true, item: it });
+    }).catch(() => json(res, 400, { error: 'bad request' }));
+    return;
+  }
+
   // 已读回执：任意授权设备对这条消息做了「复制 / 下载 / 看图」之一即记为已读，按设备去重。
   // 主设备用空 cid 访问，不计入回执；同一设备重复阅读不会让计数增加。
   if (method === 'POST' && pathname === '/api/item/read') {
