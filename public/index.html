@@ -35,6 +35,8 @@
     --shadow:0 1px 2px rgba(16,24,40,.04), 0 10px 28px -14px rgba(16,24,40,.22);
     --shadow-sm:0 1px 2px rgba(16,24,40,.05);
     --glass:0px;
+    /* --tfs：正文字号倍率，外观设置里可调（0.92 / 1 / 1.12 / 1.26） */
+    --tfs:1;
   }
   :root[data-theme="dark"]{
     --bg:#0d1015;
@@ -118,6 +120,8 @@
   :root[data-theme="glass"] .tg-field input,
   :root[data-theme="glass"] .tg-state,
   :root[data-theme="glass"] .theme-opt,
+  :root[data-theme="glass"] .fs-opt,
+  :root[data-theme="glass"] .fs-demo,
   :root[data-theme="glass"] .qr-ip,
   :root[data-theme="glass"] .fmt-grid button,
   :root[data-theme="glass"] .blk-md,
@@ -127,6 +131,7 @@
   :root[data-theme="glass"] .dlg input[type=text],
   :root[data-theme="glass"] .gate-form input,
   :root[data-theme="glass"] .emoji-pop,
+  :root[data-theme="glass"] .cfm-pop,
   :root[data-theme="glass"] .fmt-pop{background:var(--fill)}
   /* 顶栏 / 输入条要长期驻留视线里，玻璃强度比普通卡片再高一档 */
   :root[data-theme="glass"] .top,
@@ -547,7 +552,7 @@
     padding:12px 14px;box-shadow:var(--shadow-sm); animation:in .28s cubic-bezier(.2,.8,.3,1);
   }
   @keyframes in{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
-  .meta{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--faint);margin-bottom:8px}
+  .meta{display:flex;align-items:center;gap:8px;font-size:calc(11.5px * var(--tfs));color:var(--faint);margin-bottom:8px}
   .ava{
     width:20px;height:20px;border-radius:7px;flex:none;display:grid;place-items:center;
     font-size:10.5px;font-weight:700;color:#fff;
@@ -566,7 +571,7 @@
   .icon.del:hover{color:var(--danger)}
   .icon svg{width:15px;height:15px;display:block}
 
-  .text-body{font-size:14.5px;line-height:1.62;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere}
+  .text-body{font-size:calc(14.5px * var(--tfs));line-height:1.62;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere}
   .text-body.clamp{
     max-height:10.6em;overflow:hidden;
     -webkit-mask-image:linear-gradient(to bottom,#000 68%,transparent);
@@ -574,7 +579,7 @@
   }
   .more{
     display:inline-flex;align-items:center;gap:4px;margin-top:2px;padding:3px 0;
-    background:none;border:0;color:var(--accent);font:inherit;font-size:12.5px;font-weight:650;
+    background:none;border:0;color:var(--accent);font:inherit;font-size:calc(12.5px * var(--tfs));font-weight:650;
     cursor:pointer;letter-spacing:.2px;
   }
   .more:hover{text-decoration:underline}
@@ -582,7 +587,7 @@
   .text-body a:hover{border-bottom-color:var(--accent)}
 
   /* ---- Markdown 渲染（消息卡片 / 输入预览共用） ---- */
-  .md{white-space:normal;font-size:14.5px;line-height:1.66;word-break:break-word;overflow-wrap:anywhere}
+  .md{white-space:normal;font-size:calc(14.5px * var(--tfs));line-height:1.66;word-break:break-word;overflow-wrap:anywhere}
   .md>*:first-child{margin-top:0}
   .md>*:last-child{margin-bottom:0}
   .md p{margin:0 0 .6em}
@@ -629,7 +634,7 @@
     display:block;max-width:100%;max-height:340px;border-radius:11px;cursor:zoom-in;
     background:var(--card-2);border:1px solid var(--line-soft);
   }
-  .imgname{font-size:11.5px;color:var(--faint);margin-top:7px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .imgname{font-size:calc(11.5px * var(--tfs));color:var(--faint);margin-top:7px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
   .file{display:flex;align-items:center;gap:11px}
   .fico{
@@ -637,8 +642,11 @@
     background:var(--accent-soft);color:var(--accent);font-size:10px;font-weight:800;letter-spacing:.3px;
     text-transform:uppercase;
   }
-  .fname{font-size:14px;font-weight:550;word-break:break-all;line-height:1.4}
-  .fsize{font-size:11.5px;color:var(--faint);margin-top:2px}
+  /* 图片类附件：用真缩略图代替后缀字牌，一眼认出是哪张图 */
+  .fico.img{padding:0;overflow:hidden;background:var(--line-soft)}
+  .fico.img img{width:100%;height:100%;object-fit:cover;display:block}
+  .fname{font-size:calc(14px * var(--tfs));font-weight:550;word-break:break-all;line-height:1.4}
+  .fsize{font-size:calc(11.5px * var(--tfs));color:var(--faint);margin-top:2px}
   .dl{
     margin-left:auto;flex:none;height:32px;padding:0 12px;border-radius:9px;white-space:nowrap;
     background:var(--card-2);border:1px solid var(--line);color:var(--sub);
@@ -762,6 +770,28 @@
   .sw-dark:after{background:#2a323d}
   .sw-glass{background:linear-gradient(150deg,#a9c8ff,#f7c2f0 55%,#b9f4dc)}
   .sw-glass:after{background:rgba(255,255,255,.62)}
+
+  /* 字号选择：四档并排，按钮里用一个「A」直观示意大小 */
+  .fs-row{display:flex;gap:8px;margin-top:13px}
+  .fs-opt{
+    flex:1 1 0;min-width:0;padding:8px 4px 7px;border-radius:12px;
+    border:1px solid var(--line);background:var(--card-2);color:var(--sub);
+    font:inherit;font-size:11px;font-weight:600;cursor:pointer;transition:.15s;
+    display:flex;flex-direction:column;align-items:center;gap:3px;
+  }
+  .fs-opt b{font-weight:750;color:var(--text);line-height:1;transition:color .15s}
+  .fs-opt:hover{color:var(--text);border-color:var(--faint)}
+  .fs-opt.on{border-color:var(--accent);color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  .fs-opt.on b{color:var(--accent)}
+  .fs-demo{
+    margin-top:10px;padding:11px 13px;border-radius:11px;background:var(--card-2);
+    border:1px solid var(--line);color:var(--text);
+    font-size:calc(14.5px * var(--tfs));line-height:1.62;
+  }
+  .fs-demo i{
+    display:block;margin-top:3px;font-style:normal;
+    font-size:calc(11.5px * var(--tfs));color:var(--faint);
+  }
 
   /* ---------------- 浮层 ---------------- */
   .drop{
@@ -961,7 +991,7 @@
   .edit-area{margin-top:2px}
   .edit-ta{
     display:block;width:100%;box-sizing:border-box;resize:vertical;margin-bottom:10px;
-    font:inherit;font-size:14.5px;line-height:1.6;color:var(--text);
+    font:inherit;font-size:calc(14.5px * var(--tfs));line-height:1.6;color:var(--text);
     background:var(--card-2);border:1px solid var(--line);border-radius:12px;padding:10px 12px;
     white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;
   }
@@ -1067,9 +1097,9 @@
   }
   .quote-card .qc-ico{flex:0 0 auto;font-size:15px;line-height:1.15;color:var(--accent);opacity:.92;transform:translateY(1px)}
   .quote-card .qc-main{min-width:0;flex:1 1 auto}
-  .quote-card .qc-name{font-size:11.5px;font-weight:700;color:var(--accent);letter-spacing:.2px;margin-bottom:2px}
+  .quote-card .qc-name{font-size:calc(11.5px * var(--tfs));font-weight:700;color:var(--accent);letter-spacing:.2px;margin-bottom:2px}
   .quote-card .qc-text{
-    font-size:12.5px;color:var(--sub);line-height:1.5;word-break:break-word;
+    font-size:calc(12.5px * var(--tfs));color:var(--sub);line-height:1.5;word-break:break-word;
     display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
   }
 
@@ -1117,21 +1147,43 @@
   }
   .note-main{min-width:0;flex:1 1 auto}
   .note-meta{display:flex;align-items:baseline;gap:7px;margin-bottom:1px}
-  .note-name{font-size:12px;font-weight:600;color:var(--text)}
-  .note-time{font-size:10.5px;color:var(--faint)}
-  .note-text{font-size:13px;line-height:1.58;color:var(--text);word-break:break-word;overflow-wrap:anywhere}
-  .note-text.md{font-size:13px;line-height:1.6;white-space:normal}
+  .note-name{font-size:calc(12px * var(--tfs));font-weight:600;color:var(--text)}
+  .note-time{font-size:calc(10.5px * var(--tfs));color:var(--faint)}
+  .note-text{font-size:calc(13px * var(--tfs));line-height:1.58;color:var(--text);word-break:break-word;overflow-wrap:anywhere}
+  .note-text.md{font-size:calc(13px * var(--tfs));line-height:1.6;white-space:normal}
   .note-text.md p{margin:0 0 .45em}
   .note-text.md>*:last-child{margin-bottom:0}
   .note-del{
-    margin-left:auto;flex:none;align-self:center;width:20px;height:20px;display:grid;place-items:center;
-    border:0;border-radius:6px;background:transparent;color:var(--faint);cursor:pointer;
+    flex:none;margin:1px 0 0 2px;width:22px;height:22px;padding:0;line-height:0;
+    display:flex;align-items:center;justify-content:center;
+    border:0;border-radius:7px;background:transparent;color:var(--faint);cursor:pointer;
     opacity:0;transition:opacity .12s, background .12s, color .12s;
   }
-  .note-del svg{width:11px;height:11px}
-  .note-row:hover .note-del{opacity:.72}
+  .note-del svg{width:11px;height:11px;display:block}
+  .note-row:hover .note-del,
+  .note-del:focus-visible{opacity:.72}
   .note-del:hover{opacity:1;background:rgba(214,69,56,.1);color:var(--danger)}
+  .note-del.armed{opacity:1;background:rgba(214,69,56,.12);color:var(--danger)}
+  .note-del:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
   @media (hover:none){ .note-del{opacity:.55} }
+
+  /* 删除确认气泡：破坏性操作统一走这里，二次确认不打断上下文 */
+  .cfm-pop{
+    position:fixed;z-index:170;display:none;align-items:center;gap:7px;
+    padding:7px 8px 7px 12px;border-radius:11px;
+    background:var(--card);border:1px solid var(--line);
+    box-shadow:0 14px 34px -12px rgba(16,24,40,.34), 0 2px 6px rgba(16,24,40,.07);
+  }
+  .cfm-pop.on{display:flex;animation:popIn .14s cubic-bezier(.2,.8,.3,1)}
+  .cfm-t{font-size:12px;font-weight:600;color:var(--text);white-space:nowrap}
+  .cfm-ok,.cfm-no{
+    height:25px;padding:0 10px;border-radius:7px;border:1px solid transparent;
+    font:inherit;font-size:12px;font-weight:650;cursor:pointer;white-space:nowrap;transition:.13s;
+  }
+  .cfm-ok{background:var(--danger);color:#fff;box-shadow:0 3px 9px -3px rgba(229,72,77,.5)}
+  .cfm-ok:hover{filter:brightness(1.07)}
+  .cfm-no{background:var(--card-2);border-color:var(--line);color:var(--sub)}
+  .cfm-no:hover{color:var(--text);background:var(--line-soft)}
 
   .note-shots{display:grid;gap:5px;margin-top:6px;max-width:340px}
   .note-shots.n1{grid-template-columns:1fr}
@@ -1145,7 +1197,7 @@
   .note-add[hidden]{display:none}
   .note-toggle{
     display:inline-flex;align-items:center;gap:4px;margin-top:2px;padding:2px 5px;
-    border:0;background:transparent;color:var(--faint);font-size:11.5px;font-weight:600;
+    border:0;background:transparent;color:var(--faint);font-size:calc(11.5px * var(--tfs));font-weight:600;
     cursor:pointer;border-radius:6px;transition:color .12s, background .12s;
   }
   .note-toggle:hover{color:var(--accent);background:var(--accent-soft)}
@@ -1158,7 +1210,7 @@
   .na-box:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
   .note-input{
     display:block;width:100%;min-height:21px;max-height:140px;padding:0 2px;
-    font-family:inherit;font-size:13px;line-height:1.52;color:var(--text);
+    font-family:inherit;font-size:calc(13px * var(--tfs));line-height:1.52;color:var(--text);
     background:transparent;border:0;resize:none;outline:none;
   }
   .note-input::placeholder{color:var(--faint);font-size:12.5px}
@@ -1166,8 +1218,18 @@
   .na-chips[hidden]{display:none}
   .na-chip{
     display:inline-flex;align-items:center;gap:5px;max-width:230px;
-    padding:3px 5px 3px 8px;border-radius:8px;background:var(--card);
+    padding:3px 5px;border-radius:8px;background:var(--card);
     border:1px solid var(--line);font-size:11.5px;color:var(--sub);
+  }
+  /* 图片附件在文件名前带一枚小预览，文件类则用后缀字牌 */
+  .na-chip-thumb{
+    width:20px;height:20px;flex:none;border-radius:5px;object-fit:cover;display:block;
+    background:var(--line-soft);
+  }
+  .na-chip-ico{
+    width:20px;height:20px;flex:none;border-radius:5px;display:grid;place-items:center;
+    background:var(--accent-soft);color:var(--accent);
+    font-size:7.5px;font-weight:800;letter-spacing:.2px;text-transform:uppercase;
   }
   .na-chip-n{max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);font-weight:600}
   .na-chip-s{color:var(--faint);flex:none}
@@ -1579,7 +1641,7 @@
     display:inline-flex;align-items:center;gap:5px;margin-top:7px;
     padding:3px 10px;border-radius:999px;border:1px solid var(--line);
     background:var(--card-2);color:var(--sub);
-    font-family:inherit;font-size:11.5px;font-weight:550;line-height:1.5;cursor:pointer;
+    font-family:inherit;font-size:calc(11.5px * var(--tfs));font-weight:550;line-height:1.5;cursor:pointer;
   }
   .collapsed-note svg{width:11px;height:11px;flex:none}
   .collapsed-note:hover{color:var(--accent);border-color:var(--accent);background:var(--accent-soft)}
@@ -2162,6 +2224,36 @@
       applyTheme(dark ? 'dark' : 'light', false);
     }
   })();
+
+  /* ============================================================ 正文字号 */
+  /**
+   * 只放大「内容」，不放大按钮和图标：--tfs 是倍率，正文/补充/引用/文件名的
+   * font-size 都写成 calc(Npx * var(--tfs))，行高是比例值，会跟着一起涨。
+   */
+  var FSIZES = [
+    { key: 's', label: '小', val: 0.92, demo: 13 },
+    { key: 'm', label: '标准', val: 1, demo: 15 },
+    { key: 'l', label: '大', val: 1.12, demo: 17 },
+    { key: 'xl', label: '特大', val: 1.26, demo: 19 }
+  ];
+
+  function currentFSize() {
+    var k = null;
+    try { k = localStorage.getItem('xm.fs'); } catch (e) {}
+    for (var i = 0; i < FSIZES.length; i++) if (FSIZES[i].key === k) return k;
+    return 'm';
+  }
+
+  function applyFSize(key, persist) {
+    var pick = FSIZES[1];
+    for (var i = 0; i < FSIZES.length; i++) if (FSIZES[i].key === key) pick = FSIZES[i];
+    document.documentElement.style.setProperty('--tfs', String(pick.val));
+    document.documentElement.setAttribute('data-fs', pick.key);
+    if (persist !== false) {
+      try { localStorage.setItem('xm.fs', pick.key); } catch (e) {}
+    }
+  }
+  applyFSize(currentFSize(), false);
 
   /* ============================================================ 移动端软键盘 */
   /**
@@ -2995,9 +3087,26 @@
     row.className = 'file';
     var nm = String(p.name || '未命名文件');
     var ext = nm.split('.').pop();
+    // 图片走缩略图；拿不到 fid（历史数据）就退回后缀字牌
+    var isImg = /^image\//i.test(p.type || p.mime || '') ||
+      /\.(png|jpe?g|gif|webp|bmp|avif|svg|heic)$/i.test(nm);
     var fico = document.createElement('div');
     fico.className = 'fico';
-    fico.textContent = ext && ext !== nm ? ext.slice(0, 4) : 'FILE';
+    if (isImg && p.fid) {
+      fico.classList.add('img');
+      var th = document.createElement('img');
+      th.loading = 'lazy';
+      th.decoding = 'async';
+      th.alt = nm;
+      th.src = '/f/' + p.fid + '?cid=' + encodeURIComponent(state.cid);
+      th.onerror = function () {
+        fico.classList.remove('img');
+        fico.textContent = ext && ext !== nm ? ext.slice(0, 4) : 'FILE';
+      };
+      fico.appendChild(th);
+    } else {
+      fico.textContent = ext && ext !== nm ? ext.slice(0, 4) : 'FILE';
+    }
     var info = document.createElement('div');
     info.style.minWidth = '0';
     var fname = document.createElement('div');
@@ -3673,19 +3782,25 @@
     meta.innerHTML = '<span class="note-name">' + esc(nm) + '</span>' +
       '<span class="note-time">' + esc(fmtTime(n.at)) + '</span>';
 
-    // 补充人本人（或主设备）可以删掉这一条
+    main.appendChild(meta);
+    var del = null;
+    // 补充人本人（或主设备）可以删掉这一条，删前要过一道确认
     if (state.admin || (n.by && n.by === state.cid)) {
-      var del = document.createElement('button');
+      del = document.createElement('button');
       del.type = 'button';
       del.className = 'note-del';
       del.title = '删除这条补充';
       del.setAttribute('aria-label', '删除补充');
       del.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>';
-      del.onclick = function (e) { e.stopPropagation(); delNote(it, n); };
-      meta.appendChild(del);
+      del.onclick = function (e) {
+        e.stopPropagation();
+        openConfirm(del, {
+          text: '删除这条补充？',
+          ok: '删除',
+          onOk: function () { delNote(it, n); }
+        });
+      };
     }
-
-    main.appendChild(meta);
 
     var texts = parts.filter(function (p) { return p.kind === 'text'; });
     var imgs = parts.filter(function (p) { return p.kind === 'image'; });
@@ -3719,6 +3834,7 @@
 
     row.appendChild(ava);
     row.appendChild(main);
+    if (del) row.appendChild(del);
     return row;
   }
 
@@ -3852,17 +3968,34 @@
         if (isImg && !canSend('image')) { toast('主设备已关闭图片发送'); return; }
         if (!isImg && !canSend('file')) { toast('主设备已关闭文件发送'); return; }
 
-        var item = { kind: isImg ? 'image' : 'file', name: f.name || ('图片-' + Date.now() + '.png'), size: f.size, part: null };
+        var item = { kind: isImg ? 'image' : 'file', name: f.name || ('图片-' + Date.now() + '.png'), size: f.size, part: null, thumb: null };
         pending.push(item);
 
         var chip = document.createElement('span');
         chip.className = 'na-chip';
+        // 图片在文件名前面带一枚小预览；其他类型用后缀字牌
+        var face;
+        if (isImg) {
+          face = document.createElement('img');
+          face.className = 'na-chip-thumb';
+          face.alt = '';
+          item.thumb = URL.createObjectURL(f);
+          face.src = item.thumb;
+        } else {
+          face = document.createElement('span');
+          face.className = 'na-chip-ico';
+          var ext0 = String(item.name).split('.').pop();
+          face.textContent = ext0 && ext0 !== item.name ? ext0.slice(0, 4) : 'FILE';
+        }
         var nmEl = document.createElement('span');
         nmEl.className = 'na-chip-n';
         nmEl.textContent = item.name;
         var stEl = document.createElement('span');
         stEl.className = 'na-chip-s';
         stEl.textContent = '上传中…';
+        function freeThumb() {
+          if (item.thumb) { URL.revokeObjectURL(item.thumb); item.thumb = null; }
+        }
         var xEl = document.createElement('button');
         xEl.type = 'button';
         xEl.className = 'na-chip-x';
@@ -3871,11 +4004,13 @@
         xEl.onclick = function (e) {
           e.stopPropagation();
           chip.remove();
+          freeThumb();
           var i = pending.indexOf(item);
           if (i >= 0) pending.splice(i, 1);
           if (!pending.length) chips.hidden = true;
           sync();
         };
+        chip.appendChild(face);
         chip.appendChild(nmEl);
         chip.appendChild(stEl);
         chip.appendChild(xEl);
@@ -3915,6 +4050,7 @@
         body: JSON.stringify({ id: it.id, cid: state.cid, parts: parts })
       }).then(function () {
         ta.value = '';
+        pending.forEach(function (p) { if (p.thumb) URL.revokeObjectURL(p.thumb); });
         pending.length = 0;
         chips.innerHTML = '';
         chips.hidden = true;
@@ -5434,6 +5570,90 @@
     openEmojiAt(document.querySelector('[data-tool="emoji"]'), function (ch) { insertAt(ch); });
   }
 
+  /* ---- 轻量确认气泡：所有破坏性操作统一走这里 —— 点一下不留神就没了，必须二次确认 ---- */
+  var cfmPop = null, cfmOpen = false, cfmAnchor = null, cfmCb = null;
+
+  function closeConfirm() {
+    if (!cfmOpen) return;
+    if (cfmAnchor) cfmAnchor.classList.remove('armed');
+    cfmPop.classList.remove('on');
+    cfmOpen = false;
+    cfmAnchor = null;
+    cfmCb = null;
+  }
+
+  function buildConfirmPop() {
+    if (cfmPop) return cfmPop;
+    var pop = document.createElement('div');
+    pop.className = 'cfm-pop';
+    var t = document.createElement('span');
+    t.className = 'cfm-t';
+    var ok = document.createElement('button');
+    ok.type = 'button';
+    ok.className = 'cfm-ok';
+    var no = document.createElement('button');
+    no.type = 'button';
+    no.className = 'cfm-no';
+    no.textContent = '取消';
+    no.onclick = function (e) { e.stopPropagation(); closeConfirm(); };
+    ok.onclick = function (e) {
+      e.stopPropagation();
+      var fn = cfmCb;
+      closeConfirm();
+      if (fn) fn();
+    };
+    pop.appendChild(t);
+    pop.appendChild(ok);
+    pop.appendChild(no);
+    document.body.appendChild(pop);
+    pop._t = t;
+    pop._ok = ok;
+    cfmPop = pop;
+
+    document.addEventListener('pointerdown', function (e) {
+      if (!cfmOpen) return;
+      if (pop.contains(e.target)) return;
+      if (cfmAnchor && cfmAnchor.contains(e.target)) return;
+      closeConfirm();
+    }, true);
+    document.addEventListener('keydown', function (e) {
+      if (cfmOpen && e.key === 'Escape') { e.stopPropagation(); closeConfirm(); }
+    }, true);
+    // 列表一滚，气泡就悬在错的地方了，直接收掉
+    window.addEventListener('scroll', function () { closeConfirm(); }, true);
+    window.addEventListener('resize', function () { closeConfirm(); });
+    return pop;
+  }
+
+  /** anchor 是触发按钮；opt = {text, ok, onOk} */
+  function openConfirm(anchor, opt) {
+    var pop = buildConfirmPop();
+    var same = cfmOpen && cfmAnchor === anchor;
+    closeConfirm();
+    if (same) return;
+    pop._t.textContent = opt.text || '确认删除？';
+    pop._ok.textContent = opt.ok || '删除';
+    cfmCb = opt.onOk || null;
+    cfmAnchor = anchor;
+    if (anchor) anchor.classList.add('armed');
+    pop.classList.add('on');
+    cfmOpen = true;
+
+    var r = anchor.getBoundingClientRect();
+    // 竖向以「整行」为基准，气泡落在行下方，别盖住正要删的那段内容
+    var host = anchor.closest('.note-row') || anchor;
+    var hr = host.getBoundingClientRect();
+    var w = pop.offsetWidth, h = pop.offsetHeight;
+    var left = Math.min(Math.max(8, r.right - w), window.innerWidth - w - 8);
+    var top = hr.bottom + 8;
+    var below = true;
+    if (top + h > window.innerHeight - 8) { top = hr.top - h - 8; below = false; }
+    if (top < 8) top = Math.min(hr.bottom + 8, window.innerHeight - h - 8);
+    pop.classList.toggle('up', !below);
+    pop.style.left = Math.round(left) + 'px';
+    pop.style.top = Math.round(Math.max(8, top)) + 'px';
+  }
+
   /* ---- 格式面板：小屏把 9 个格式动作收进底部抽屉 ---- */
   var FMT_ITEMS = [
     ['hr', '分隔线', '—', ''],
@@ -6083,17 +6303,52 @@
     return grid;
   }
 
+  function buildFSizeRow() {
+    var row = document.createElement('div');
+    row.className = 'fs-row';
+    var opts = [];
+    FSIZES.forEach(function (f) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'fs-opt' + (currentFSize() === f.key ? ' on' : '');
+      b.title = '正文 ' + f.label;
+      b.innerHTML = '<b style="font-size:' + f.demo + 'px">A</b><span>' + f.label + '</span>';
+      b.onclick = function () {
+        applyFSize(f.key);
+        opts.forEach(function (o) { o.classList.remove('on'); });
+        b.classList.add('on');
+      };
+      row.appendChild(b);
+      opts.push(b);
+    });
+    return row;
+  }
+
   function buildLookPane() {
     var wrap = document.createElement('div');
     wrap.className = 'dev-sec';
+
     var head = document.createElement('div');
     head.className = 'dev-head';
     head.innerHTML = '<span>主题</span>';
     wrap.appendChild(head);
     wrap.appendChild(buildThemeGrid());
+
+    var head2 = document.createElement('div');
+    head2.className = 'dev-head';
+    head2.style.marginTop = '18px';
+    head2.innerHTML = '<span>字体大小</span>';
+    wrap.appendChild(head2);
+    wrap.appendChild(buildFSizeRow());
+
+    var demo = document.createElement('div');
+    demo.className = 'fs-demo';
+    demo.innerHTML = '局域网互传，随手一发就到。<i>文字、图片、文件都能带上这一条。</i>';
+    wrap.appendChild(demo);
+
     var tip = document.createElement('div');
     tip.className = 'dev-hint';
-    tip.textContent = '外观只记在这台设备上，不影响其他设备。';
+    tip.textContent = '外观和字号只记在这台设备上，不影响其他设备。';
     wrap.appendChild(tip);
     return wrap;
   }
@@ -6307,7 +6562,7 @@
   function openTheme() {
     Dialog.open({
       title: '外观',
-      desc: '选一个顺眼的，会记在这台设备上。',
+      desc: '主题和字号都记在这台设备上。',
       body: buildLookPane(),
       actions: [{ label: '完成', value: true, kind: 'primary' }]
     });

@@ -105,8 +105,11 @@
   .theme-card h3{font-size:17px;font-weight:700}
   .theme-card p{font-size:13px;color:var(--sub);line-height:1.75;margin-top:8px}
   .theme-card .frame{margin-top:0;border-radius:13px}
-  .swatch-row{display:flex;gap:10px;margin-top:14px}
+  .swatch-row{display:flex;gap:10px;margin-top:14px;align-items:center}
   .sw{width:26px;height:26px;border-radius:8px;border:1px solid var(--line)}
+  .size-row{display:flex;gap:14px;margin-top:12px;align-items:baseline;color:var(--faint)}
+  .size-row b{font-weight:750;color:var(--text);line-height:1}
+  .size-row em{font-style:normal;font-size:11px;letter-spacing:.3px}
 
   /* ---------- 功能 3x3 ---------- */
   .feats{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:26px}
@@ -173,7 +176,7 @@
     <div class="logo"><img src="assets/logo.gif" alt=""></div>
     <div>
       <div class="brandname"><em>XM</em> 互传</div>
-      <div class="brandsub">局域网互传系统 · v1.3.0 说明</div>
+      <div class="brandsub">局域网互传系统 · v1.4.0 说明</div>
     </div>
   </div>
 
@@ -225,12 +228,16 @@
 
     <div class="theme-card">
       <div>
-        <h3>三套外观，各自记住</h3>
-        <p>浅色、暗色、毛玻璃，每台设备自己选，记在本机，不影响别人。</p>
+        <h3>三套外观 + 四档字号</h3>
+        <p>浅色、暗色、毛玻璃各取所需；正文字号还能单独调，只放大内容不动按钮，记在本机不影响别人。</p>
         <div class="swatch-row">
           <span class="sw" style="background:#fff"></span>
           <span class="sw" style="background:#161b22"></span>
           <span class="sw" style="background:linear-gradient(135deg,#cfe4ff,#f7d6ff,#d9fff0)"></span>
+        </div>
+        <div class="size-row">
+          <b style="font-size:13px">A</b><b style="font-size:15px">A</b><b style="font-size:17px">A</b><b style="font-size:19px">A</b>
+          <em>小 · 标准 · 大 · 特大</em>
         </div>
       </div>
       <div class="frame"><img src="assets/shot-theme.png" alt="外观"></div>
@@ -295,8 +302,8 @@
 
   <div class="sect">
     <div class="sect-head">
-      <h2>本次更新<span class="ver-tag">v1.3.0</span></h2>
-      <p>补上引用与补充，补充说明不再绕</p>
+      <h2>本次更新<span class="ver-tag">v1.4.0</span></h2>
+      <p>字号可调，看得清也看得舒服</p>
     </div>
     <div class="rule"></div>
 
@@ -322,9 +329,9 @@
         <p>两行排布，发送人紫、日期青、批量天蓝、清空红；宽屏图标 + 文字，窄屏自动收成图标。</p>
       </div>
       <div class="feat">
-        <div class="ico"><svg viewBox="0 0 24 24"><path d="M4 5h16M4 19h9"/><path d="M8 9l4 4 4-4"/><path d="M12 13v4"/></svg></div>
-        <h4>双击收起</h4>
-        <p>双击头像把长消息收成一行预览，再双击或点「已收起」展开；收起 / 展开都会把长文打回默认折叠。</p>
+        <div class="ico"><svg viewBox="0 0 24 24"><path d="M4 7h9M4 12h13M4 17h7"/><path d="M18.5 8.5V16"/><path d="M16 10l2.5-2.5L21 10"/></svg></div>
+        <h4>字号四档</h4>
+        <p>外观里切「小 / 标准 / 大 / 特大」，只放大正文与补充，按钮图标不动；带一条实时示例，选完立刻生效。</p>
       </div>
       <div class="feat warm">
         <div class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 16.5V7.5"/><path d="M8.5 11 12 7.5 15.5 11"/></svg></div>
@@ -408,7 +415,7 @@
     </div>
     <div class="sign">
       <b><em>XM</em> 互传 <span style="display:inline;font-size:12px;color:var(--faint);font-weight:500">轻量 · 够快 · 不外传</span></b>
-      <span>v1.3.0 · github.com/xiaomaoJT/XiaoMaoShare</span>
+      <span>v1.4.0 · github.com/xiaomaoJT/XiaoMaoShare</span>
       <span>Telegram 频道 · t.me/ListenToMao</span>
     </div>
   </div>
