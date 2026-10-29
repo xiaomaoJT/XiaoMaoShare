@@ -581,7 +581,7 @@
     padding:12px 14px;box-shadow:var(--shadow-sm); animation:in .28s cubic-bezier(.2,.8,.3,1);
   }
   @keyframes in{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
-  .meta{display:flex;align-items:center;gap:8px;font-size:calc(11.5px * var(--tfs));color:var(--faint);margin-bottom:8px}
+  .meta{display:flex;align-items:center;gap:8px;font-size:calc(11.5px * var(--tfs));color:var(--faint);margin-bottom:8px;flex-wrap:wrap;row-gap:4px}
   .ava{
     width:20px;height:20px;border-radius:7px;flex:none;display:grid;place-items:center;
     font-size:10.5px;font-weight:700;color:#fff;
@@ -599,6 +599,8 @@
   .icon:hover{background:var(--card-2);color:var(--text)}
   .icon.del:hover{color:var(--danger)}
   .icon svg{width:15px;height:15px;display:block}
+  /* 窄屏：名字让位，操作按钮实在排不下就整组落到下一行右对齐（margin-left:auto 保证） */
+  @media (max-width:560px){ .who{max-width:104px} }
 
   /* 保留开关：常驻可见 —— 这是「别删我的」的开关，藏起来就没人找得到；已保留时点亮 */
   .keepbtn{
@@ -611,6 +613,14 @@
   .keepbtn.on{opacity:1;color:var(--accent)}
   .keepbtn.on svg{fill:currentColor;fill-opacity:.16}
   .keepbtn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+
+  /* 自动清理倒计时：删前 1 天才出现的小胶囊，提前给「要没了」的心理预期 */
+  .delwarn{
+    flex:none;padding:2px 8px;border-radius:999px;white-space:nowrap;
+    font-size:10.5px;font-weight:700;letter-spacing:.2px;
+    color:#c2402f;background:rgba(194,64,47,.1);
+  }
+  :root[data-theme="dark"] .delwarn{color:#ff8a76;background:rgba(255,110,90,.14)}
 
   .text-body{font-size:calc(14.5px * var(--tfs));line-height:1.62;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere}
   .text-body.clamp{
@@ -4156,6 +4166,24 @@
   }
 
   /* ============================================================ 卡片 */
+
+  /* 自动清理倒计时：保留天数 >0、这条没标「保留」、距删除不足 1 天时返回剩余信息 */
+  function delWarnInfo(it) {
+    var days = Number(state.settings && state.settings.keepDays) || 0;
+    if (!days || it.keep || !Number(it.time)) return null;
+    var exp = Number(it.time) + days * 864e5;
+    var left = exp - Date.now();
+    if (left <= 0 || left >= 864e5) return null; // 还早，不吵；已过期交给服务端清
+    return { exp: exp, left: left };
+  }
+  function fmtLeft(ms) {
+    var m = Math.max(1, Math.round(ms / 60000));
+    if (m < 60) return m + ' 分钟';
+    var h = Math.floor(m / 60);
+    if (h < 24) return h + ' 小时';
+    return Math.floor(h / 24) + ' 天';
+  }
+
   function makeCard(it) {
     var el = document.createElement('article');
     el.className = 'card';
@@ -4262,7 +4290,18 @@
     kbtn.setAttribute('aria-pressed', it.keep ? 'true' : 'false');
     kbtn.onclick = function (e) { e.stopPropagation(); toggleKeep(it, kbtn); };
 
-    meta.appendChild(time); meta.appendChild(kbtn); meta.appendChild(acts);
+    meta.appendChild(time); meta.appendChild(kbtn);
+    // 自动清理倒计时：开了保留天数、这条没标「保留」、且距删除不足 1 天时才提示
+    var dw = delWarnInfo(it);
+    if (dw) {
+      var dwEl = document.createElement('span');
+      dwEl.className = 'delwarn';
+      dwEl.dataset.exp = dw.exp;
+      dwEl.textContent = fmtLeft(dw.left) + '后自动清理';
+      dwEl.title = '超过主机设定的保留天数会被服务端自动清理；点旁边的图钉可永久保留这条消息';
+      meta.appendChild(dwEl);
+    }
+    meta.appendChild(acts);
     el.appendChild(meta);
     // 内容区（文字 / 图片 / 文件 / 收起说明）抽成 buildBody，便于编辑后增量重建
     buildBody(el, it);
@@ -5821,6 +5860,12 @@
   function tickTimes() {
     feed.querySelectorAll('.meta > span[data-ts]').forEach(function (s) {
       s.textContent = fmtTime(Number(s.dataset.ts));
+    });
+    // 删除倒计时跟着走：到期就把胶囊摘掉（消息本体由服务端下次清理时移除）
+    feed.querySelectorAll('.delwarn[data-exp]').forEach(function (s) {
+      var left = Number(s.dataset.exp) - Date.now();
+      if (left <= 0) { s.remove(); return; }
+      s.textContent = fmtLeft(left) + '后自动清理';
     });
   }
   function syncWho() {
