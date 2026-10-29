@@ -50,7 +50,12 @@ function looksLikeOurData(dir) {
   } catch { return false; }
 }
 
-process.env.XM_DATA_DIR = readDataDirPref() || path.join(app.getPath('userData'), 'data');
+// 免安装版（portable）运行时由启动器注入这个环境变量，指向 exe 所在目录
+const PORTABLE_ROOT = process.env.PORTABLE_EXECUTABLE_DIR || '';
+
+// 免安装版默认把数据放在 exe 旁边的 data/，U 盘拷走即整套带走；其余仍落 userData
+process.env.XM_DATA_DIR = readDataDirPref() ||
+  (PORTABLE_ROOT ? path.join(PORTABLE_ROOT, 'data') : path.join(app.getPath('userData'), 'data'));
 
 const server = require('../server.js');
 
@@ -761,7 +766,7 @@ const RELEASES_URL = 'https://github.com/xiaomaoJT/XiaoMaoShare/releases/latest'
 let manualCheck = false; // 手动检查时才把失败细节弹给用户，静默检查失败不打扰
 
 function setupAutoUpdater() {
-  if (!app.isPackaged) return; // 开发模式没有 app-update.yml，只在打包后生效
+  if (!app.isPackaged || PORTABLE_ROOT) return; // 开发模式 / 免安装版不接自动更新
   let autoUpdater;
   try { ({ autoUpdater } = require('electron-updater')); } catch { return; }
 
@@ -818,6 +823,19 @@ function setupAutoUpdater() {
 
 /** 菜单「检查更新…」：明确告诉用户结果，失败给下载页兜底 */
 function checkForUpdatesManually() {
+  if (PORTABLE_ROOT) {
+    dialog.showMessageBox({
+      type: 'info',
+      title: '免安装版',
+      message: '免安装版不自动更新',
+      detail: '有新版本时，到发布页下载新的免安装版替换即可（数据目录不受影响）。',
+      buttons: ['打开发布页', '关闭'],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true,
+    }).then(({ response }) => { if (response === 0) shell.openExternal(RELEASES_URL); });
+    return;
+  }
   if (!app.isPackaged) {
     dialog.showMessageBox({
       message: '开发模式下不检查更新',

@@ -45,8 +45,11 @@
       "identity": null
     },
     "win": {
-      "target": "nsis",
+      "target": ["nsis", "portable"],
       "icon": "build/icon.ico"
+    },
+    "portable": {
+      "artifactName": "XiaoMaoShare-${version}-win-portable.${ext}"
     },
     "nsis": {
       "oneClick": false,
