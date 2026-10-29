@@ -3,6 +3,7 @@
   "version": "2.2.2",
   "private": true,
   "description": "XiaoMao 互传 —— 局域网内文字 / 图片 / 文件互传，零依赖",
+  "license": "MIT",
   "main": "desktop/main.js",
   "scripts": {
     "start": "node server.js --open",
