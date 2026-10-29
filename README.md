@@ -52,7 +52,7 @@
 - [常见问题](#常见问题)
 - [说明](#说明)
 
-同一个 Wi-Fi 下，手机、电脑之间互传**文字、图片、文件**的极简工具。跑一条 Node 命令，其他设备打开网址、输一次接入密码就能用，不用注册、不用装 App、不经过任何服务器。
+同一个 Wi-Fi 下，手机、电脑之间互传**文字、图片、文件**的极简工具。跑一条 Node 命令，其他设备打开网址、输一次接入密码就能用，不用注册、不经过任何服务器。浏览器即开即用，macOS / Windows / Android 另有安装包（见 [Releases](https://github.com/xiaomaoJT/XiaoMaoShare/releases)）。
 
 零依赖，只有 `server.js` + 一个 HTML 页面。
 
@@ -524,9 +524,11 @@ npm run desktop
 
 ## 手机添加到主屏幕（PWA）
 
-项目带 `manifest.webmanifest` 和 `icon.png` / `apple-touch-icon.png`。在 iOS Safari「分享 → 添加到主屏幕」、或 Android Chrome「安装应用」后，会以**全屏、无地址栏**的方式打开，像个原生 App。主题色跟随当前皮肤。**这是 iOS 端的推荐安装方式**（iOS 真 App 壳因签名门槛作为预留能力，见 `ios/README.md`）。
+项目带 `manifest.webmanifest` 和 `icon.png` / `apple-touch-icon.png`。**Android 建议直接安装 Release 里的 apk**（`XiaoMaoShare-*-android.apk`）；**iOS 推荐用 Safari「分享 → 添加到主屏幕」**——添加后以**全屏、无地址栏**的方式打开，效果接近原生 App，主题色跟随当前皮肤。iOS 原生壳（WKWebView）因签名门槛作为预留能力，见 `ios/README.md`。
 
 ## 四端打包与发布（v2.0.0 起）
+
+macOS / Windows / Android 安装包已随 v2.0.0 发布于 [GitHub Releases](https://github.com/xiaomaoJT/XiaoMaoShare/releases)，可直接下载；以下为自行构建的方式：
 
 | 端 | 形态 | 打包方式 | 产物 |
 | --- | --- | --- | --- |
@@ -543,7 +545,7 @@ git tag v2.0.0 && git push origin v2.0.0
 
 细节：
 
-- 应用图标统一用 `public/icon.png`（小毛集团 logo）：Electron 由 electron-builder 自动转 `.icns` / `.ico`；Android 的各密度 mipmap 已由它生成
+- 应用图标统一用 `public/icon.png`（小帽集团 logo）：Electron 由 electron-builder 自动转 `.icns` / `.ico`；Android 的各密度 mipmap 已由它生成
 - Android 壳零第三方依赖（纯 SDK 类），地址输入预填 `192.168.`、端口默认 6767，支持文件上传与系统下载管理器
 - iOS 自签：免费 Apple ID 签一次管 7 天，到期重签数据不丢；完整步骤与坑见 `ios/README.md`
 

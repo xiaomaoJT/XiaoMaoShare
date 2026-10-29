@@ -2681,7 +2681,7 @@ const server = http.createServer((req, res) => {
     }
 
     const ascii = 'XiaoMao-' + new Date().toISOString().slice(0, 10).replace(/-/g, '') + '.zip';
-    const cn = '小毛互传-' + new Date().toISOString().slice(0, 10) + '.zip';
+    const cn = '小帽互传-' + new Date().toISOString().slice(0, 10) + '.zip';
     res.writeHead(200, {
       'Content-Type': 'application/zip',
       'Content-Disposition':
