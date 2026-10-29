@@ -1,6 +1,6 @@
 {
   "name": "xiaomao-share",
-  "version": "2.2.2",
+  "version": "2.2.3",
   "private": true,
   "description": "XiaoMao 互传 —— 局域网内文字 / 图片 / 文件互传，零依赖",
   "license": "MIT",
