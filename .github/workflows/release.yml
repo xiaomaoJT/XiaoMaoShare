@@ -31,9 +31,14 @@ jobs:
         with:
           name: desktop
           if-no-files-found: error
+          # exe/dmg/zip 给人下载；blockmap 供 Windows 差量更新；
+          # latest*.yml 是 electron-updater 的版本元数据，缺了自动更新就瞎了
           path: |
             release/*.dmg
             release/*.exe
+            release/*.zip
+            release/*.blockmap
+            release/latest*.yml
 
   # ---------- Android：ubuntu runner 自带 Android SDK，出 debug 签名 apk（可直接安装） ----------
   android:

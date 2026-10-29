@@ -21,6 +21,11 @@
     "appId": "cc.xiaomao.share",
     "productName": "XiaoMao 互传",
     "artifactName": "XiaoMaoShare-${version}-${os}.${ext}",
+    "publish": {
+      "provider": "github",
+      "owner": "xiaomaoJT",
+      "repo": "XiaoMaoShare"
+    },
     "directories": {
       "output": "release"
     },
@@ -31,7 +36,7 @@
       "package.json"
     ],
     "mac": {
-      "target": "dmg",
+      "target": ["dmg", "zip"],
       "category": "public.app-category.utilities",
       "identity": null
     },
@@ -43,5 +48,8 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true
     }
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.11"
   }
 }

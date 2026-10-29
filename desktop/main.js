@@ -425,6 +425,10 @@ function buildMenu() {
           label: '打开数据目录',
           click: () => shell.openPath(server.DATA_DIR),
         },
+        {
+          label: '检查更新…',
+          click: () => checkForUpdatesManually(),
+        },
         { type: 'separator' },
         { role: IS_MAC ? 'close' : 'quit', label: IS_MAC ? '关闭窗口（服务继续）' : '退出' },
       ],
@@ -579,6 +583,110 @@ async function restartWithPort(p) {
   return hostInfo;
 }
 
+/* ------------------------------------------------------------ 自动更新 */
+
+/**
+ * 基于 electron-updater + GitHub Releases：
+ *   打包配置里声明了 publish（provider: github），electron-builder 会顺带生成
+ *   latest.yml / latest-mac.yml 元数据；只要把它们随安装包一起传上 Release，
+ *   应用就能自己发现新版本、后台下载、重启安装。
+ *
+ * 差异：Windows（NSIS）走 blockmap 差量更新，只下改动块；
+ *       macOS（Squirrel.Mac）只支持全量 zip。
+ * 注意：mac 应用未签名，自动更新可能被系统拦下 —— 失败时降级为打开下载页。
+ */
+
+const RELEASES_URL = 'https://github.com/xiaomaoJT/XiaoMaoShare/releases/latest';
+let manualCheck = false; // 手动检查时才把失败细节弹给用户，静默检查失败不打扰
+
+function setupAutoUpdater() {
+  if (!app.isPackaged) return; // 开发模式没有 app-update.yml，只在打包后生效
+  let autoUpdater;
+  try { ({ autoUpdater } = require('electron-updater')); } catch { return; }
+
+  autoUpdater.autoDownload = true;
+  autoUpdater.allowPrerelease = false;
+
+  autoUpdater.on('update-available', (info) => {
+    dialog.showMessageBox({
+      type: 'info',
+      title: '发现新版本',
+      message: `新版本 ${info.version} 可用（当前 v${app.getVersion()}）`,
+      detail: '正在后台下载，完成后会询问是否立即安装。',
+      buttons: ['好'],
+      noLink: true,
+    });
+  });
+
+  autoUpdater.on('update-downloaded', async (info) => {
+    const { response } = await dialog.showMessageBox({
+      type: 'question',
+      title: '更新已就绪',
+      message: `新版本 ${info.version} 已下载完成`,
+      detail: '重启应用后将自动安装并进入新版本，主机服务会短暂中断几秒。',
+      buttons: ['立即重启安装', '稍后'],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true,
+    });
+    if (response !== 0) return;
+    // 走一遍优雅退出（放掉端口）再交给安装器
+    quitting = true;
+    server.stopServer().finally(() => autoUpdater.quitAndInstall());
+  });
+
+  autoUpdater.on('error', (e) => {
+    if (!manualCheck) return; // 静默检查失败：忽略，下次启动再试
+    manualCheck = false;
+    dialog.showMessageBox({
+      type: 'warning',
+      title: '检查更新失败',
+      message: '自动更新暂时不可用',
+      detail: (e && e.message ? e.message : String(e)) +
+        '\n\n可以直接到发布页手动下载最新安装包。',
+      buttons: ['打开下载页', '关闭'],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true,
+    }).then(({ response }) => { if (response === 0) shell.openExternal(RELEASES_URL); });
+  });
+
+  // 启动后静默检查一次；网络不通、被拦截等一律静默，不烦用户
+  setTimeout(() => { autoUpdater.checkForUpdates().catch(() => {}); }, 5000);
+}
+
+/** 菜单「检查更新…」：明确告诉用户结果，失败给下载页兜底 */
+function checkForUpdatesManually() {
+  if (!app.isPackaged) {
+    dialog.showMessageBox({
+      message: '开发模式下不检查更新',
+      detail: '打包后的应用才支持自动更新。',
+      buttons: ['好'],
+      noLink: true,
+    });
+    return;
+  }
+  let autoUpdater;
+  try { ({ autoUpdater } = require('electron-updater')); } catch { shell.openExternal(RELEASES_URL); return; }
+  manualCheck = true;
+  autoUpdater.checkForUpdates()
+    .then((r) => {
+      manualCheck = false;
+      const latest = r && r.updateInfo && r.updateInfo.version;
+      if (latest && latest !== app.getVersion()) {
+        // update-available 事件已弹窗，这里不用再说话
+        return;
+      }
+      dialog.showMessageBox({
+        message: '已经是最新版本',
+        detail: `当前 v${app.getVersion()}，暂无更新。`,
+        buttons: ['好'],
+        noLink: true,
+      });
+    })
+    .catch(() => { /* error 事件里统一兜底 */ });
+}
+
 /* ------------------------------------------------------------ 生命周期 */
 
 if (!app.requestSingleInstanceLock()) {
@@ -637,6 +745,7 @@ if (!app.requestSingleInstanceLock()) {
     writePortPref(hostInfo.port); // 记住实际跑起来的端口（可能因占用偏移过）
     buildMenu();
     createHostWindow();
+    setupAutoUpdater();
 
     app.on('activate', () => { ensureHostWindow(); });
   });
