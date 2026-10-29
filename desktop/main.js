@@ -14,13 +14,56 @@
 
 const { app, BrowserWindow, ipcMain, Menu, shell, clipboard, dialog } = require('electron');
 const path = require('node:path');
+const fs = require('node:fs');
 const { once } = require('node:events');
 
 /**
  * 数据目录必须在 require server.js 之前定好 —— 它在模块顶层就把 DATA_DIR 算出来了。
- * 打包后代码在只读的 asar 里，数据只能写用户目录。
+ * 默认落到 userData/data（打包后代码在只读的 asar 里，数据只能写用户目录）；
+ * 但用户可以在设置里改到任意目录（比如沿用 启动.bat 那份 data），这里优先读那个偏好。
  */
-process.env.XM_DATA_DIR = process.env.XM_DATA_DIR || path.join(app.getPath('userData'), 'data');
+const SETTINGS_FILE = () => path.join(app.getPath('userData'), 'settings.json');
+
+function readDataDirPref() {
+  try {
+    const s = JSON.parse(fs.readFileSync(SETTINGS_FILE(), 'utf8'));
+    return s && typeof s.dataDir === 'string' && s.dataDir ? s.dataDir : '';
+  } catch { return ''; }
+}
+
+function writeDataDirPref(dir) {
+  try {
+    let s = {};
+    try { s = JSON.parse(fs.readFileSync(SETTINGS_FILE(), 'utf8')) || {}; } catch { /* 覆盖就好 */ }
+    s.dataDir = dir;
+    fs.writeFileSync(SETTINGS_FILE(), JSON.stringify(s, null, 2));
+  } catch { /* 写不了就算了 */ }
+}
+
+/** 一个目录看着像不像我们的数据目录（里面有没有熟悉的标记文件） */
+function looksLikeOurData(dir) {
+  try {
+    if (!fs.statSync(dir).isDirectory()) return false;
+    const names = fs.readdirSync(dir);
+    return ['index.json', 'accounts.json', 'host.json', 'profiles.json', 'settings.json', 'devices.json']
+      .some((n) => names.includes(n)) || names.includes('files');
+  } catch { return false; }
+}
+
+/** 首次启动探测：应用旁边有没有旧数据可一键沿用（开发目录 / 便携版旁边那种） */
+function detectLegacyDataDir() {
+  const cands = [];
+  try { cands.push(path.join(app.getAppPath(), 'data')); } catch { /* ignore */ }
+  try { cands.push(path.join(path.dirname(app.getPath('exe')), 'data')); } catch { /* ignore */ }
+  const own = path.resolve(app.getPath('userData'), 'data');
+  for (const c of cands) {
+    const dd = path.resolve(c);
+    if (dd && dd !== own && looksLikeOurData(dd)) return dd;
+  }
+  return null;
+}
+
+process.env.XM_DATA_DIR = readDataDirPref() || path.join(app.getPath('userData'), 'data');
 
 const server = require('../server.js');
 
@@ -352,6 +395,31 @@ function buildMenu() {
             }
           },
         },
+        {
+          label: '更改数据目录…',
+          click: async () => {
+            const cur = server.DATA_DIR;
+            const res = await dialog.showOpenDialog(
+              (hostWin && !hostWin.isDestroyed()) ? hostWin : undefined,
+              { title: '选择数据目录', defaultPath: cur, properties: ['openDirectory', 'createDirectory'] }
+            );
+            if (res.canceled || !res.filePaths || !res.filePaths[0]) return;
+            const dir = res.filePaths[0];
+            if (dir === cur) return;
+            writeDataDirPref(dir);
+            const { response } = await dialog.showMessageBox({
+              type: 'info',
+              title: '数据目录已更新',
+              message: '数据目录已改为：\n' + dir,
+              detail: '需要重启应用才能生效。重启后所有文件、账号与头像都会从新目录读取。',
+              buttons: ['立即重启', '稍后重启'],
+              defaultId: 0,
+              cancelId: 1,
+              noLink: true,
+            });
+            if (response === 0) { app.relaunch(); app.exit(0); }
+          },
+        },
         { type: 'separator' },
         {
           label: '打开数据目录',
@@ -410,7 +478,6 @@ function buildMenu() {
  * 存的是「实际跑起来的端口」：6767 被占自动挪到 6768 的话，下次直接用 6768，
  * 地址才稳定——手机上存的书签不会隔天失效。
  */
-const SETTINGS_FILE = () => path.join(app.getPath('userData'), 'settings.json');
 
 function readPortPref() {
   try {
@@ -520,6 +587,25 @@ if (!app.requestSingleInstanceLock()) {
   app.on('second-instance', () => { ensureHostWindow(); });
 
   app.whenReady().then(async () => {
+    // 首次启动：还没设过数据目录、且桌面端默认 data 还没建起来时，
+    // 探测一下旁边有没有旧数据（比如 启动.bat 留下的那份），有就问一句要不要沿用。
+    if (!readDataDirPref() && !fs.existsSync(path.join(app.getPath('userData'), 'data'))) {
+      const legacy = detectLegacyDataDir();
+      if (legacy) {
+        const { response } = await dialog.showMessageBox({
+          type: 'question',
+          title: '发现旧数据',
+          message: '检测到旧的数据目录：\n' + legacy,
+          detail: '是否沿用这份数据？沿用后将直接读取其中的文件、账号与头像；\n选「使用新目录」则会另起一份空白数据。',
+          buttons: ['沿用旧数据', '使用新目录'],
+          defaultId: 0,
+          cancelId: 1,
+          noLink: true,
+        });
+        if (response === 0) { writeDataDirPref(legacy); app.relaunch(); app.exit(0); return; }
+      }
+    }
+
     // 上次用过的端口优先（哪怕是被占用后自动挪过位的），地址才稳定
     const pref = readPortPref() || DEFAULT_PORT;
     let err = null;

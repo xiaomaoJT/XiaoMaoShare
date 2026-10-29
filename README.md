@@ -378,7 +378,10 @@ npm run desktop
 
 ### 数据与打包
 
-- 桌面版的数据不放在项目 `data/` 里，而在系统用户目录（macOS `~/Library/Application Support/xiaomao-share/data`，Windows `%APPDATA%/xiaomao-share/data`），和命令行方式跑的服务互相独立。菜单「我的主机 → 打开数据目录」可以直接跳过去。
+- 桌面版默认的数据目录在系统用户目录（macOS `~/Library/Application Support/xiaomao-share/data`，Windows `%APPDATA%/xiaomao-share/data`），与命令行方式（项目 `data/`）互相独立。所以**从 `启动.bat` 切到桌面版不会自动带上旧数据**——这是有意为之，两套数据各管各的、互不污染。
+- **沿用旧数据（零拷贝挂载）**：菜单「我的主机 → 更改数据目录…」选到任意一份 `data` 文件夹（例如 `启动.bat` 生成的那份），桌面版就直接读它，账号 / 文件 / 头像原样可用，无需复制迁移；改完需重启生效（菜单会提示）。该设置记在 `userData/settings.json` 的 `dataDir` 字段，下次启动自动沿用。
+- **首次启动自动探测**：第一次开桌面版时，若在其所在目录（开发目录 / 便携版目录）旁检测到一份带标记文件的旧 `data`，会弹窗询问「是否沿用」，一键指过去即可。
+- 菜单「我的主机 → 打开数据目录」可直接跳到当前正在使用的数据目录。
 - 打包安装包（可选，不装 electron-builder 也能正常用桌面版）：
 
   ```bash
