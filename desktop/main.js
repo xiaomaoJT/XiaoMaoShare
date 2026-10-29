@@ -50,19 +50,6 @@ function looksLikeOurData(dir) {
   } catch { return false; }
 }
 
-/** 首次启动探测：应用旁边有没有旧数据可一键沿用（开发目录 / 便携版旁边那种） */
-function detectLegacyDataDir() {
-  const cands = [];
-  try { cands.push(path.join(app.getAppPath(), 'data')); } catch { /* ignore */ }
-  try { cands.push(path.join(path.dirname(app.getPath('exe')), 'data')); } catch { /* ignore */ }
-  const own = path.resolve(app.getPath('userData'), 'data');
-  for (const c of cands) {
-    const dd = path.resolve(c);
-    if (dd && dd !== own && looksLikeOurData(dd)) return dd;
-  }
-  return null;
-}
-
 process.env.XM_DATA_DIR = readDataDirPref() || path.join(app.getPath('userData'), 'data');
 
 const server = require('../server.js');
@@ -71,6 +58,7 @@ const IS_MAC = process.platform === 'darwin';
 const DEFAULT_PORT = 6767;
 
 let hostWin = null;   // 我自己的主机（主控）
+let guideWin = null;  // 数据目录引导窗
 let hostInfo = null;  // 启动后缓存的地址信息（端口、局域网地址）
 const links = new Map(); // id -> { id, url, host, win }
 let linkSeq = 0;
@@ -397,28 +385,7 @@ function buildMenu() {
         },
         {
           label: '更改数据目录…',
-          click: async () => {
-            const cur = server.DATA_DIR;
-            const res = await dialog.showOpenDialog(
-              (hostWin && !hostWin.isDestroyed()) ? hostWin : undefined,
-              { title: '选择数据目录', defaultPath: cur, properties: ['openDirectory', 'createDirectory'] }
-            );
-            if (res.canceled || !res.filePaths || !res.filePaths[0]) return;
-            const dir = res.filePaths[0];
-            if (dir === cur) return;
-            writeDataDirPref(dir);
-            const { response } = await dialog.showMessageBox({
-              type: 'info',
-              title: '数据目录已更新',
-              message: '数据目录已改为：\n' + dir,
-              detail: '需要重启应用才能生效。重启后所有文件、账号与头像都会从新目录读取。',
-              buttons: ['立即重启', '稍后重启'],
-              defaultId: 0,
-              cancelId: 1,
-              noLink: true,
-            });
-            if (response === 0) { app.relaunch(); app.exit(0); }
-          },
+          click: () => openDataDirGuide(),
         },
         { type: 'separator' },
         {
@@ -583,6 +550,200 @@ async function restartWithPort(p) {
   return hostInfo;
 }
 
+/* ------------------------------------------------- 数据目录选择引导 */
+
+/**
+ * 系统文件夹选择器在各平台上行为不一致（Windows 上选中后常常只是「进入」文件夹，
+ * 很多人选不出来），所以不直接裸弹选择器，而是先给一个引导窗：
+ *   说明这步是干嘛的 → 粘贴路径或点「浏览…」→ 实时校验 → 确认重启生效。
+ * 整个过程不阻塞主界面，随时可关。
+ */
+
+function readGuideDismissed() {
+  try {
+    const s = JSON.parse(fs.readFileSync(SETTINGS_FILE(), 'utf8'));
+    return !!(s && s.dataDirGuideDismissed);
+  } catch { return false; }
+}
+
+function writeGuideDismissed() {
+  try {
+    let s = {};
+    try { s = JSON.parse(fs.readFileSync(SETTINGS_FILE(), 'utf8')) || {}; } catch { /* 覆盖就好 */ }
+    s.dataDirGuideDismissed = true;
+    fs.writeFileSync(SETTINGS_FILE(), JSON.stringify(s, null, 2));
+  } catch { /* 写不了就算了 */ }
+}
+
+function dataDirStatus(dir) {
+  try {
+    if (!fs.statSync(dir).isDirectory()) return { exists: false, valid: false };
+  } catch { return { exists: false, valid: false }; }
+  return { exists: true, valid: looksLikeOurData(dir) };
+}
+
+function pushToGuide(js) {
+  if (!guideWin || guideWin.isDestroyed()) return;
+  guideWin.webContents.executeJavaScript(js).catch(() => {});
+}
+
+function pushStatToGuide(dir) {
+  pushToGuide(`window.__setStat && window.__setStat(${JSON.stringify(dataDirStatus(dir))})`);
+}
+
+/** 校验并应用新目录：不存在报错；不是有效数据目录时二次确认（允许硬选空目录） */
+function validateAndApplyDataDir(dir) {
+  const st = dataDirStatus(dir);
+  if (!st.exists) {
+    dialog.showErrorBox('目录不存在', dir + '\n\n请确认盘符和路径拼写。');
+    return;
+  }
+  const apply = () => {
+    writeDataDirPref(dir);
+    if (guideWin && !guideWin.isDestroyed()) guideWin.close();
+    dialog.showMessageBox({
+      type: 'info',
+      title: '数据目录已更新',
+      message: '数据目录已设为：\n' + dir,
+      detail: '需要重启应用才能生效。重启后所有文件、账号与头像都会从新目录读取。',
+      buttons: ['立即重启', '稍后重启'],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true,
+    }).then(({ response }) => {
+      if (response === 0) { app.relaunch(); app.exit(0); }
+    });
+  };
+  if (!st.valid) {
+    dialog.showMessageBox({
+      type: 'warning',
+      title: '没有找到已知的数据文件',
+      message: '这个目录里没有发现小帽互传的数据文件（accounts.json / index.json / files 等）。',
+      detail: '选一个空目录的话，应用会从零开始记录。如果你确定路径没选错（比如就想另起一份），可以继续使用。',
+      buttons: ['仍要使用', '返回重选'],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+    }).then(({ response }) => { if (response === 0) apply(); });
+    return;
+  }
+  apply();
+}
+
+function openDataDirGuide() {
+  if (guideWin && !guideWin.isDestroyed()) { guideWin.show(); guideWin.focus(); return; }
+  guideWin = new BrowserWindow({
+    width: 520,
+    height: 400,
+    parent: hostWin && !hostWin.isDestroyed() ? hostWin : undefined,
+    modal: false, // 不挡主界面，随手可关
+    title: '数据目录',
+    resizable: false,
+    show: false,
+    webPreferences: { contextIsolation: true, nodeIntegration: false },
+  });
+  guideWin.setMenuBarVisibility(false);
+
+  const curEsc = String(server.DATA_DIR).replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  guideWin.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(`<!doctype html><meta charset="utf-8">
+<style>
+  body{margin:0;padding:20px 22px;font:13px/1.7 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;color:#3d4450;background:#f4f6f9}
+  h2{font-size:15px;margin:0 0 6px}
+  .tip{margin:0 0 14px;color:#6b7280;font-size:12.5px}
+  .tip b{color:#3d4450}
+  .row{display:flex;gap:8px}
+  input{flex:1;box-sizing:border-box;height:36px;padding:0 10px;border:1px solid #d4d9e2;
+        border-radius:8px;font-size:13px;outline:none;background:#fff;color:#3d4450}
+  input:focus{border-color:#4c6ef5}
+  button.br{height:36px;padding:0 14px;border-radius:8px;border:1px solid #d4d9e2;
+            background:#fff;color:#3d4450;font-size:12.5px;cursor:pointer;white-space:nowrap}
+  button.br:hover{background:#eef1f6}
+  .st{min-height:20px;margin-top:8px;font-size:12px;font-weight:600}
+  .st.ok{color:#1a7f4b}.st.warn{color:#b45309}.st.err{color:#c0392b}
+  .cur{margin-top:10px;font-size:12px;color:#6b7280}
+  .cur code{background:#eef1f6;padding:1px 6px;border-radius:5px;font-size:11.5px;word-break:break-all}
+  .btns{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+  .btns button{height:30px;padding:0 14px;border-radius:7px;border:1px solid #d4d9e2;
+               background:#fff;color:#3d4450;font-size:12.5px;cursor:pointer}
+  .btns button.ok{background:#4c6ef5;border-color:#4c6ef5;color:#fff}
+</style>
+<h2>选择数据目录</h2>
+<p class="tip">这里存放消息、账号与文件。如果你之前用<b>命令行方式（启动.bat）</b>跑过服务，
+把目录指到项目里那个 <b>data</b> 文件夹，所有数据原样沿用，<b>无需复制迁移</b>。</p>
+<div class="row">
+  <input id="p" placeholder="粘贴 data 文件夹的完整路径，如 D:\\XiaoMaoShare\\data" spellcheck="false">
+  <button class="br" id="b">浏览…</button>
+</div>
+<div class="st" id="st"></div>
+<div class="cur">当前：<code>${curEsc}</code></div>
+<div class="btns">
+  <button id="c">取消</button>
+  <button class="ok" id="o">使用此目录</button>
+</div>
+<script>
+  var p = document.getElementById('p'), st = document.getElementById('st');
+  var timer = null;
+  function val(){ return p.value.trim(); }
+  function send(t){ document.title = t; }
+  window.__setPath = function (d) { p.value = d; };
+  window.__setStat = function (s) {
+    st.className = 'st ' + (!s.exists ? 'err' : s.valid ? 'ok' : 'warn');
+    st.textContent = !s.exists ? '❌ 目录不存在，请检查盘符和路径'
+      : s.valid ? '✅ 已识别为有效的数据目录'
+      : '⚠️ 没发现已知数据文件（仍可使用，应用会从零开始记录）';
+  };
+  p.addEventListener('input', function () {
+    clearTimeout(timer);
+    timer = setTimeout(function () {
+      if (val()) send('DDVAL:' + encodeURIComponent(val()));
+      else { st.textContent = ''; st.className = 'st'; }
+    }, 300);
+  });
+  document.getElementById('b').onclick = function () { send('DDBROWSE:' + encodeURIComponent(val())); };
+  document.getElementById('o').onclick = function () { if (val()) send('DDOK:' + encodeURIComponent(val())); };
+  document.getElementById('c').onclick = function () { window.close(); };
+  p.focus();
+<\/script>`));
+
+  guideWin.webContents.on('page-title-updated', async (e, title) => {
+    let m = /^DDBROWSE(?::(.*))?$/.exec(title || '');
+    if (m) {
+      e.preventDefault();
+      let start = '';
+      try { start = m[1] ? decodeURIComponent(m[1]) : ''; } catch { /* ignore */ }
+      const res = await dialog.showOpenDialog(guideWin, {
+        title: '选择数据目录',
+        defaultPath: start || server.DATA_DIR,
+        properties: ['openDirectory', 'createDirectory'],
+      });
+      if (!res.canceled && res.filePaths && res.filePaths[0]) {
+        pushToGuide(`window.__setPath && window.__setPath(${JSON.stringify(res.filePaths[0])})`);
+        pushStatToGuide(res.filePaths[0]);
+      }
+      return;
+    }
+    m = /^DDVAL:(.+)$/.exec(title || '');
+    if (m) {
+      e.preventDefault();
+      try { pushStatToGuide(decodeURIComponent(m[1])); } catch { /* ignore */ }
+      return;
+    }
+    m = /^DDOK:(.+)$/.exec(title || '');
+    if (m) {
+      e.preventDefault();
+      try { validateAndApplyDataDir(decodeURIComponent(m[1])); } catch { /* ignore */ }
+    }
+  });
+
+  guideWin.on('closed', () => {
+    guideWin = null;
+    writeGuideDismissed(); // 关过一次就不再自动弹，菜单里随时可以再开
+  });
+  guideWin.once('ready-to-show', () => guideWin.show());
+}
+
 /* ------------------------------------------------------------ 自动更新 */
 
 /**
@@ -695,25 +856,6 @@ if (!app.requestSingleInstanceLock()) {
   app.on('second-instance', () => { ensureHostWindow(); });
 
   app.whenReady().then(async () => {
-    // 首次启动：还没设过数据目录、且桌面端默认 data 还没建起来时，
-    // 探测一下旁边有没有旧数据（比如 启动.bat 留下的那份），有就问一句要不要沿用。
-    if (!readDataDirPref() && !fs.existsSync(path.join(app.getPath('userData'), 'data'))) {
-      const legacy = detectLegacyDataDir();
-      if (legacy) {
-        const { response } = await dialog.showMessageBox({
-          type: 'question',
-          title: '发现旧数据',
-          message: '检测到旧的数据目录：\n' + legacy,
-          detail: '是否沿用这份数据？沿用后将直接读取其中的文件、账号与头像；\n选「使用新目录」则会另起一份空白数据。',
-          buttons: ['沿用旧数据', '使用新目录'],
-          defaultId: 0,
-          cancelId: 1,
-          noLink: true,
-        });
-        if (response === 0) { writeDataDirPref(legacy); app.relaunch(); app.exit(0); return; }
-      }
-    }
-
     // 上次用过的端口优先（哪怕是被占用后自动挪过位的），地址才稳定
     const pref = readPortPref() || DEFAULT_PORT;
     let err = null;
@@ -746,6 +888,10 @@ if (!app.requestSingleInstanceLock()) {
     buildMenu();
     createHostWindow();
     setupAutoUpdater();
+
+    // 首次使用引导：先让界面正常起来，再温和地弹一次数据目录引导（不阻塞、可关、关了不再弹）。
+    // 不做任何文件系统扫描 —— 用户想沿用旧数据，自己知道它在哪里。
+    if (!readDataDirPref() && !readGuideDismissed()) openDataDirGuide();
 
     app.on('activate', () => { ensureHostWindow(); });
   });
