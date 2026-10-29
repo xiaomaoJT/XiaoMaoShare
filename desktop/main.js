@@ -846,18 +846,19 @@ const UPD_HTML = `<!doctype html><meta charset="utf-8"><title>检查更新</titl
 function __upd(s){
   var t=document.getElementById('t'),d=document.getElementById('d'),
       ico=document.getElementById('ico'),bar=document.getElementById('bar'),fill=document.getElementById('fill');
-  function mb(n){return (n/1048576).toFixed(1);}
+  function mb(n){return Number.isFinite(n)?(n/1048576).toFixed(1):null;}
   if(s.state==='checking'){
     ico.className='spin';ico.textContent='';bar.hidden=true;
     t.textContent='正在检查更新…';d.textContent='连接更新服务器，请稍候';
   }else if(s.state==='downloading'){
     ico.className='spin';ico.textContent='';bar.hidden=false;
-    var p=Math.max(0,Math.min(100,s.extra.percent||0));
+    var p=Math.max(0,Math.min(100,Number.isFinite(s.extra.percent)?s.extra.percent:0));
     t.textContent='正在下载新版本 v'+(s.extra.version||'')+' · '+p.toFixed(0)+'%';
     fill.style.width=p+'%';
     var bits=[];
-    if(s.extra.speed) bits.push(mb(s.extra.speed)+' MB/s');
-    if(s.extra.total) bits.push(mb(s.extra.transferred)+' / '+mb(s.extra.total)+' MB');
+    var spd=mb(s.extra.speed), got=mb(s.extra.transferred), tot=mb(s.extra.total);
+    if(spd) bits.push(spd+' MB/s');
+    if(got&&tot) bits.push(got+' / '+tot+' MB');
     d.textContent=bits.join(' · ')||'正在后台下载，完成后会询问是否安装';
   }else if(s.state==='latest'){
     ico.className='ok';ico.textContent='✓';bar.hidden=true;
@@ -948,7 +949,7 @@ function setupAutoUpdater() {
       version: updVersion,
       percent: p.percent,
       speed: p.bytesPerSecond,
-      transferred: p.transfered, // electron-updater 的拼写就是少个 r
+      transferred: p.transferred,
       total: p.total,
     });
   });
