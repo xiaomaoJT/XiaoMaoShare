@@ -12,7 +12,7 @@
  * 关掉界面不影响手机连进来。
  */
 
-const { app, BrowserWindow, ipcMain, Menu, shell, clipboard, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, shell, clipboard, dialog, nativeImage } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const { once } = require('node:events');
@@ -311,6 +311,18 @@ ipcMain.handle('host:copy', (_e, text) => {
   return { ok: true };
 });
 
+// 页面传 PNG 的 dataURL 过来，主进程写进系统剪贴板 —— 微信 / QQ 输入框直接粘贴
+ipcMain.handle('host:copyImage', (_e, dataUrl) => {
+  try {
+    const img = nativeImage.createFromDataURL(String(dataUrl || ''));
+    if (img.isEmpty()) return { error: '图片数据为空' };
+    clipboard.writeImage(img);
+    return { ok: true };
+  } catch (e) {
+    return { error: (e && e.message) || '复制失败' };
+  }
+});
+
 /** 前端点「连接」时想先挑一下最近连过的，这个开关由主进程控制窗口 */
 ipcMain.handle('link:forget', (_e, url) => {
   const list = readRecent().filter((x) => x !== url);
@@ -400,6 +412,19 @@ function buildMenu() {
         {
           label: '检查更新…',
           click: () => checkForUpdatesManually(),
+        },
+        {
+          label: '自动下载更新',
+          type: 'checkbox',
+          checked: readAutoDownloadPref(),
+          visible: app.isPackaged && !PORTABLE_ROOT, // 开发模式 / 免安装版没有更新器，不显示
+          click: (item) => {
+            writeAutoDownloadPref(item.checked);
+            try {
+              const { autoUpdater } = require('electron-updater');
+              autoUpdater.autoDownload = item.checked; // 立即生效，不用重启
+            } catch { /* 没装更新器就算了 */ }
+          },
         },
         { type: 'separator' },
         { role: IS_MAC ? 'close' : 'quit', label: IS_MAC ? '关闭窗口（服务继续）' : '退出' },
@@ -583,6 +608,23 @@ function writeGuideDismissed() {
     let s = {};
     try { s = JSON.parse(fs.readFileSync(SETTINGS_FILE(), 'utf8')) || {}; } catch { /* 覆盖就好 */ }
     s.dataDirGuideDismissed = true;
+    fs.writeFileSync(SETTINGS_FILE(), JSON.stringify(s, null, 2));
+  } catch { /* 写不了就算了 */ }
+}
+
+/** 「自动下载更新」偏好：默认开；关掉后只提示有新版，下载与否由用户决定 */
+function readAutoDownloadPref() {
+  try {
+    const s = JSON.parse(fs.readFileSync(SETTINGS_FILE(), 'utf8'));
+    return !(s && s.autoDownload === false);
+  } catch { return true; }
+}
+
+function writeAutoDownloadPref(on) {
+  try {
+    let s = {};
+    try { s = JSON.parse(fs.readFileSync(SETTINGS_FILE(), 'utf8')) || {}; } catch { /* 覆盖就好 */ }
+    s.autoDownload = !!on;
     fs.writeFileSync(SETTINGS_FILE(), JSON.stringify(s, null, 2));
   } catch { /* 写不了就算了 */ }
 }
@@ -866,15 +908,36 @@ function setupAutoUpdater() {
   let autoUpdater;
   try { ({ autoUpdater } = require('electron-updater')); } catch { return; }
 
-  autoUpdater.autoDownload = true;
+  autoUpdater.autoDownload = readAutoDownloadPref();
   autoUpdater.allowPrerelease = false;
 
-  // 不管静默还是手动检查，发现新版都用同一个状态小窗：非模态、可关，下载照常进行
+  // 发现新版：开了自动下载 → 状态小窗直接切进度条；
+  // 关了 → 问一句要不要现在下载（下载与否完全由用户决定）
   autoUpdater.on('update-available', (info) => {
     manualCheck = false;
     updChecking = false;
     updVersion = info.version;
-    updShow('downloading', { version: info.version, percent: 0 });
+    if (readAutoDownloadPref()) {
+      updShow('downloading', { version: info.version, percent: 0 });
+      return;
+    }
+    dialog.showMessageBox({
+      type: 'info',
+      title: '发现新版本',
+      message: `新版本 ${info.version} 可用（当前 v${app.getVersion()}）`,
+      detail: '已关闭自动下载：可以立即下载，或到发布页手动获取安装包。',
+      buttons: ['立即下载', '打开发布页', '暂不更新'],
+      defaultId: 0,
+      cancelId: 2,
+      noLink: true,
+    }).then(({ response }) => {
+      if (response === 0) {
+        updShow('downloading', { version: info.version, percent: 0 });
+        autoUpdater.downloadUpdate().catch(() => { updClose(); });
+      } else if (response === 1) {
+        shell.openExternal(RELEASES_URL);
+      }
+    });
   });
 
   autoUpdater.on('download-progress', (p) => {
@@ -903,9 +966,9 @@ function setupAutoUpdater() {
       noLink: true,
     });
     if (response !== 0) return;
-    // 走一遍优雅退出（放掉端口）再交给安装器
+    // 走一遍优雅退出（放掉端口）再交给安装器；isForceRunAfter 让它装完自动拉起新版
     quitting = true;
-    server.stopServer().finally(() => autoUpdater.quitAndInstall());
+    server.stopServer().finally(() => autoUpdater.quitAndInstall(false, true));
   });
 
   autoUpdater.on('error', (e) => {
