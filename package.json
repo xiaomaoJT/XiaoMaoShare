@@ -16,6 +16,7 @@
   "devDependencies": {
     "electron": "^45.1.0",
     "electron-builder": "^26.18.0",
+    "jimp": "^0.22.12",
     "png-to-ico": "^3.0.2"
   },
   "build": {
@@ -45,7 +46,10 @@
       "identity": null
     },
     "win": {
-      "target": ["nsis", "portable"],
+      "target": [
+        "nsis",
+        "portable"
+      ],
       "icon": "build/icon.ico"
     },
     "portable": {

@@ -479,7 +479,14 @@ function writePortPref(port) {
 function askPort(current) {
   return new Promise((resolve) => {
     let done = false;
-    const finish = (v) => { if (!done) { done = true; resolve(v); w.close(); } };
+    // 收尾必须判存活：点「取消」/关窗时 'closed' 已触发、窗口已销毁，
+    // 这时再 w.close() 会抛 "Object has been destroyed"
+    const finish = (v) => {
+      if (done) return;
+      done = true;
+      resolve(v);
+      if (!w.isDestroyed()) w.close();
+    };
 
     const w = new BrowserWindow({
       width: 380,
