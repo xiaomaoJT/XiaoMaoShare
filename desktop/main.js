@@ -12,7 +12,7 @@
  * 关掉界面不影响手机连进来。
  */
 
-const { app, BrowserWindow, ipcMain, Menu, shell, clipboard, dialog, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, shell, clipboard, dialog, nativeImage, screen } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const { once } = require('node:events');
@@ -109,10 +109,42 @@ function isSelf(rawUrl) {
 
 /* ------------------------------------------------------------ 窗口 */
 
+/** 读整个 settings.json（各偏好共用一个文件） */
+function readSettings() {
+  try { return JSON.parse(fs.readFileSync(SETTINGS_FILE(), 'utf8')) || {}; } catch { return {}; }
+}
+
+/** 合并写几个键，其余键保持不动 */
+function updateSettings(patch) {
+  try {
+    const s = { ...readSettings(), ...patch };
+    fs.writeFileSync(SETTINGS_FILE(), JSON.stringify(s, null, 2));
+  } catch { /* 写不了就算了 */ }
+}
+
+/**
+ * 校验保存下来的窗口几何：数值要齐全，且至少 1/4 面积落在某块屏幕的工作区内。
+ * 防两种坏数据：手改坏 settings.json；拔掉外接显示器后窗口还原到屏幕外。
+ */
+function validWindowBounds(b) {
+  if (!b || ![b.x, b.y, b.width, b.height].every(Number.isFinite)) return null;
+  if (b.width < 400 || b.height < 300) return null;
+  try {
+    const work = screen.getDisplayMatching(b).workArea;
+    const ix = Math.max(0, Math.min(b.x + b.width, work.x + work.width) - Math.max(b.x, work.x));
+    const iy = Math.max(0, Math.min(b.y + b.height, work.y + work.height) - Math.max(b.y, work.y));
+    return ix * iy >= (b.width * b.height) / 4 ? b : null;
+  } catch { return null; }
+}
+
 function createHostWindow() {
+  // 恢复上次的大小与位置；最大化状态单独记，还原态的几何始终保留一份
+  const saved = validWindowBounds(readSettings().windowBounds);
+  const bounds = saved ? { x: saved.x, y: saved.y, width: saved.width, height: saved.height }
+                       : { width: 1120, height: 840 };
+
   hostWin = new BrowserWindow({
-    width: 1120,
-    height: 840,
+    ...bounds,
     minWidth: 640,
     minHeight: 520,
     title: 'XiaoMao 互传',
@@ -129,8 +161,31 @@ function createHostWindow() {
     },
   });
 
+  if (saved && saved.isMaximized) hostWin.maximize();
+
   hostWin.once('ready-to-show', () => hostWin.show());
   hostWin.loadURL(hostInfo.hostUrl);
+
+  // 记住窗口大小与位置：拖动/缩放中只更新内存里的还原态，防抖 400ms 落盘；
+  // 最大化、全屏、最小化时的瞬时几何不记录，还原态始终是上一次「正常」的样子
+  let lastNormal = saved ? { x: saved.x, y: saved.y, width: saved.width, height: saved.height } : null;
+  let boundsTimer = null;
+  const captureNormal = () => {
+    if (!hostWin || hostWin.isDestroyed()) return;
+    if (hostWin.isMinimized() || hostWin.isMaximized() || hostWin.isFullScreen()) return;
+    lastNormal = hostWin.getBounds();
+  };
+  const saveBounds = (final) => {
+    captureNormal();
+    clearTimeout(boundsTimer);
+    if (!final) { boundsTimer = setTimeout(saveBounds, 400); return; }
+    if (lastNormal && hostWin && !hostWin.isDestroyed()) {
+      updateSettings({ windowBounds: { ...lastNormal, isMaximized: hostWin.isMaximized() } });
+    }
+  };
+  hostWin.on('resize', () => saveBounds(false));
+  hostWin.on('move', () => saveBounds(false));
+  hostWin.on('close', () => saveBounds(true));
 
   // 页面里想开新窗口（外链）一律交给系统浏览器，别在应用里长出一堆窗口
   hostWin.webContents.setWindowOpenHandler(({ url }) => {
@@ -604,29 +659,17 @@ function readGuideDismissed() {
 }
 
 function writeGuideDismissed() {
-  try {
-    let s = {};
-    try { s = JSON.parse(fs.readFileSync(SETTINGS_FILE(), 'utf8')) || {}; } catch { /* 覆盖就好 */ }
-    s.dataDirGuideDismissed = true;
-    fs.writeFileSync(SETTINGS_FILE(), JSON.stringify(s, null, 2));
-  } catch { /* 写不了就算了 */ }
+  updateSettings({ dataDirGuideDismissed: true });
 }
 
 /** 「自动下载更新」偏好：默认开；关掉后只提示有新版，下载与否由用户决定 */
 function readAutoDownloadPref() {
-  try {
-    const s = JSON.parse(fs.readFileSync(SETTINGS_FILE(), 'utf8'));
-    return !(s && s.autoDownload === false);
-  } catch { return true; }
+  const s = readSettings();
+  return !(s && s.autoDownload === false);
 }
 
 function writeAutoDownloadPref(on) {
-  try {
-    let s = {};
-    try { s = JSON.parse(fs.readFileSync(SETTINGS_FILE(), 'utf8')) || {}; } catch { /* 覆盖就好 */ }
-    s.autoDownload = !!on;
-    fs.writeFileSync(SETTINGS_FILE(), JSON.stringify(s, null, 2));
-  } catch { /* 写不了就算了 */ }
+  updateSettings({ autoDownload: !!on });
 }
 
 function dataDirStatus(dir) {
