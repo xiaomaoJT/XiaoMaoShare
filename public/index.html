@@ -1675,6 +1675,7 @@
   }
   .tool:hover{background:var(--card-2);color:var(--text)}
   .tool.on{background:var(--accent-soft);color:var(--accent);border-color:rgba(76,110,245,.3)}
+  .tool.ur svg{width:15px;height:15px;display:block}
   .tool i{font-style:normal;font-weight:800;font-size:11.5px;letter-spacing:.2px}
   .tool.mono i{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:10.5px}
   .tool.emoji span{font-size:15px;line-height:1}
@@ -2132,6 +2133,12 @@
       <div class="mdp" id="mdp"></div>
       <div class="mtools-wrap" id="mtoolsWrap">
         <div class="mtools" id="mtools">
+          <button type="button" class="tool ur" data-tool="undo" id="undoBtn" title="回退上一步（Ctrl+Z）" disabled>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg>
+          </button>
+          <button type="button" class="tool ur" data-tool="redo" id="redoBtn" title="恢复下一步（Ctrl+Shift+Z）" disabled>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 14 20 9 15 4"/><path d="M4 20v-7a4 4 0 0 1 4-4h12"/></svg>
+          </button>
           <button type="button" class="tool emoji" data-tool="emoji" title="插入表情"><span>😊</span></button>
           <button type="button" class="tool fmt-btn" data-tool="fmt" title="更多格式">
             <i>Aa</i><span>格式</span>
@@ -2167,6 +2174,10 @@
           <span class="pick-label">文件 / 图片</span>
         </button>
         <input type="file" id="file" multiple hidden>
+        <button class="btn ghost" id="clearAll" type="button" hidden title="清空输入区（可撤销）">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+          <span class="pick-label">清空</span>
+        </button>
         <span class="hint" id="hint">拖拽文件到页面 · 可直接粘贴截图</span>
         <span class="len-chip" id="lenChip" hidden></span>
         <button class="btn primary" id="send" disabled>发送</button>
@@ -5941,6 +5952,12 @@
     ta.addEventListener('input', function () { autoGrowEl(ta); syncSend(); });
     ta.addEventListener('focus', function () { lastText = b; });
     ta.addEventListener('keydown', function (e) {
+      if ((e.metaKey || e.ctrlKey) && !e.altKey) {
+        var k = (e.key || '').toLowerCase();
+        // 输入区的回退/恢复是跨块的（含删块、附件、清空），接管浏览器默认的单框撤销
+        if (k === 'z' && !e.shiftKey) { e.preventDefault(); composerUndo(); return; }
+        if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); composerRedo(); return; }
+      }
       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); sendAll(); return; }
 
       var atStart = ta.selectionStart === 0 && ta.selectionEnd === 0;
@@ -6231,6 +6248,115 @@
     });
   }
 
+  /* ---- 输入区快照：清空可反悔，编辑步骤可回退 / 恢复 ----
+     快照只记两样：文字块的字符串、附件块的对象引用（File/fid 不可变，恢复时复用）。
+     打字用防抖合并成一个步骤；删块 / 加附件 / 清空 / 发送也会走 syncSend，进同一条链。 */
+  var undoStack = [], redoStack = [];
+  var snapTimer = null, snapLock = false;
+
+  function serializeCompose() {
+    return compose.map(function (b) {
+      return b.type === 'text' ? { t: 'text', v: b.el.value } : { t: 'media', ref: b };
+    });
+  }
+
+  function snapEquals(a, b) {
+    if (a === b) return true;
+    if (!a || !b || a.length !== b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i].t !== b[i].t) return false;
+      if (a[i].t === 'text' ? a[i].v !== b[i].v : a[i].ref !== b[i].ref) return false;
+    }
+    return true;
+  }
+
+  function scheduleSnapshot() {
+    if (snapLock) return;
+    clearTimeout(snapTimer);
+    snapTimer = setTimeout(flushSnapshot, 550);
+  }
+
+  function flushSnapshot() {
+    clearTimeout(snapTimer);
+    if (snapLock) return;
+    var cur = serializeCompose();
+    if (snapEquals(undoStack[undoStack.length - 1], cur)) return;
+    if (!undoStack.length) undoStack.push([]); // 基线：初始空输入区
+    undoStack.push(cur);
+    if (undoStack.length > 60) undoStack.shift();
+    redoStack.length = 0;
+    paintUndoRedo();
+  }
+
+  function applySnapshot(snap) {
+    snapLock = true;
+    compose.slice().forEach(function (b) {
+      if (b.el && b.el.parentNode) b.el.parentNode.removeChild(b.el);
+    });
+    compose.length = 0;
+    lastText = null;
+    snap.forEach(function (e) {
+      if (e.t === 'text') {
+        var b = newTextBlock();
+        b.el.value = e.v;
+        compose.push(b);
+        blocksEl.appendChild(b.el);
+        autoGrowEl(b.el);
+        if (!lastText) lastText = b;
+      } else {
+        var m = e.ref;
+        // 快照期间块可能被删过、预览 URL 已被回收，恢复时补建一个
+        if (m.kind === 'image' && m.file && !m.preview) {
+          try { m.preview = URL.createObjectURL(m.file); } catch (err) {}
+          var img = m.el && m.el.querySelector ? m.el.querySelector('img.blk-thumb') : null;
+          if (img && m.preview) img.src = m.preview;
+        }
+        compose.push(m);
+        if (m.el) blocksEl.appendChild(m.el);
+      }
+    });
+    if (!compose.some(function (b) { return b.type === 'text'; })) addTextBlock(false);
+    refreshPlaceholders();
+    syncSend();
+    if (previewOn) renderPreview();
+    snapLock = false;
+  }
+
+  function composerUndo() {
+    flushSnapshot();
+    if (undoStack.length < 2) return;
+    redoStack.push(undoStack.pop());
+    applySnapshot(undoStack[undoStack.length - 1]);
+    paintUndoRedo();
+  }
+
+  function composerRedo() {
+    if (!redoStack.length) return;
+    var nxt = redoStack.pop();
+    undoStack.push(nxt);
+    applySnapshot(nxt);
+    paintUndoRedo();
+  }
+
+  function paintUndoRedo() {
+    var u = $('undoBtn'), r = $('redoBtn');
+    if (u) u.disabled = undoStack.length < 2;
+    if (r) r.disabled = !redoStack.length;
+  }
+
+  /** 一键清空（可撤销）：先定格当前状态，清完靠「回退」就能整体找回 */
+  function clearDraft() {
+    if (!hasContent()) return;
+    flushSnapshot();
+    compose.slice().forEach(dropBlock);
+    addTextBlock(true);
+    refreshPlaceholders();
+    syncSend();
+    if (previewOn) renderPreview();
+    toast('输入区已清空，可点「回退」找回');
+  }
+  $('clearAll').addEventListener('click', clearDraft);
+
   /* ---- 文字长度：一律按 UTF-8 字节算 ----
      之前服务端按「字符数」限量，中文一个字 3 字节，1.7 万字就超了；
      而超限时它直接掐连接，浏览器只收到一个没有正文的 Failed to fetch。 */
@@ -6331,6 +6457,11 @@
       hintEl.hidden = false;
       hintEl.textContent = '拖拽文件到页面 · 可直接粘贴截图';
     }
+
+    var clearBtn = $('clearAll');
+    if (clearBtn) clearBtn.hidden = !hasContent();
+    scheduleSnapshot();
+    paintUndoRedo();
   }
 
   function resetCompose() {
@@ -6657,6 +6788,8 @@
     if (name === 'fmt') { toggleFmt(); return; }
     if (name === 'preview') { togglePreview(); return; }
     if (name === 'tomd') { sendAsMarkdown(); return; }
+    if (name === 'undo') { composerUndo(); return; }
+    if (name === 'redo') { composerRedo(); return; }
 
     if (name === 'hr') {
       b = textTarget(); v = b.el.value;
