@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>XiaoMao 互传</title>
+<style>
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: #f2f4f7;
+    display: flex; align-items: center; justify-content: center;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                 "Microsoft YaHei", "Hiragino Sans GB", sans-serif;
+    color: #14171c;
+    -webkit-app-region: drag; /* 允许在启动页上拖动窗口 */
+    user-select: none;
+  }
+  .wrap { display: flex; flex-direction: column; align-items: center; gap: 18px; }
+  .mark {
+    width: 72px; height: 72px; border-radius: 20px;
+    background: linear-gradient(135deg, #4c6ef5 0%, #5b8def 45%, #e8562f 130%);
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 10px 30px -10px rgba(76,110,245,.55);
+  }
+  .mark span { color: #fff; font-size: 34px; font-weight: 800; letter-spacing: 1px; }
+  .name { font-size: 17px; font-weight: 700; letter-spacing: .5px; }
+  .tip { font-size: 13px; color: #6b7484; }
+  .spin {
+    width: 26px; height: 26px; border-radius: 50%;
+    border: 3px solid #d7dded; border-top-color: #4c6ef5;
+    animation: sp 0.8s linear infinite;
+  }
+  @keyframes sp { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="mark"><span>帽</span></div>
+    <div class="name">XiaoMao 互传</div>
+    <div class="spin"></div>
+    <div class="tip">正在启动…</div>
+  </div>
+</body>
+</html>

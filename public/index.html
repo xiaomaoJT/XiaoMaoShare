@@ -15,6 +15,22 @@
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   [hidden]{display:none!important}
 
+  /* ---------------- 启动遮罩：页面首屏先盖一层，避免加载时露白/闪动 ---------------- */
+  @keyframes bootSpin{to{transform:rotate(360deg)}}
+  #boot{position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;
+        background:#f2f4f7;transition:opacity .25s ease}
+  #boot.hide{opacity:0;pointer-events:none}
+  #boot .boot-in{display:flex;flex-direction:column;align-items:center;gap:18px}
+  #boot .boot-mark{width:72px;height:72px;border-radius:20px;
+        background:linear-gradient(135deg,#4c6ef5 0%,#5b8def 45%,#e8562f 130%);
+        display:flex;align-items:center;justify-content:center;
+        box-shadow:0 10px 30px -10px rgba(76,110,245,.55)}
+  #boot .boot-mark span{color:#fff;font-size:34px;font-weight:800;letter-spacing:1px}
+  #boot .boot-name{font-size:17px;font-weight:700;letter-spacing:.5px;color:#14171c}
+  #boot .boot-spin{width:26px;height:26px;border-radius:50%;border:3px solid #d7dded;
+        border-top-color:#4c6ef5;animation:bootSpin .8s linear infinite}
+  #boot .boot-tip{font-size:13px;color:#6b7484}
+
   /* ---------------- 主题变量 ---------------- */
   :root{
     --bg:#f2f4f7;
@@ -2100,6 +2116,26 @@
 </style>
 </head>
 <body>
+
+<div id="boot" aria-hidden="true">
+  <div class="boot-in">
+    <div class="boot-mark"><span>帽</span></div>
+    <div class="boot-name">XiaoMao 互传</div>
+    <div class="boot-spin"></div>
+    <div class="boot-tip">正在加载…</div>
+  </div>
+</div>
+<script>
+  /* 启动遮罩：首屏先盖住，DOM 就绪（即主脚本执行完、界面已渲染）后淡出移除；
+     另设 4s 兜底，万一主脚本异常也不会卡在启动页。 */
+  (function () {
+    var b = document.getElementById('boot'); if (!b) return;
+    var done = function () { if (!b) return; b.classList.add('hide'); setTimeout(function () { if (b) b.remove(); }, 280); };
+    if (document.readyState === 'complete' || document.readyState === 'interactive') done();
+    else window.addEventListener('DOMContentLoaded', done, { once: true });
+    setTimeout(done, 4000);
+  })();
+</script>
 
 <header class="top">
   <div class="top-in">

@@ -109,6 +109,9 @@ function isSelf(rawUrl) {
 
 /* ------------------------------------------------------------ 窗口 */
 
+/** 启动页：双击后立刻显示，不依赖本地服务器是否已起好 */
+const SPLASH = path.join(__dirname, 'splash.html');
+
 /** 读整个 settings.json（各偏好共用一个文件） */
 function readSettings() {
   try { return JSON.parse(fs.readFileSync(SETTINGS_FILE(), 'utf8')) || {}; } catch { return {}; }
@@ -163,8 +166,10 @@ function createHostWindow() {
 
   if (saved && saved.isMaximized) hostWin.maximize();
 
-  hostWin.once('ready-to-show', () => hostWin.show());
-  hostWin.loadURL(hostInfo.hostUrl);
+  // 先显示启动页（不依赖本地服务器，双击后立即有反馈），服务就绪后再换真实页
+  hostWin.loadFile(SPLASH);
+  hostWin.show();
+  if (hostInfo) hostWin.loadURL(hostInfo.hostUrl); // 窗口重建时服务已在跑，直接进真实页
 
   // 记住窗口大小与位置：拖动/缩放中只更新内存里的还原态，防抖 400ms 落盘；
   // 最大化、全屏、最小化时的瞬时几何不记录，还原态始终是上一次「正常」的样子
@@ -1090,6 +1095,11 @@ if (!app.requestSingleInstanceLock()) {
     // 上次用过的端口优先（哪怕是被占用后自动挪过位的），地址才稳定
     const pref = readPortPref() || DEFAULT_PORT;
     let err = null;
+
+    // 1. 窗口与启动页立刻出现 —— 双击就有反馈，不必干等本地服务拉起
+    createHostWindow();
+
+    // 2. 后台把本地服务拉起来（启动页已先显示，这段时间用户看到的是加载动画）
     try {
       hostInfo = await server.startServer({ port: pref });
     } catch (e) {
@@ -1117,7 +1127,7 @@ if (!app.requestSingleInstanceLock()) {
 
     writePortPref(hostInfo.port); // 记住实际跑起来的端口（可能因占用偏移过）
     buildMenu();
-    createHostWindow();
+    hostWin.loadURL(hostInfo.hostUrl);  // 服务已就绪，无缝切到真实界面（页面内还有加载遮罩兜底）
     setupAutoUpdater();
 
     // 首次使用引导：先让界面正常起来，再温和地弹一次数据目录引导（不阻塞、可关、关了不再弹）。
