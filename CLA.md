@@ -2,7 +2,7 @@
 
 **版本 1.0**　·　生效日期：2026-10-29　·　协议语言：中文（以中文版本为准）
 
-项目维护者 / 著作权人：**XiaoMaoShare 项目著作权人**（GitHub: [@xiaomaoJT](https://github.com/xiaomaoJT)）
+项目维护者 / 著作权人：**XiaoMaoShare 项目著作权人**（GitHub [@xiaomaoJT](https://github.com/xiaomaoJT)）
 适用项目：**XiaoMao 互传 / XiaoMaoShare** — https://github.com/xiaomaoJT/XiaoMaoShare
 
 ---
@@ -26,7 +26,7 @@
 
 - **"贡献"**：你有意提交给本项目的任何内容，包括通过 Pull Request、补丁、Issue 中的代码片段、代码评审建议等方式提交的源代码、文档、配置、图像或其他作品。
 - **"项目"**：XiaoMao 互传 / XiaoMaoShare 仓库及其所有衍生仓库。
-- **"维护者"**：XiaoMaoShare 项目著作权人，以及其以书面方式指定的项目继受人。
+- **"维护者"**：XiaoMaoShare 项目著作权人（GitHub [@xiaomaoJT](https://github.com/xiaomaoJT)），以及其以书面方式指定的项目继受人。
 - **"你"**：签署本协议的自然人或法人实体。
 
 ## 2. 著作权许可

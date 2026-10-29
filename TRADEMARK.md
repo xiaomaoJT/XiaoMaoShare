@@ -2,7 +2,7 @@
 
 本文件说明本项目的名称标识使用规则。**它不属于 [LICENSE](LICENSE)（MIT）的组成部分，也不受 MIT 约束**——MIT 只许可著作权，商标权始终由著作权人保留。
 
-著作权人：XiaoMaoShare 项目著作权人（GitHub: [@xiaomaoJT](https://github.com/xiaomaoJT)）
+著作权人：XiaoMaoShare 项目著作权人（GitHub [@xiaomaoJT](https://github.com/xiaomaoJT)）
 
 ---
 
