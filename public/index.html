@@ -2268,6 +2268,9 @@
     <span class="lb-zoom" id="lbZoom">100%</span>
     <button class="lb-act" id="lbZoomIn" title="放大 (+)" aria-label="放大">+</button>
     <span class="lb-sep"></span>
+    <button class="lb-act" id="lbCopy" title="复制图片，聊天窗口直接粘贴" aria-label="复制图片">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+    </button>
     <button class="lb-act" id="lbDl" title="下载这张" aria-label="下载">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v10m0 0l-4-4m4 4l4-4"/><path d="M5 19h14"/></svg>
     </button>
@@ -5281,6 +5284,56 @@
     try { document.execCommand('copy'); toast(okMsg || '已复制'); }
     catch (e) { toast('复制失败，请长按选择'); }
     ta.remove();
+  }
+
+  /* ---- 复制图片到系统剪贴板 ----
+     剪贴板只普遍认 image/png，别的格式先在 canvas 里转一道。
+     桌面壳走主进程（http 下浏览器没有剪贴板 API）；纯浏览器只有安全上下文可用，
+     不行就如实告诉用户去用下载 —— 不假装成功。 */
+  function fetchPngBlob(src) {
+    return fetch(src).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.blob();
+    }).then(function (b) {
+      if (b.type === 'image/png') return b;
+      return new Promise(function (res, rej) {
+        var u = URL.createObjectURL(b), im = new Image();
+        im.onload = function () {
+          try {
+            var c = document.createElement('canvas');
+            c.width = im.naturalWidth; c.height = im.naturalHeight;
+            c.getContext('2d').drawImage(im, 0, 0);
+            c.toBlob(function (x) {
+              URL.revokeObjectURL(u);
+              x ? res(x) : rej(new Error('转 PNG 失败'));
+            }, 'image/png');
+          } catch (e) { URL.revokeObjectURL(u); rej(e); }
+        };
+        im.onerror = function () { URL.revokeObjectURL(u); rej(new Error('图片解码失败')); };
+        im.src = u;
+      });
+    });
+  }
+
+  async function copyImage(src) {
+    try {
+      var blob = await fetchPngBlob(src);
+      if (window.xmDesktop && window.xmDesktop.copyImage) {
+        var durl = await new Promise(function (res, rej) {
+          var fr = new FileReader();
+          fr.onload = function () { res(fr.result); };
+          fr.onerror = function () { rej(new Error('读取失败')); };
+          fr.readAsDataURL(blob);
+        });
+        var r = await window.xmDesktop.copyImage(durl);
+        return !!(r && r.ok);
+      }
+      if (navigator.clipboard && window.isSecureContext && window.ClipboardItem) {
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+        return true;
+      }
+    } catch (e) { /* 落到失败提示 */ }
+    return false;
   }
 
   /** 已读回执：同一条消息只上报一次、且上报设备不算发送者本人 */
@@ -8854,6 +8907,11 @@
   $('lbNext').onclick = function () { navLb(1); };
   $('lbZoomIn').onclick = function () { var c = lbCenter(); zoomAt(scale * 1.4, c[0], c[1]); };
   $('lbZoomOut').onclick = function () { var c = lbCenter(); zoomAt(scale / 1.4, c[0], c[1]); };
+  $('lbCopy').onclick = async function () {
+    var g = lbList[lbIndex]; if (!g) return;
+    var ok = await copyImage(g.src);
+    toast(ok ? '图片已复制，聊天窗口直接粘贴' : '当前环境不支持复制图片，请用「下载」');
+  };
   $('lbDl').onclick = function () {
     var g = lbList[lbIndex]; if (!g) return;
     var a = document.createElement('a'); a.href = g.src; a.download = g.name || 'image';

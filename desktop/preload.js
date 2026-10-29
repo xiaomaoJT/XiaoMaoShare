@@ -34,6 +34,9 @@ contextBridge.exposeInMainWorld('xmDesktop', {
   /** 复制到系统剪贴板（页面在 http 下也能用 navigator.clipboard，但桌面里更稳） */
   copy: (text) => ipcRenderer.invoke('host:copy', text),
 
+  /** 复制图片到系统剪贴板：传 PNG 的 dataURL，聊天软件里直接粘贴（浏览器 http 下没有剪贴板 API，桌面独占） */
+  copyImage: (dataUrl) => ipcRenderer.invoke('host:copyImage', dataUrl),
+
   onLinks: (fn) => { if (typeof fn === 'function') listeners.links.push(fn); },
   onOpenConnect: (fn) => { if (typeof fn === 'function') listeners.openConnect.push(fn); },
 });
