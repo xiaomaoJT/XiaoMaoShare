@@ -772,6 +772,95 @@ function openDataDirGuide() {
 const RELEASES_URL = 'https://github.com/xiaomaoJT/XiaoMaoShare/releases/latest';
 let manualCheck = false; // 手动检查时才把失败细节弹给用户，静默检查失败不打扰
 
+/* ---- 更新状态小窗：检查/下载进度即时可见 ----
+   原生 dialog 做不了进度显示，还会阻塞；这个小窗非模态、随手可关，
+   点「检查更新」立刻出现（转圈），发现新版切成实时进度条，已是最新则打勾自动关闭。 */
+let updWin = null;
+let updState = null;       // 最近一次要渲染的状态，页面加载完补渲染
+let updVersion = '';       // update-available 与 download-progress 事件间传递版本号
+let updLastPaint = 0;      // 进度事件限频，~4 次/秒足够
+let updChecking = false;   // 防抖：检查进行中再点菜单不重复发起
+
+const UPD_HTML = `<!doctype html><meta charset="utf-8"><title>检查更新</title>
+<style>
+  body{margin:0;font:13px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;
+       color:#3d4450;background:#f4f6f9;display:flex;align-items:center;height:100vh;user-select:none}
+  .row{display:flex;align-items:center;gap:12px;width:300px;margin:0 auto}
+  .spin{width:20px;height:20px;border:3px solid #d4d9e2;border-top-color:#4c6ef5;border-radius:50%;
+        animation:s .8s linear infinite;flex:none;box-sizing:border-box}
+  @keyframes s{to{transform:rotate(360deg)}}
+  .ok{width:20px;height:20px;flex:none;color:#1a7f37;font-size:16px;font-weight:700;text-align:center;line-height:20px}
+  b{display:block;font-size:13.5px}
+  span{color:#6b7280;font-size:12px}
+  .bar{height:6px;border-radius:3px;background:#d8dee4;margin-top:6px;overflow:hidden}
+  .bar i{display:block;height:100%;width:0;background:#4c6ef5;border-radius:3px;transition:width .25s}
+</style>
+<div class="row">
+  <div class="spin" id="ico"></div>
+  <div style="flex:1"><b id="t">正在检查更新…</b><span id="d">连接更新服务器，请稍候</span>
+  <div class="bar" id="bar" hidden><i id="fill"></i></div></div>
+</div>
+<script>
+function __upd(s){
+  var t=document.getElementById('t'),d=document.getElementById('d'),
+      ico=document.getElementById('ico'),bar=document.getElementById('bar'),fill=document.getElementById('fill');
+  function mb(n){return (n/1048576).toFixed(1);}
+  if(s.state==='checking'){
+    ico.className='spin';ico.textContent='';bar.hidden=true;
+    t.textContent='正在检查更新…';d.textContent='连接更新服务器，请稍候';
+  }else if(s.state==='downloading'){
+    ico.className='spin';ico.textContent='';bar.hidden=false;
+    var p=Math.max(0,Math.min(100,s.extra.percent||0));
+    t.textContent='正在下载新版本 v'+(s.extra.version||'')+' · '+p.toFixed(0)+'%';
+    fill.style.width=p+'%';
+    var bits=[];
+    if(s.extra.speed) bits.push(mb(s.extra.speed)+' MB/s');
+    if(s.extra.total) bits.push(mb(s.extra.transferred)+' / '+mb(s.extra.total)+' MB');
+    d.textContent=bits.join(' · ')||'正在后台下载，完成后会询问是否安装';
+  }else if(s.state==='latest'){
+    ico.className='ok';ico.textContent='✓';bar.hidden=true;
+    t.textContent='已是最新版本';d.textContent='当前 v'+(s.extra.version||'')+'，暂无更新';
+  }
+}
+</script>`;
+
+function updRender() {
+  if (!updWin || updWin.isDestroyed() || !updState) return;
+  updWin.webContents.executeJavaScript('window.__upd(' + JSON.stringify(updState) + ')').catch(() => {});
+}
+
+function updShow(state, extra) {
+  updState = { state, extra: extra || {} };
+  if (!updWin || updWin.isDestroyed()) {
+    updWin = new BrowserWindow({
+      width: 380,
+      height: 128,
+      title: '检查更新',
+      resizable: false,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      skipTaskbar: true,
+      show: false,
+      backgroundColor: '#f4f6f9',
+      webPreferences: { contextIsolation: true, nodeIntegration: false },
+    });
+    updWin.setMenuBarVisibility(false);
+    updWin.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(UPD_HTML));
+    updWin.webContents.on('did-finish-load', updRender);
+    updWin.once('ready-to-show', () => { if (updWin && !updWin.isDestroyed()) updWin.show(); });
+    updWin.on('closed', () => { updWin = null; });
+  } else {
+    if (!updWin.isVisible()) updWin.show();
+    updRender();
+  }
+}
+
+function updClose() {
+  if (updWin && !updWin.isDestroyed()) updWin.close();
+  updWin = null;
+}
+
 function setupAutoUpdater() {
   if (!app.isPackaged || PORTABLE_ROOT) return; // 开发模式 / 免安装版不接自动更新
   let autoUpdater;
@@ -780,18 +869,29 @@ function setupAutoUpdater() {
   autoUpdater.autoDownload = true;
   autoUpdater.allowPrerelease = false;
 
+  // 不管静默还是手动检查，发现新版都用同一个状态小窗：非模态、可关，下载照常进行
   autoUpdater.on('update-available', (info) => {
-    dialog.showMessageBox({
-      type: 'info',
-      title: '发现新版本',
-      message: `新版本 ${info.version} 可用（当前 v${app.getVersion()}）`,
-      detail: '正在后台下载，完成后会询问是否立即安装。',
-      buttons: ['好'],
-      noLink: true,
+    manualCheck = false;
+    updChecking = false;
+    updVersion = info.version;
+    updShow('downloading', { version: info.version, percent: 0 });
+  });
+
+  autoUpdater.on('download-progress', (p) => {
+    const now = Date.now();
+    if (now - updLastPaint < 250) return;
+    updLastPaint = now;
+    updShow('downloading', {
+      version: updVersion,
+      percent: p.percent,
+      speed: p.bytesPerSecond,
+      transferred: p.transfered, // electron-updater 的拼写就是少个 r
+      total: p.total,
     });
   });
 
   autoUpdater.on('update-downloaded', async (info) => {
+    updClose();
     const { response } = await dialog.showMessageBox({
       type: 'question',
       title: '更新已就绪',
@@ -809,8 +909,10 @@ function setupAutoUpdater() {
   });
 
   autoUpdater.on('error', (e) => {
-    if (!manualCheck) return; // 静默检查失败：忽略，下次启动再试
+    updChecking = false;
+    if (!manualCheck) { updClose(); return; } // 静默检查失败：忽略，下次启动再试
     manualCheck = false;
+    updClose();
     dialog.showMessageBox({
       type: 'warning',
       title: '检查更新失败',
@@ -828,7 +930,7 @@ function setupAutoUpdater() {
   setTimeout(() => { autoUpdater.checkForUpdates().catch(() => {}); }, 5000);
 }
 
-/** 菜单「检查更新…」：明确告诉用户结果，失败给下载页兜底 */
+/** 菜单「检查更新…」：点了立刻出状态小窗（转圈），结果出来就地切换，不让用户干等 */
 function checkForUpdatesManually() {
   if (PORTABLE_ROOT) {
     dialog.showMessageBox({
@@ -854,21 +956,18 @@ function checkForUpdatesManually() {
   }
   let autoUpdater;
   try { ({ autoUpdater } = require('electron-updater')); } catch { shell.openExternal(RELEASES_URL); return; }
+  if (updChecking) { updShow('checking'); return; } // 已经在查：把状态窗调出来就行
+  updChecking = true;
   manualCheck = true;
+  updShow('checking'); // 先出窗再发请求，网络再慢用户也知道在动
   autoUpdater.checkForUpdates()
     .then((r) => {
+      updChecking = false;
       manualCheck = false;
       const latest = r && r.updateInfo && r.updateInfo.version;
-      if (latest && latest !== app.getVersion()) {
-        // update-available 事件已弹窗，这里不用再说话
-        return;
-      }
-      dialog.showMessageBox({
-        message: '已经是最新版本',
-        detail: `当前 v${app.getVersion()}，暂无更新。`,
-        buttons: ['好'],
-        noLink: true,
-      });
+      if (latest && latest !== app.getVersion()) return; // 状态窗已切到下载进度
+      updShow('latest', { version: app.getVersion() });
+      setTimeout(() => { if (updWin && !manualCheck) updClose(); }, 1800);
     })
     .catch(() => { /* error 事件里统一兜底 */ });
 }
