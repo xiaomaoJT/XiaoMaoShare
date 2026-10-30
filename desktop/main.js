@@ -404,6 +404,8 @@ ipcMain.handle('start:state', (e) => {
     keepHost: p.keepHost,
     recent: readRecent(),
     dataDir: server.DATA_DIR,
+    // 选择页把端口固定显示成「:6767」，跟着这里的常量走，改端口不用改两处
+    defaultPort: DEFAULT_PORT,
   };
 });
 

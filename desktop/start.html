@@ -37,13 +37,13 @@
   /* ---------------- 启动动画（默认就是它，避免先亮一下再跳） ---------------- */
   #boot { display: flex; flex-direction: column; align-items: center; gap: 16px; }
   #boot[hidden] { display: none; }
+  /* 应用图标（构建用的是同一张，见 build/icon.png）本身就是白底方图，
+     所以按「一枚 app 图标」来摆：圆角裁切 + 一圈极淡的描边，避免白底糊在浅灰背景上 */
   .mark {
-    width: 72px; height: 72px; border-radius: 20px;
-    background: linear-gradient(135deg, #4c6ef5 0%, #5b8def 45%, #e8562f 130%);
-    display: flex; align-items: center; justify-content: center;
-    box-shadow: 0 10px 30px -10px rgba(76,110,245,.55);
+    width: 72px; height: 72px; border-radius: 17px;
+    object-fit: cover; background: #fff;
+    box-shadow: 0 8px 22px -12px rgba(20,23,28,.5), 0 0 0 1px rgba(20,23,28,.07);
   }
-  .mark span { color: #fff; font-size: 34px; font-weight: 800; letter-spacing: 1px; }
   .brand { font-size: 17px; font-weight: 700; letter-spacing: .5px; }
   .spin {
     width: 24px; height: 24px; border-radius: 50%;
@@ -57,8 +57,7 @@
   #pick { width: 100%; max-width: 880px; }
   #pick[hidden] { display: none; }
   .head { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
-  .head .mark { width: 38px; height: 38px; border-radius: 11px; box-shadow: 0 6px 16px -8px rgba(76,110,245,.6); }
-  .head .mark span { font-size: 19px; }
+  .head .mark { width: 38px; height: 38px; border-radius: 10px; box-shadow: 0 4px 12px -7px rgba(20,23,28,.5), 0 0 0 1px rgba(20,23,28,.07); }
   .head .brand { font-size: 15px; }
   h1 { font-size: 21px; margin: 18px 0 4px; letter-spacing: .3px; }
   .sub { font-size: 13px; color: var(--ink2); margin: 0 0 20px; }
@@ -100,12 +99,23 @@
 
   #linkCard.on { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
   .field { margin-top: 14px; display: flex; gap: 8px; }
-  input[type="text"] {
-    flex: 1; min-width: 0; height: 38px; padding: 0 12px;
+  /* 输入框和固定的「:6767」拼成一个整体，看起来就是「地址 + 端口」一格填完 */
+  .inputwrap {
+    flex: 1; min-width: 0; height: 38px; display: flex; align-items: center;
     border: 1px solid var(--line); border-radius: 10px; background: #fbfcfe;
-    font: inherit; font-size: 13px; color: var(--ink); outline: none;
+    padding-right: 10px; transition: border-color .15s, background .15s;
   }
-  input[type="text"]:focus { border-color: var(--accent); background: #fff; }
+  .inputwrap:focus-within { border-color: var(--accent); background: #fff; }
+  .inputwrap input {
+    flex: 1; min-width: 0; height: 100%; padding: 0 0 0 12px;
+    border: 0; background: none; outline: none;
+    font: inherit; font-size: 13px; color: var(--ink); font-variant-numeric: tabular-nums;
+  }
+  .inputwrap .port {
+    font-size: 12px; color: var(--ink3); white-space: nowrap;
+    font-variant-numeric: tabular-nums; user-select: none;
+  }
+  .inputwrap .port[hidden] { display: none; }
   .recent { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
   .chip {
     font-size: 12px; padding: 4px 9px; border-radius: 7px;
@@ -145,7 +155,7 @@
 <div class="center">
   <!-- 启动动画 / 执行中 -->
   <div id="boot">
-    <div class="mark"><span>帽</span></div>
+    <img class="mark" src="../public/icon.png" alt="XiaoMao 互传">
     <div class="brand">XiaoMao 互传</div>
     <div class="spin"></div>
     <div class="boot-tip" id="bootTip">正在启动…</div>
@@ -154,7 +164,7 @@
   <!-- 选择页 -->
   <div id="pick" hidden>
     <div class="head">
-      <div class="mark"><span>帽</span></div>
+      <img class="mark" src="../public/icon.png" alt="XiaoMao 互传">
       <div class="brand">XiaoMao 互传</div>
     </div>
     <h1>这次要做什么？</h1>
@@ -177,7 +187,10 @@
         </div>
         <p class="d">我当普通设备，用别人开着的服务。不需要对方做任何设置。</p>
         <div class="field">
-          <input type="text" id="url" placeholder="192.168.1.20:6767" spellcheck="false" autocomplete="off">
+          <div class="inputwrap">
+            <input type="text" id="url" placeholder="192.168.1.20" spellcheck="false" autocomplete="off">
+            <span class="port" id="portHint">:6767</span>
+          </div>
           <button class="btn" id="linkGo">连接</button>
         </div>
         <div class="recent" id="recent"></div>
@@ -208,6 +221,7 @@
   var pick = document.getElementById('pick');
   var errBox = document.getElementById('err');
   var urlInp = document.getElementById('url');
+  var portHint = document.getElementById('portHint');
   var keepHost = document.getElementById('keepHost');
   var remember = document.getElementById('remember');
   var recentBox = document.getElementById('recent');
@@ -248,11 +262,39 @@
   function pickLink() {
     var raw = (urlInp.value || '').trim();
     if (!raw) {
-      errBox.textContent = '先填对方的地址，例如 192.168.1.20:6767';
+      errBox.textContent = '先填对方的地址，例如 192.168.1.20';
       urlInp.focus();
       return;
     }
+    if (incompleteHost(raw)) {
+      errBox.textContent = 'IP 还没写完，比如 192.168.1.20（端口不用填，默认 ' + DEFAULT_PORT + '）';
+      urlInp.focus();
+      urlInp.setSelectionRange(raw.length, raw.length);
+      return;
+    }
     choose({ action: 'link', url: raw, keepHost: keepHost.checked, remember: remember.checked });
+  }
+
+  /* ---------- 地址输入 ---------- */
+
+  var DEFAULT_PORT = '6767';
+  var PREFIX = '192.168.';   // 家用/办公局域网最常见的开头，先垫上，少敲四位
+
+  /**
+   * 主机名只写了半截（比如还停在 "192.168."）就别发请求了 ——
+   * 主进程那边只会回一句"这个地址看不懂"，不如在这里直接说清楚还差什么。
+   * 域名、带协议的地址一律放行，交给主进程判断。
+   */
+  function incompleteHost(raw) {
+    var hostPart = raw.replace(/^https?:\/\//i, '').split('/')[0].split(':')[0];
+    if (!/^[\d.]+$/.test(hostPart)) return false;
+    return hostPart.split('.').filter(Boolean).length < 4;
+  }
+
+  /** 用户自己写了端口（192.168.1.20:8080）时，把固定的 :6767 让开，别误导 */
+  function syncPortHint() {
+    var v = (urlInp.value || '').replace(/^https?:\/\//i, '');
+    portHint.hidden = /:[0-9]{2,5}(\/|$)/.test(v);
   }
 
   /* ---------- 渲染 ---------- */
@@ -263,6 +305,7 @@
     b.textContent = String(url).replace(/^https?:\/\//, '').replace(/\/+$/, '');
     b.onclick = function () {
       urlInp.value = b.textContent;
+      syncPortHint();
       urlInp.focus();
       linkCard.classList.add('on');
     };
@@ -272,12 +315,18 @@
   function render(st) {
     if (st.dataDir) document.getElementById('dir').textContent = st.dataDir;
     keepHost.checked = st.keepHost !== false;
+    if (st.defaultPort) {
+      DEFAULT_PORT = String(st.defaultPort);
+      portHint.textContent = ':' + DEFAULT_PORT;
+    }
 
     var list = (st.recent || []).filter(function (u) { return u && u !== st.lastLinkUrl; });
     recentBox.textContent = '';
     if (st.lastLinkUrl) {
       urlInp.value = String(st.lastLinkUrl).replace(/^https?:\/\//, '').replace(/\/+$/, '');
       recentBox.appendChild(chip(st.lastLinkUrl));
+    } else {
+      urlInp.value = PREFIX;   // 没连过就垫上 192.168.，用户补完后两段即可
     }
     list.slice(0, 5).forEach(function (u) { recentBox.appendChild(chip(u)); });
     if (!recentBox.children.length) {
@@ -286,8 +335,15 @@
       n.textContent = '连过一次之后，地址会记在这里';
       recentBox.appendChild(n);
     }
+    syncPortHint();
     showPick();
-    (urlInp.value ? linkGo : hostGo).focus();
+    // 地址已经在框里（记忆或前缀），光标落到末尾，接着敲就行
+    if (urlInp.value && !st.lastLinkUrl) {
+      urlInp.focus();
+      urlInp.setSelectionRange(urlInp.value.length, urlInp.value.length);
+    } else {
+      (urlInp.value ? linkGo : hostGo).focus();
+    }
   }
 
   /* ---------- 事件 ---------- */
@@ -307,6 +363,17 @@
 
   urlInp.addEventListener('keydown', function (e) {
     if (e.key === 'Enter') { e.preventDefault(); pickLink(); }
+  });
+  urlInp.addEventListener('input', syncPortHint);
+
+  // 从聊天里复制来的完整地址（192.168.1.20 或 http://…）整段替换，
+  // 不然会接在预填的 "192.168." 后面变成一串废地址；粘半截则照常插在光标处
+  urlInp.addEventListener('paste', function (e) {
+    var t = ((e.clipboardData || window.clipboardData).getData('text') || '').trim();
+    if (!/^(https?:\/\/)?([\w-]+\.){2,}[\w-]+/i.test(t)) return;
+    e.preventDefault();
+    urlInp.value = t.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+    syncPortHint();
   });
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape' && !pick.hidden) errBox.textContent = '';
