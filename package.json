@@ -3,13 +3,17 @@
   "version": "2.2.3",
   "private": true,
   "description": "XiaoMao 互传 —— 局域网内文字 / 图片 / 文件互传，零依赖",
+  "author": "XiaoMaoShare <895250757@qq.com>",
   "license": "MIT",
   "main": "desktop/main.js",
   "scripts": {
     "start": "node server.js --open",
     "serve": "node server.js",
     "desktop": "node desktop/run.js",
-    "dist": "electron-builder"
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win --x64 --publish never && node build/make-portable-zip.mjs",
+    "dist:mac": "electron-builder --mac --publish never",
+    "dist:all": "npm run dist:win && npm run dist:mac"
   },
   "engines": {
     "node": ">=18"
