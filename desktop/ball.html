@@ -5,6 +5,7 @@
 <title>XiaoMao 互传 · 悬浮球</title>
 <style>
   :root {
+    --disc: 64px;                    /* 球体直径，主进程按设置推过来 */
     --card: #ffffff;
     --line: #e3e8f0;
     --ink: #14171c;
@@ -29,12 +30,12 @@
   /* ---------------- 球 ---------------- */
   #ball {
     position: absolute; left: 0; top: 0;
-    width: 84px; height: 84px;
     display: flex; align-items: center; justify-content: center;
     cursor: default;
+    touch-action: none;
   }
   #ball .disc {
-    width: 64px; height: 64px; border-radius: 50%;
+    width: var(--disc); height: var(--disc); border-radius: 50%;
     background: #fff;
     box-shadow: 0 4px 14px -4px rgba(16, 24, 40, .45), 0 0 0 1px rgba(20, 23, 28, .07);
     overflow: hidden;
@@ -47,7 +48,7 @@
 
   /* 未读角标：比球更靠外一点，不然被圆边吃掉 */
   #badge {
-    position: absolute; top: 6px; right: 6px;
+    position: absolute; top: 4px; right: 4px;
     min-width: 20px; height: 20px; padding: 0 6px;
     border-radius: 10px; background: var(--err);
     color: #fff; font-size: 11.5px; font-weight: 700; line-height: 20px;
@@ -80,14 +81,17 @@
   #panel[hidden] { display: none; }
   @keyframes pop { from { opacity: 0; transform: scale(.97); } to { opacity: 1; transform: none; } }
 
+  /* 顶栏就是这块浮件的「标题栏」：按住这里能拖动整个窗口 */
   .p-head {
     display: flex; align-items: center; gap: 8px;
-    padding: 12px 14px 10px; border-bottom: 1px solid var(--line);
+    padding: 11px 14px 9px; border-bottom: 1px solid var(--line);
+    cursor: default; touch-action: none;
   }
+  .p-head:active { cursor: default; }
   .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ink3); flex: none; }
   .dot.on { background: var(--ok); box-shadow: 0 0 0 3px rgba(18, 184, 134, .16); }
-  .p-title { font-size: 12.5px; font-weight: 600; color: var(--ink); }
-  .p-sub { margin-left: auto; font-size: 11.5px; color: var(--ink3); }
+  .p-title { font-size: 12.5px; font-weight: 600; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .p-sub { margin-left: auto; font-size: 11.5px; color: var(--ink3); white-space: nowrap; flex: none; }
 
   .p-list { flex: 1; overflow-y: auto; padding: 6px; }
   .p-list::-webkit-scrollbar { width: 8px; }
@@ -95,16 +99,35 @@
 
   .row {
     display: flex; gap: 9px; align-items: flex-start;
-    padding: 9px 10px; border-radius: 10px;
-    cursor: default;
+    padding: 8px 9px; border-radius: 10px;
   }
   .row:hover { background: #f6f8fc; }
+  .row + .row { margin-top: 1px; }
+
+  /* 类型头像：颜色由 data-k 决定，跟主界面同一套分类（public/filetype.js） */
   .row .ico {
-    width: 26px; height: 26px; border-radius: 8px; flex: none;
+    width: 30px; height: 30px; border-radius: 9px; flex: none;
     display: flex; align-items: center; justify-content: center;
-    font-size: 13px; background: var(--accent-soft); color: var(--accent);
+    font-size: 9.5px; font-weight: 800; letter-spacing: .2px;
+    background: color-mix(in srgb, var(--k, #5a6473) 14%, #fff);
+    color: var(--k, #5a6473);
+    overflow: hidden;
   }
-  .row.file .ico { background: #fff4ec; color: #e8562f; }
+  .row .ico img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  [data-k]{--k:#5a6473}
+  [data-k="img"]{--k:#e8590c}
+  [data-k="video"]{--k:#7048e8}
+  [data-k="audio"]{--k:#d6336c}
+  [data-k="pdf"]{--k:#e03131}
+  [data-k="doc"]{--k:#1c7ed6}
+  [data-k="sheet"]{--k:#2f9e44}
+  [data-k="slide"]{--k:#f08c00}
+  [data-k="zip"]{--k:#8c6d1f}
+  [data-k="code"]{--k:#0c8599}
+  [data-k="text"]{--k:#868e96}
+  [data-k="app"]{--k:#495057}
+  [data-k="other"]{--k:#7a8699}
+
   .row .body { min-width: 0; flex: 1; }
   .row .t1 {
     font-size: 12.5px; line-height: 1.5; color: var(--ink);
@@ -112,30 +135,49 @@
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
     word-break: break-word;
   }
-  .row .t2 { font-size: 11px; color: var(--ink3); margin-top: 2px; }
-  .row .act { font-size: 11.5px; color: var(--accent); opacity: 0; flex: none; }
-  .row:hover .act { opacity: 1; }
-
-  .empty { padding: 28px 16px; text-align: center; font-size: 12.5px; color: var(--ink3); line-height: 1.7; }
-
-  .p-foot { padding: 10px 12px 12px; border-top: 1px solid var(--line); }
-  .dropzone {
-    border: 1.5px dashed #d5dce8; border-radius: 12px;
-    padding: 12px; text-align: center;
-    font-size: 12px; color: var(--ink3);
-    transition: .15s;
-  }
-  .dropzone.hot { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
-  .p-actions { display: flex; gap: 8px; margin-top: 10px; }
-  .btn {
-    flex: 1; height: 34px; border-radius: 10px;
+  .row .t2 { font-size: 11px; color: var(--ink3); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* 组成摘要（文字 + 2 个文件）单独一行：挤在时间后面会被省略号吃掉 */
+  .row .t3 { font-size: 10.5px; color: var(--ink3); margin-top: 3px; display: inline-block; padding: 1px 6px; border-radius: 6px; background: #f2f5fa; }
+  .row .acts { display: flex; gap: 4px; flex: none; align-self: center; }
+  .row .act {
+    height: 24px; padding: 0 8px; border-radius: 7px;
     border: 1px solid var(--line); background: #fff;
-    font: inherit; font-size: 12.5px; font-weight: 600; color: var(--ink2);
-    cursor: default;
+    font: inherit; font-size: 11px; font-weight: 600; color: var(--ink2);
+    cursor: default; white-space: nowrap;
   }
-  .btn:hover { border-color: #c8d3ea; color: var(--ink); }
-  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  .btn.primary:hover { filter: brightness(1.06); color: #fff; }
+  .row .act:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+  .row .act:disabled { color: #b9c0cc; border-color: #eef1f6; background: #fafbfd; }
+  .row .act[hidden] { display: none; }
+
+  .empty { padding: 30px 18px; text-align: center; font-size: 12.5px; color: var(--ink3); line-height: 1.8; }
+
+  .p-foot { padding: 9px 10px 10px; border-top: 1px solid var(--line); }
+  .composer { display: flex; gap: 7px; align-items: flex-end; }
+  .composer textarea {
+    flex: 1; min-width: 0; resize: none; max-height: 84px;
+    padding: 8px 10px; border-radius: 10px;
+    border: 1px solid var(--line); background: #fff;
+    font: inherit; font-size: 12.5px; line-height: 1.5; color: var(--ink);
+    outline: none; user-select: text;
+  }
+  .composer textarea:focus { border-color: #b9c8ea; box-shadow: 0 0 0 3px rgba(76, 110, 245, .1); }
+  .composer textarea::placeholder { color: var(--ink3); }
+  .send {
+    height: 34px; padding: 0 14px; flex: none;
+    border-radius: 9px; border: 1px solid var(--accent);
+    background: var(--accent); color: #fff;
+    font: inherit; font-size: 12.5px; font-weight: 650; cursor: default;
+  }
+  .send:hover { filter: brightness(1.06); }
+  .send:disabled { opacity: .45; filter: none; }
+
+  .hint { font-size: 11px; color: var(--ink3); margin-top: 6px; display: flex; align-items: center; gap: 8px; }
+  .hint .grow { flex: 1; }
+  .link {
+    border: 0; background: none; padding: 0; font: inherit; font-size: 11px;
+    color: var(--ink3); cursor: default;
+  }
+  .link:hover { color: var(--accent); }
 
   /* 拖文件的遮罩：铺满整个窗口，落在球和面板上都算 */
   #dropmask {
@@ -148,33 +190,37 @@
   body.dropping #dropmask { display: flex; }
 
   .toast {
-    position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%);
+    position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%);
     background: rgba(20, 23, 28, .9); color: #fff;
     font-size: 12px; padding: 7px 12px; border-radius: 9px;
-    opacity: 0; pointer-events: none; transition: opacity .18s;
+    opacity: 0; pointer-events: none; transition: opacity .18s; z-index: 30;
     white-space: nowrap; max-width: 92%; overflow: hidden; text-overflow: ellipsis;
   }
   .toast.on { opacity: 1; }
 </style>
 </head>
 <body>
-  <div id="ball" title="点一下展开；拖文件进来直接发送">
+  <div id="ball" title="点一下展开；拖文件进来直接发送（⌘/Ctrl + 滚轮调大小）">
     <div class="disc"><img id="logo" alt=""></div>
     <span id="badge" hidden>0</span>
   </div>
 
   <div id="panel" hidden>
-    <div class="p-head">
+    <div class="p-head" id="pHead" title="按住这里可以拖动">
       <span class="dot" id="dot"></span>
       <span class="p-title" id="pTitle">XiaoMao 互传</span>
       <span class="p-sub" id="pSub"></span>
     </div>
     <div class="p-list" id="pList"></div>
     <div class="p-foot">
-      <div class="dropzone" id="dz">把文件拖到这颗球上，直接发出去</div>
-      <div class="p-actions">
-        <button class="btn" id="btnHide">收起悬浮球</button>
-        <button class="btn primary" id="btnHost">打开主界面</button>
+      <div class="composer">
+        <textarea id="txt" rows="1" placeholder="说点什么，回车发送"></textarea>
+        <button class="send" id="btnSend" type="button">发送</button>
+      </div>
+      <div class="hint">
+        <span class="grow" id="hintText">把文件拖到球上松手即发</span>
+        <button class="link" id="btnHide" type="button">收起</button>
+        <button class="link" id="btnHost" type="button">打开主界面</button>
       </div>
     </div>
   </div>
@@ -182,6 +228,7 @@
   <div id="dropmask">松开就发送</div>
   <div class="toast" id="toast"></div>
 
+<script src="../public/filetype.js"></script>
 <script>
 (function () {
   var api = window.xmBall || {};
@@ -191,9 +238,12 @@
   var badge = $('badge');
   var listEl = $('pList');
   var toastEl = $('toast');
+  var txt = $('txt');
+  var btnSend = $('btnSend');
   var open = false;
   var lastSeen = Number(sessionStorage.getItem('ballSeen') || 0);
   var pollTimer = null;
+  var sending = false;
 
   $('logo').src = '../public/icon.png';
 
@@ -219,11 +269,16 @@
     return Math.floor(s / 86400) + ' 天前';
   }
 
-  /* ---------------- 位置：主进程算好，这里只负责摆 ---------------- */
-  function layout(r) {
-    if (!r || !r.ball) return;
-    ball.style.left = r.ball.left + 'px';
-    ball.style.top = r.ball.top + 'px';
+  /* ---------------- 几何：主进程算好，这里只负责摆 ---------------- */
+  function applyGeo(r) {
+    if (!r) return;
+    if (r.size) document.documentElement.style.setProperty('--disc', r.size + 'px');
+    var b = r.ball || { left: 0, top: 0 };
+    var box = r.box || (r.size ? r.size + 20 : 84);
+    ball.style.left = b.left + 'px';
+    ball.style.top = b.top + 'px';
+    ball.style.width = box + 'px';
+    ball.style.height = box + 'px';
     if (r.panel) {
       panel.hidden = false;
       panel.style.left = r.panel.left + 'px';
@@ -239,50 +294,70 @@
     if (on === open) return;
     open = on;
     var r = await api.expand(on);
-    layout(r || {});
+    applyGeo(r || {});
     if (on) {
       if (api.seen) api.seen();   // 打开就算看过了，角标立刻清
       badge.hidden = true;
-      poll();
     }
+    startPoll();                  // 展开时刷得勤一点，收起时省电
   }
 
-  /* ---------------- 拖动 / 点击 ---------------- */
-  var drag = null;
-  ball.addEventListener('pointerdown', function (e) {
-    if (e.button !== 0) return;
-    drag = { sx: e.screenX, sy: e.screenY, lx: e.screenX, ly: e.screenY, moved: false };
-    try { ball.setPointerCapture(e.pointerId); } catch (err) { /* 老内核 */ }
-  });
-  ball.addEventListener('pointermove', function (e) {
-    if (!drag) return;
-    var dx = e.screenX - drag.lx;
-    var dy = e.screenY - drag.ly;
-    if (!drag.moved) {
-      if (Math.hypot(e.screenX - drag.sx, e.screenY - drag.sy) < 4) return;
-      drag.moved = true;
-      ball.classList.add('dragging');
-    }
-    drag.lx = e.screenX;
-    drag.ly = e.screenY;
-    api.move(dx, dy);
-  });
-  ball.addEventListener('pointerup', function (e) {
-    if (!drag) return;
-    var moved = drag.moved;
-    drag = null;
-    ball.classList.remove('dragging');
-    try { ball.releasePointerCapture(e.pointerId); } catch (err) { /* 同上 */ }
-    if (moved) api.dragEnd();
-    else setOpen(!open);
-  });
+  /* ---------------- 拖动：球和面板标题栏都能拖 ---------------- */
+  function makeDraggable(el, onClick) {
+    var drag = null;
+    el.addEventListener('pointerdown', function (e) {
+      if (e.button !== 0) return;
+      // 面板里的输入框 / 按钮不参与拖动
+      if (e.target.closest && e.target.closest('button, textarea, input')) return;
+      drag = { sx: e.screenX, sy: e.screenY, lx: e.screenX, ly: e.screenY, moved: false };
+      try { el.setPointerCapture(e.pointerId); } catch (err) { /* 老内核 */ }
+    });
+    el.addEventListener('pointermove', function (e) {
+      if (!drag) return;
+      var dx = e.screenX - drag.lx;
+      var dy = e.screenY - drag.ly;
+      if (!drag.moved) {
+        if (Math.hypot(e.screenX - drag.sx, e.screenY - drag.sy) < 4) return;
+        drag.moved = true;
+        el.classList.add('dragging');
+      }
+      drag.lx = e.screenX;
+      drag.ly = e.screenY;
+      api.move(dx, dy);          // 展开时挪的是整个窗口，球和面板一起走
+    });
+    el.addEventListener('pointerup', function (e) {
+      if (!drag) return;
+      var moved = drag.moved;
+      drag = null;
+      el.classList.remove('dragging');
+      try { el.releasePointerCapture(e.pointerId); } catch (err) { /* 同上 */ }
+      if (moved) { api.dragEnd(); return; }
+      if (onClick) onClick();
+    });
+  }
 
-  /* 面板展开后点外面的球仍能收回；按 Esc 也收 */
+  makeDraggable(ball, function () { setOpen(!open); });
+  makeDraggable($('pHead'), null);
+
+  /* 球上 ⌘/Ctrl + 滚轮换大小：比翻菜单快。
+     必须带修饰键 —— 球的窗口永远置顶，光标扫过它时随手一滑就改尺寸太容易误触。 */
+  var wheelAt = 0;
+  ball.addEventListener('wheel', function (e) {
+    if (!(e.metaKey || e.ctrlKey)) return;   // 不带修饰键就当没有，别吃掉页面滚动
+    e.preventDefault();
+    var now = Date.now();
+    if (now - wheelAt < 180) return;         // 触控板会连发一大串，节流一下
+    wheelAt = now;
+    if (api.sizeStep) api.sizeStep(e.deltaY > 0 ? 1 : -1).then(function (r) {
+      if (r && r.ok) toast('球的大小：' + ({ sm: '小', md: '标准', lg: '大' }[r.size] || r.size));
+    });
+  }, { passive: false });
+
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape' && open) setOpen(false);
   });
 
-  /* ---------------- 数据 ---------------- */
+  /* ---------------- 列表 ---------------- */
   function paint(state) {
     if (!state) return;
     var host = state.target && state.target.kind === 'host';
@@ -296,30 +371,67 @@
     badge.textContent = n > 99 ? '99+' : String(n);
 
     if (!items.length) {
-      listEl.innerHTML = '<div class="empty">还没有内容<br>把文件拖到球上就能发</div>';
+      listEl.innerHTML = '<div class="empty">还没有内容<br>说句话，或把文件拖到球上</div>';
       return;
     }
+
     listEl.innerHTML = items.map(function (it) {
-      var isFile = it.kind !== 'text';
-      var name = isFile ? (it.name || '文件') : (it.text || '').slice(0, 120);
-      var meta = (it.from ? it.from + ' · ' : '') + ago(it.time);
-      return '<div class="row' + (isFile ? ' file' : '') + '" data-fid="' + esc(it.fid || '') +
-        '" data-file="' + esc(it.file || '') + '" data-text="' + esc(isFile ? '' : (it.text || '')) + '">' +
-        '<div class="ico">' + (isFile ? '件' : '文') + '</div>' +
-        '<div class="body"><div class="t1">' + esc(name) + '</div><div class="t2">' + esc(meta) + '</div></div>' +
-        '<div class="act">' + (isFile ? '定位' : '复制') + '</div>' +
+      var tk = it.tk || { key: 'other', label: 'FILE' };
+      var meta = (it.from ? '来自 ' + it.from + ' · ' : '') + ago(it.time || Date.now());
+      var isText = it.kind === 'text';
+      return '<div class="row" data-id="' + esc(it.id || '') +
+          '" data-kind="' + esc(it.kind || '') +
+          '" data-name="' + esc(it.name || '') +
+          '" data-file="' + esc(it.file || '') +
+          '" data-fid="' + esc(it.fid || '') +
+          '" data-text="' + esc(isText ? (it.snippet || '') : '') + '">' +
+        '<div class="ico" data-k="' + esc(tk.key) + '">' + esc(tk.label) + '</div>' +
+        '<div class="body">' +
+          '<div class="t1">' + esc(it.title || '') + '</div>' +
+          '<div class="t2">' + esc(meta) + '</div>' +
+          (it.comp ? '<div class="t3">' + esc(it.comp) + '</div>' : '') +
+        '</div>' +
+        '<div class="acts">' +
+          '<button class="act" type="button" data-act="locate" title="打开主界面，定位到这条">定位</button>' +
+          (isText ? '' :
+            '<button class="act" type="button" data-act="reveal"' + (it.canReveal ? '' : ' disabled') +
+              ' title="' + (it.canReveal ? '在文件夹里显示这份文件' : '本机还没有这份文件，先下载') + '">位置</button>') +
+        '</div>' +
         '</div>';
     }).join('');
   }
 
-  listEl.addEventListener('click', function (e) {
+  listEl.addEventListener('click', async function (e) {
+    var btn = e.target.closest('.act');
     var row = e.target.closest('.row');
     if (!row) return;
-    var fid = row.getAttribute('data-fid');
-    var file = row.getAttribute('data-file');
+    var id = row.getAttribute('data-id');
+    var act = btn ? btn.getAttribute('data-act') : '';
+
+    // 「位置」：打开文件所在文件夹（本机真有这份文件时才出现）
+    if (act === 'reveal') {
+      var r = await api.reveal({
+        id: id,
+        name: row.getAttribute('data-name'),
+        file: row.getAttribute('data-file'),
+        fid: row.getAttribute('data-fid'),
+      });
+      if (!r || !r.ok) toast((r && r.error) || '打不开文件位置');
+      return;
+    }
+
+    // 文字行的正文点一下就是复制（这类行没有第二个按钮，正文就是内容本身）
     var text = row.getAttribute('data-text');
-    if (fid) api.reveal({ fid: fid, file: file });
-    else if (text) { api.copy(text); toast('已复制'); }
+    if (!btn && text) {
+      api.copy(text);
+      toast('已复制');
+      return;
+    }
+
+    // 「定位」：打开主界面，滚到这条并闪一下
+    var loc = await api.locate(id);
+    if (!loc || !loc.ok) toast((loc && loc.error) || '定位失败');
+    else setOpen(false);
   });
 
   async function poll() {
@@ -368,18 +480,56 @@
     var paths = api.pathsOf ? api.pathsOf(files) : [];
     if (!paths.length) return toast('只支持拖本机的文件');
     toast('正在发送 ' + paths.length + ' 个文件…');
-    var r = await api.send(paths);
+    var r = await api.send({ paths: paths });
     if (r && r.ok) { toast('已发送 ' + r.sent + ' 个'); poll(); }
     else toast((r && r.error) || '发送失败');
   });
+
+  /* ---------------- 发文字 ---------------- */
+  function autoGrow() {
+    txt.style.height = 'auto';
+    txt.style.height = Math.min(84, Math.max(34, txt.scrollHeight)) + 'px';
+  }
+
+  async function sendText() {
+    var body = txt.value.trim();
+    if (!body || sending) return;
+    sending = true;
+    btnSend.disabled = true;
+    try {
+      var r = await api.send({ text: body });
+      if (r && r.ok) {
+        txt.value = '';
+        autoGrow();
+        toast('已发送');
+        poll();
+      } else {
+        toast((r && r.error) || '发送失败');
+      }
+    } finally {
+      sending = false;
+      btnSend.disabled = false;
+      txt.focus();
+    }
+  }
+
+  txt.addEventListener('input', autoGrow);
+  txt.addEventListener('keydown', function (e) {
+    // 回车发送、Shift+回车换行：这是个小面板，不是文档编辑器
+    if (e.key === 'Enter' && !e.shiftKey && !e.altKey) {
+      e.preventDefault();
+      sendText();
+    }
+  });
+  btnSend.addEventListener('click', sendText);
 
   /* ---------------- 按钮 ---------------- */
   $('btnHost').addEventListener('click', function () { api.openHost(); });
   $('btnHide').addEventListener('click', function () { api.hide(); });
 
-  if (api.onState) api.onState(function (s) { paint(s); });
+  if (api.onGeometry) api.onGeometry(applyGeo);
 
-  layout({ ball: { left: 0, top: 0 } });
+  if (api.layout) api.layout().then(applyGeo).catch(function () {});
   startPoll();
 })();
 </script>

@@ -715,15 +715,31 @@
   .imgname{font-size:calc(11.5px * var(--tfs));color:var(--faint);margin-top:7px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
   .file{display:flex;align-items:center;gap:11px}
+  /* 文件类型头像：底色由 --k 混出来，一类一个颜色 —— 一排文件里一眼分得清
+     哪些是文档、哪些是压缩包、哪些是视频。分类判定见 public/filetype.js。
+     用 data-k 而不是逐个类名，是为了让 .fico / .blk-ico / .na-chip-ico 共用一份色板。 */
+  [data-k]{--k:#5a6473}
+  [data-k="img"]{--k:#e8590c}
+  [data-k="video"]{--k:#7048e8}
+  [data-k="audio"]{--k:#d6336c}
+  [data-k="pdf"]{--k:#e03131}
+  [data-k="doc"]{--k:#1c7ed6}
+  [data-k="sheet"]{--k:#2f9e44}
+  [data-k="slide"]{--k:#f08c00}
+  [data-k="zip"]{--k:#8c6d1f}
+  [data-k="code"]{--k:#0c8599}
+  [data-k="text"]{--k:#868e96}
+  [data-k="app"]{--k:#495057}
+  [data-k="other"]{--k:#7a8699}
   .fico{
     width:38px;height:38px;border-radius:11px;flex:none;display:grid;place-items:center;
-    background:var(--accent-soft);color:var(--accent);font-size:10px;font-weight:800;letter-spacing:.3px;
+    background:color-mix(in srgb, var(--k, #5a6473) 14%, var(--card));color:var(--k, #5a6473);
+    font-size:10px;font-weight:800;letter-spacing:.3px;
     text-transform:uppercase;
   }
   /* 图片类附件：用真缩略图代替后缀字牌，一眼认出是哪张图 */
   .fico.img{padding:0;overflow:hidden;background:var(--line-soft)}
-  .fico.img img{width:100%;height:100%;object-fit:cover;display:block}
-  .fname{font-size:calc(14px * var(--tfs));font-weight:550;word-break:break-all;line-height:1.4}
+  .fico.img img{width:100%;height:100%;object-fit:cover;display:block}  .fname{font-size:calc(14px * var(--tfs));font-weight:550;word-break:break-all;line-height:1.4}
   .fsize{font-size:calc(11.5px * var(--tfs));color:var(--faint);margin-top:2px}
   .dl{
     margin-left:auto;flex:none;height:32px;padding:0 12px;border-radius:9px;white-space:nowrap;
@@ -1519,7 +1535,7 @@
   }
   .na-chip-ico{
     width:20px;height:20px;flex:none;border-radius:5px;display:grid;place-items:center;
-    background:var(--accent-soft);color:var(--accent);
+    background:color-mix(in srgb, var(--k, #5a6473) 16%, var(--card));color:var(--k, #5a6473);
     font-size:7.5px;font-weight:800;letter-spacing:.2px;text-transform:uppercase;
   }
   .na-chip-n{max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);font-weight:600}
@@ -1665,7 +1681,7 @@
   .blk-thumb{width:36px;height:36px;flex:none;border-radius:8px;object-fit:cover;display:block;background:var(--line-soft)}
   .blk-ico{
     width:36px;height:36px;flex:none;border-radius:8px;display:grid;place-items:center;
-    background:var(--accent-soft);color:var(--accent);font-size:9.5px;font-weight:800;
+    background:color-mix(in srgb, var(--k, #5a6473) 14%, var(--card));color:var(--k, #5a6473);font-size:9.5px;font-weight:800;
     letter-spacing:.3px;text-transform:uppercase;
   }
   .blk-info{flex:1;min-width:0}
@@ -2136,6 +2152,7 @@
     <div class="boot-tip">正在加载…</div>
   </div>
 </div>
+<script src="filetype.js"></script>
 <script>
   /* 启动遮罩：首屏先盖住，DOM 就绪（即主脚本执行完、界面已渲染）后淡出移除；
      另设 4s 兜底，万一主脚本异常也不会卡在启动页。 */
@@ -4179,12 +4196,13 @@
     var row = document.createElement('div');
     row.className = 'file';
     var nm = String(p.name || '未命名文件');
-    var ext = nm.split('.').pop();
-    // 图片走缩略图；拿不到 fid（历史数据）就退回后缀字牌
-    var isImg = /^image\//i.test(p.type || p.mime || '') ||
-      /\.(png|jpe?g|gif|webp|bmp|avif|svg|heic)$/i.test(nm);
+    // 类型判定走公共表（public/filetype.js）：头像写类型名，颜色按类型分。
+    // 图片走缩略图；拿不到 fid（历史数据）或图裂了就退回类型字牌。
+    var tk = (window.xmFileType ? window.xmFileType.of(nm, p.type || p.mime) : { key: 'other', label: 'FILE' });
+    var isImg = tk.key === 'img';
     var fico = document.createElement('div');
     fico.className = 'fico';
+    fico.setAttribute('data-k', tk.key);
     if (isImg && p.fid) {
       fico.classList.add('img');
       var th = document.createElement('img');
@@ -4194,11 +4212,11 @@
       th.src = '/f/' + p.fid + '?cid=' + encodeURIComponent(state.cid);
       th.onerror = function () {
         fico.classList.remove('img');
-        fico.textContent = ext && ext !== nm ? ext.slice(0, 4) : 'FILE';
+        fico.textContent = tk.label;
       };
       fico.appendChild(th);
     } else {
-      fico.textContent = ext && ext !== nm ? ext.slice(0, 4) : 'FILE';
+      fico.textContent = tk.label;
     }
     var info = document.createElement('div');
     info.style.minWidth = '0';
@@ -4904,6 +4922,37 @@
     setTimeout(function () { target.classList.remove('flash'); }, 1200);
   }
 
+  /**
+   * 桌面端悬浮球的「定位」走这里：把某条内容滚到中间并闪一下。
+   * 它可能正被搜索词 / 筛选 / 分页挡着 —— 那种情况下直接放弃会让人以为内容没了，
+   * 所以先把筛选复位、把分页放到位，再滚过去。
+   * （悬浮球是 file:// 加载的独立窗口，只能用 executeJavaScript 调这个函数，走不了 preload。）
+   */
+  window.__xmLocate = function (id) {
+    if (!id) return false;
+    var idx = -1;
+    for (var i = 0; i < allItems.length; i++) if (allItems[i].id === id) { idx = i; break; }
+    if (idx < 0) return false;
+
+    if (!nodes.get(id)) {
+      if (view.q) { var qi = $('q'); if (qi) qi.value = ''; setQuery(''); }
+      if (view.filter !== 'all') setFilter('all');
+      if (view.sender) { view.sender = ''; updateSenderBtn(); }
+      if (view.date) { view.date = ''; updateDateBtn(); }
+      if (pageLimit < idx + 3) pageLimit = idx + 3;
+      render(true);
+    }
+
+    var el = nodes.get(id);
+    if (!el) return false;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.remove('flash');
+    void el.offsetWidth;
+    el.classList.add('flash');
+    setTimeout(function () { el.classList.remove('flash'); }, 1400);
+    return true;
+  };
+
   /** 引用某一条「补充」：挂到输入区，下一条发出时带引用卡（服务端按 note 下标回填作者） */
   function startQuoteNote(it, n, snip) {
     var idx = (it.notes || []).indexOf(n);
@@ -5206,8 +5255,9 @@
         } else {
           face = document.createElement('span');
           face.className = 'na-chip-ico';
-          var ext0 = String(item.name).split('.').pop();
-          face.textContent = ext0 && ext0 !== item.name ? ext0.slice(0, 4) : 'FILE';
+          var tk0 = window.xmFileType ? window.xmFileType.of(item.name) : { key: 'other', label: 'FILE' };
+          face.setAttribute('data-k', tk0.key);
+          face.textContent = tk0.label;
         }
         var nmEl = document.createElement('span');
         nmEl.className = 'na-chip-n';
@@ -6229,8 +6279,9 @@
     } else {
       face = document.createElement('div');
       face.className = 'blk-ico';
-      var ext = String(b.name).split('.').pop();
-      face.textContent = ext && ext !== b.name ? ext.slice(0, 4) : 'FILE';
+      var tk1 = window.xmFileType ? window.xmFileType.of(b.name) : { key: 'other', label: 'FILE' };
+      face.setAttribute('data-k', tk1.key);
+      face.textContent = tk1.label;
     }
 
     var info = document.createElement('div');

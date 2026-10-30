@@ -65,6 +65,8 @@ process.env.XM_DATA_DIR = readDataDirPref() ||
   (PORTABLE_ROOT ? path.join(PORTABLE_ROOT, 'data') : path.join(app.getPath('userData'), 'data'));
 
 const server = require('../server.js');
+// 类型判定跟网页端共用一份（同一套后缀表），别在这里再抄一遍
+const fileType = require('../public/filetype.js');
 
 const IS_MAC = process.platform === 'darwin';
 const DEFAULT_PORT = 6767;
@@ -82,9 +84,12 @@ let trayHintShown = false; // 「已收进托盘」的气泡只在第一次提�
 
 let ballWin = null;       // 悬浮球窗口
 let ballOpen = false;     // 面板是否展开（展开时窗口变大）
-let ballAnchor = null;    // 收起时球的屏幕位置，展开时用它算往哪边弹
+let ballAnchor = null;    // 球的屏幕位置（收起时就是窗口位置，展开时是窗口内的球位换算出来的）
+let ballGeo = null;       // 上一次算出来的展开布局，拖动时用它把窗口位移换算回球位
 let ballCid = '';         // 主窗口上报的设备身份，球的请求靠它拿权限
 let ballBase = '';        // 主窗口上报的 origin（连别人时是对方的地址）
+let ballDiscPx = 64;      // 当前球体直径（跟着设置走）
+let ballBoxPx = 84;       // 当前球窗口边长 = 球体 + 一圈给阴影留的空白
 
 /* ------------------------------------------------------------ 地址处理 */
 
@@ -564,11 +569,35 @@ function buildMenu() {
           ],
         },
         {
-          // 拖个文件上去就能发出去，不用切窗口
-          label: '显示悬浮球',
-          type: 'checkbox',
-          checked: readBallPref().enabled,
-          click: (item) => setBallEnabled(item.checked),
+          // 悬浮球：拖个文件上去就能发出去，不用切窗口
+          label: '悬浮球',
+          submenu: [
+            {
+              label: '显示悬浮球',
+              type: 'checkbox',
+              checked: readBallPref().enabled,
+              click: (item) => setBallEnabled(item.checked),
+            },
+            { type: 'separator' },
+            { label: '大小', enabled: false },
+            { label: '小', type: 'radio', checked: readBallPref().size === 'sm', click: () => setBallSize('sm') },
+            { label: '标准', type: 'radio', checked: readBallPref().size === 'md', click: () => setBallSize('md') },
+            { label: '大', type: 'radio', checked: readBallPref().size === 'lg', click: () => setBallSize('lg') },
+            { type: 'separator' },
+            {
+              label: '收回屏幕右上角',
+              enabled: readBallPref().enabled,
+              click: () => {
+                if (!ballWin || ballWin.isDestroyed()) return;
+                ballAnchor = clampBallPos(null);
+                ballWin.setBounds({ x: ballAnchor.x, y: ballAnchor.y, width: ballBoxPx, height: ballBoxPx });
+                ballOpen = false;
+                ballGeo = null;
+                applyBallGeometry();
+                updateSettings({ ballPos: { x: ballAnchor.x, y: ballAnchor.y } });
+              },
+            },
+          ],
         },
         { type: 'separator' },
         // 服务跑没跑起来，只有这里看得见 —— 连别人的主机时主窗口是隐藏的，
@@ -1553,10 +1582,18 @@ function trayTemplate(inf) {
       ],
     },
     {
-      label: '显示悬浮球',
-      type: 'checkbox',
-      checked: readBallPref().enabled,
-      click: (item) => setBallEnabled(item.checked),
+      label: '悬浮球',
+      submenu: [
+        {
+          label: '显示悬浮球',
+          type: 'checkbox',
+          checked: readBallPref().enabled,
+          click: (item) => setBallEnabled(item.checked),
+        },
+        { label: '小', type: 'radio', checked: readBallPref().size === 'sm', click: () => setBallSize('sm') },
+        { label: '标准', type: 'radio', checked: readBallPref().size === 'md', click: () => setBallSize('md') },
+        { label: '大', type: 'radio', checked: readBallPref().size === 'lg', click: () => setBallSize('lg') },
+      ],
     },
     { type: 'separator' },
     { label: '退出', click: () => app.quit() },
@@ -1663,8 +1700,8 @@ async function askCloseChoice() {
 /* ------------------------------------------------------------ 悬浮球 */
 
 /**
- * 悬浮球：一个始终置顶的 64px 圆球，拖着文件扔上去就直接发出去，
- * 点一下展开面板看最近几条。
+ * 悬浮球：一个始终置顶的小圆球，拖着文件扔上去就直接发出去，
+ * 点一下展开面板看最近几条、也能顺手发句话。
  *
  * 它存在的理由不是「多一个入口」，而是「不打断手上的事」——
  * 传文件本来要：找窗口 → 切过去 → 选文件 → 发，一套下来十几秒。
@@ -1674,17 +1711,26 @@ async function askCloseChoice() {
  * origin 和凭据都只有主进程知道。
  */
 const BALL_PAGE = path.join(__dirname, 'ball.html');
-const BALL_SIZE = 84;                                    // 球体 64 + 四周 10px 给自绘阴影留位（透明窗口会裁掉超出部分）
-const BALL_GAP = 12;                                     // 球与面板之间
-const BALL_PANEL = { width: 340, height: 420 };
+// 三档大小：菜单 / 托盘 / 在球上滚滚轮都能换，记在设置里
+const BALL_DISC = { sm: 52, md: 64, lg: 80 };
+const BALL_PAD = 20;                                     // 窗口比球体大一圈，给自绘阴影留位（透明窗口会裁掉超出部分）
+const BALL_GAP = 6;                                      // 球与面板之间（球本身还自带 10px 留白）
+const BALL_PANEL = { width: 360, height: 460 };
 
 function readBallPref() {
   const s = readSettings();
   const p = s.ballPos;
   return {
     enabled: s.ballEnabled === true,                     // 默认不起：桌面组件得用户自己同意才出现
+    size: BALL_DISC[s.ballSize] ? s.ballSize : 'md',
     pos: p && Number.isFinite(p.x) && Number.isFinite(p.y) ? { x: p.x, y: p.y } : null,
   };
+}
+
+/** 把像素尺寸从设置里同步到内存：布局和拖动都靠这两个数，别每次读盘 */
+function syncBallMetrics() {
+  ballDiscPx = BALL_DISC[readBallPref().size];
+  ballBoxPx = ballDiscPx + BALL_PAD;
 }
 
 function setBallEnabled(on) {
@@ -1696,25 +1742,69 @@ function setBallEnabled(on) {
   return { ok: true, enabled: !!on };
 }
 
+/** 换大小：窗口跟着变，球心位置尽量不动 —— 换完球不该跳到屏幕另一头 */
+function setBallSize(key) {
+  if (!BALL_DISC[key]) return { ok: false, error: '没有这个尺寸' };
+  const before = ballAnchor || clampBallPos(readBallPref().pos);
+  const center = { x: before.x + ballBoxPx / 2, y: before.y + ballBoxPx / 2 };
+
+  updateSettings({ ballSize: key });
+  syncBallMetrics();
+
+  if (ballWin && !ballWin.isDestroyed()) {
+    if (ballOpen) {
+      // 展开时球心随窗口内球位偏移，重算一遍布局即可
+      ballAnchor = clampBallPos({
+        x: Math.round(center.x - ballBoxPx / 2),
+        y: Math.round(center.y - ballBoxPx / 2),
+      });
+      ballGeo = ballLayout();
+      ballWin.setBounds(ballGeo.bounds);
+      applyBallGeometry();
+    } else {
+      ballAnchor = clampBallPos({
+        x: Math.round(center.x - ballBoxPx / 2),
+        y: Math.round(center.y - ballBoxPx / 2),
+      });
+      ballWin.setBounds({ x: ballAnchor.x, y: ballAnchor.y, width: ballBoxPx, height: ballBoxPx });
+      applyBallGeometry();
+    }
+  }
+  buildMenu();
+  refreshTray();
+  return { ok: true, size: key };
+}
+
+/** 把当前几何推给页面（换尺寸 / 展开收起都走这里，页面只负责摆） */
+function applyBallGeometry() {
+  if (!ballWin || ballWin.isDestroyed()) return;
+  const payload = (ballOpen && ballGeo)
+    ? ballGeo.panelAndBall()
+    : { size: ballDiscPx, box: ballBoxPx, ball: { left: 0, top: 0 }, panel: null };
+  try { ballWin.webContents.send('ball:geometry', payload); } catch { /* 页面还没就绪 */ }
+}
+
 /** 位置兜底：默认贴右上角；记下来的位置要落回某块屏幕里（拔了外接屏也不会跑到看不见的地方） */
 function clampBallPos(pos) {
   const area = screen.getDisplayNearestPoint(pos || { x: 200, y: 200 }).workArea;
-  const raw = pos || { x: area.x + area.width - BALL_SIZE - 24, y: area.y + 120 };
+  const raw = pos || { x: area.x + area.width - ballBoxPx - 24, y: area.y + 120 };
   return {
-    x: Math.round(Math.min(Math.max(raw.x, area.x), area.x + area.width - BALL_SIZE)),
-    y: Math.round(Math.min(Math.max(raw.y, area.y), area.y + area.height - BALL_SIZE)),
+    x: Math.round(Math.min(Math.max(raw.x, area.x), area.x + area.width - ballBoxPx)),
+    y: Math.round(Math.min(Math.max(raw.y, area.y), area.y + area.height - ballBoxPx)),
   };
 }
 
 function createBallWindow() {
   if (ballWin && !ballWin.isDestroyed()) { ballWin.showInactive(); return ballWin; }
 
+  syncBallMetrics();
   const pos = clampBallPos(readBallPref().pos);
   ballAnchor = pos;
   ballOpen = false;
+  ballGeo = null;
 
   ballWin = new BrowserWindow({
-    x: pos.x, y: pos.y, width: BALL_SIZE, height: BALL_SIZE,
+    x: pos.x, y: pos.y, width: ballBoxPx, height: ballBoxPx,
     frame: false,
     transparent: true,
     backgroundColor: '#00000000',
@@ -1739,7 +1829,8 @@ function createBallWindow() {
 
   ballWin.loadFile(BALL_PAGE);
   ballWin.once('ready-to-show', () => { if (ballWin && !ballWin.isDestroyed()) ballWin.showInactive(); });
-  ballWin.on('closed', () => { ballWin = null; ballOpen = false; });
+  ballWin.webContents.on('did-finish-load', () => applyBallGeometry());
+  ballWin.on('closed', () => { ballWin = null; ballOpen = false; ballGeo = null; });
   ballWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   return ballWin;
 }
@@ -1754,6 +1845,7 @@ function destroyBallWindow() {
   ballWin.destroy();
   ballWin = null;
   ballOpen = false;
+  ballGeo = null;
 }
 
 /**
@@ -1762,29 +1854,35 @@ function destroyBallWindow() {
  * 水平方向默认往右弹、贴右边自动翻到左侧；垂直方向按球的位置决定贴顶还是贴底。
  */
 function ballLayout() {
+  const box = ballBoxPx;
   const anchor = ballAnchor || clampBallPos(readBallPref().pos);
   const area = screen.getDisplayNearestPoint(anchor).workArea;
 
-  const right = anchor.x + BALL_SIZE + BALL_GAP + BALL_PANEL.width <= area.x + area.width;
+  const right = anchor.x + box + BALL_GAP + BALL_PANEL.width <= area.x + area.width;
   const down = anchor.y + BALL_PANEL.height <= area.y + area.height;
 
-  const w = BALL_SIZE + BALL_GAP + BALL_PANEL.width;
-  const h = Math.max(BALL_SIZE, BALL_PANEL.height);
-  const x = Math.min(Math.max(right ? anchor.x : anchor.x + BALL_SIZE - w, area.x), area.x + area.width - w);
-  const y = Math.min(Math.max(down ? anchor.y : anchor.y + BALL_SIZE - h, area.y), area.y + area.height - h);
+  const w = box + BALL_GAP + BALL_PANEL.width;
+  const h = Math.max(box, BALL_PANEL.height);
+  const x = Math.min(Math.max(right ? anchor.x : anchor.x + box - w, area.x), area.x + area.width - w);
+  const y = Math.min(Math.max(down ? anchor.y : anchor.y + box - h, area.y), area.y + area.height - h);
 
-  return {
-    bounds: { x: Math.round(x), y: Math.round(y), width: w, height: h },
-    ball: { left: right ? 0 : w - BALL_SIZE, top: down ? 0 : h - BALL_SIZE },
-    panel: {
-      left: right ? BALL_SIZE + BALL_GAP : 0,
-      top: 0,
-      width: BALL_PANEL.width,
-      height: BALL_PANEL.height,
-    },
+  const ball = { left: right ? 0 : w - box, top: down ? 0 : h - box, box };
+  const panel = {
+    left: right ? box + BALL_GAP : 0,
+    top: 0,
+    width: BALL_PANEL.width,
+    height: BALL_PANEL.height,
   };
+  const out = {
+    bounds: { x: Math.round(x), y: Math.round(y), width: w, height: h },
+    ball,
+    panel,
+    size: ballDiscPx,
+    box,
+    panelAndBall: () => ({ ball, panel, size: ballDiscPx, box }),
+  };
+  return out;
 }
-
 /** 球现在该跟谁打交道：主窗口收起来且开着别人的主机 → 跟对方；否则回本机 */
 function ballTarget() {
   const opened = [...links.values()].pop();
@@ -1802,6 +1900,22 @@ function ballTarget() {
   return null;
 }
 
+/**
+ * 球的设备身份。
+ * 主窗口开着时会把它自己的 cid 报过来，直接用那个（连别人时才有授权）；
+ * 主窗口还没报（球先起来 / 主窗口在启动页）就用一个本机持久 cid ——
+ * 关键是「同一个身份贯穿上传与合并发送」，服务端按 cid 认暂存文件的归属，
+ * 两次请求各随机一个 cid，就会被判成「附件已失效」。
+ */
+function ballIdentity() {
+  if (ballCid) return ballCid;
+  const saved = String(readSettings().ballCid || '');
+  if (/^[A-Za-z0-9_-]{3,64}$/.test(saved)) return saved;
+  const made = 'd' + require('node:crypto').randomBytes(8).toString('hex');
+  updateSettings({ ballCid: made });
+  return made;
+}
+
 /** 主机模式带主控令牌（不然读不到私聊、也发不出东西）；连接模式只能靠 cid */
 function ballUrl(t, p) {
   if (t.kind !== 'host') return t.base + p;
@@ -1809,9 +1923,102 @@ function ballUrl(t, p) {
 }
 
 function ballHeaders() {
-  const h = {};
-  if (ballCid) h['x-xm-cid'] = ballCid;
-  return h;
+  return { 'x-xm-cid': ballIdentity() };
+}
+
+/** 这条内容在本机磁盘上有没有实物：有就能「打开文件位置」 */
+function ballLocalCopy(t, it) {
+  if (!it) return '';
+  if (t && t.kind === 'host' && it.file) {
+    const p = path.join(server.FILES_DIR, String(it.file));
+    if (fs.existsSync(p)) return p;
+  }
+  // 连别人时：文件是对方机器上的，只有自己下过才有本地副本
+  const nm = path.basename(String(it.name || ''));
+  if (!nm) return '';
+  const p = path.join(app.getPath('downloads'), nm);
+  return fs.existsSync(p) ? p : '';
+}
+
+/** 列表里一行要展示的东西：类型、标题、组成、以及能不能定位 / 打开位置 */
+function ballItemView(t, it) {
+  const parts = Array.isArray(it.parts) && it.parts.length
+    ? it.parts
+    : (it.text ? [{ kind: 'text', text: it.text }] : []);
+  const texts = parts.filter((p) => p.kind === 'text');
+  const files = parts.filter((p) => p.kind !== 'text');
+  const imgs = files.filter((p) => p.kind === 'image');
+  const docs = files.filter((p) => p.kind !== 'image');
+  const pick = docs[0] || imgs[0] || null;           // 「打开位置」认这一个文件
+  const text = String((texts[0] && texts[0].text) || '');
+  const snippet = text.replace(/\s+/g, ' ').trim();
+
+  let title;
+  let kind;
+  if (pick && docs.length) {
+    title = pick.name || '文件';
+    if (docs.length > 1) title += ' 等 ' + docs.length + ' 个';
+    kind = 'file';
+  } else if (pick) {
+    title = pick.name || '图片';
+    if (imgs.length > 1) title += ' 等 ' + imgs.length + ' 张';
+    kind = 'image';
+  } else {
+    title = snippet.slice(0, 120) || '（空内容）';
+    kind = 'text';
+  }
+  if (pick && snippet && (texts.length || parts.length > 1)) kind = 'mixed';
+
+  // 类型头像：文字用「文」，文件用后缀（PDF / PNG / MP4…）
+  const tk = pick
+    ? fileType.of(pick.name, pick.mime || pick.type)
+    : { key: 'text', label: '文' };
+
+  const comp = [];
+  if (texts.length) comp.push('文字');
+  if (imgs.length) comp.push(imgs.length + ' 张图片');
+  if (docs.length) comp.push(docs.length + ' 个文件');
+
+  return {
+    id: it.id,
+    kind,
+    title,
+    comp: parts.length > 1 ? comp.join(' + ') : '',
+    from: it.from || '',
+    time: it.time || 0,
+    tk,
+    snippet: snippet.slice(0, 400),
+    fid: (pick && pick.fid) || '',
+    name: (pick && pick.name) || '',
+    file: (pick && pick.file) || '',
+    canReveal: !!ballLocalCopy(t, pick),
+  };
+}
+
+/** 定位要用哪个窗口：连别人的内容就在那个连接窗口里找，自己的内容在主窗口里找 */
+function ballWindowFor(t) {
+  if (t && t.kind === 'link') {
+    for (const [, l] of links) if (l.url.replace(/\/+$/, '') === t.base) return l.win;
+    const last = [...links.values()].pop();
+    if (last) return last.win;
+  }
+  return hostWin && !hostWin.isDestroyed() ? hostWin : null;
+}
+
+/** 把某条内容滚到中间并闪一下（页面里暴露了 window.__xmLocate） */
+async function locateInWindow(win, id) {
+  if (!win || win.isDestroyed()) return false;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+  try {
+    if (win.webContents.isLoading()) await once(win.webContents, 'did-finish-load');
+    const ok = await win.webContents.executeJavaScript(
+      'window.__xmLocate ? window.__xmLocate(' + JSON.stringify(String(id)) + ') : false',
+      true,
+    );
+    return ok === true;
+  } catch { return false; }
 }
 
 function registerBallIpc() {
@@ -1825,14 +2032,7 @@ function registerBallIpc() {
         return { ok: false, online: false, target: t, error: j.error || ('对方返回 ' + r.status) };
       }
       const d = await r.json();
-      const items = (d.items || []).slice(0, 8).map((it) => {
-        const f = (it.parts || []).find((p) => p.kind !== 'text');
-        return {
-          id: it.id, kind: it.kind, text: it.text || '',
-          name: f && f.name, fid: f && f.fid, file: f && f.file,
-          from: it.from, time: it.time,
-        };
-      });
+      const items = (d.items || []).slice(0, 10).map((it) => ballItemView(t, it));
       const lastSeen = Number(readSettings().ballSeen || 0);
       return {
         ok: true, online: true, target: t, port: t.port,
@@ -1850,30 +2050,63 @@ function registerBallIpc() {
     return { ok: true };
   });
 
+  /** 页面初次加载要一份几何（窗口由主进程摆，页面只把球和面板放到对应位置） */
+  ipcMain.handle('ball:layout', () => ({
+    size: ballDiscPx, box: ballBoxPx, ball: { left: 0, top: 0 }, panel: null,
+  }));
+
   ipcMain.handle('ball:expand', (_e, on) => {
-    if (!ballWin || ballWin.isDestroyed()) return { ball: { left: 0, top: 0 } };
+    if (!ballWin || ballWin.isDestroyed()) return { size: ballDiscPx, box: ballBoxPx, ball: { left: 0, top: 0 } };
     ballOpen = !!on;
     if (!on) {
-      const a = ballAnchor || clampBallPos(readBallPref().pos);
-      ballWin.setBounds({ x: a.x, y: a.y, width: BALL_SIZE, height: BALL_SIZE });
-      return { ball: { left: 0, top: 0 } };
+      const a = clampBallPos(ballAnchor || readBallPref().pos);
+      ballAnchor = a;
+      ballGeo = null;
+      ballWin.setBounds({ x: a.x, y: a.y, width: ballBoxPx, height: ballBoxPx });
+      return { size: ballDiscPx, box: ballBoxPx, ball: { left: 0, top: 0 }, panel: null };
     }
-    const L = ballLayout();
-    ballWin.setBounds(L.bounds);
-    return { ball: L.ball, panel: L.panel };
+    ballGeo = ballLayout();
+    ballWin.setBounds(ballGeo.bounds);
+    return ballGeo.panelAndBall();
   });
 
+  /**
+   * 拖动：传这一帧的位移，主进程直接挪窗口。
+   * 展开后也要能挪 —— 这时候球和面板在同一个窗口里，窗口整体移动，
+   * 球位再按窗口内偏移换算回屏幕坐标，收起来时才不会跳。
+   */
   ipcMain.on('ball:move', (_e, dx, dy) => {
-    if (!ballWin || ballWin.isDestroyed() || ballOpen) return;
-    const [x, y] = ballWin.getPosition();
-    ballWin.setPosition(Math.round(x + (Number(dx) || 0)), Math.round(y + (Number(dy) || 0)));
+    if (!ballWin || ballWin.isDestroyed()) return;
+    const b = ballWin.getBounds();
+    const area = screen.getDisplayMatching(b).workArea;
+    let nx = Math.round(b.x + (Number(dx) || 0));
+    let ny = Math.round(b.y + (Number(dy) || 0));
+    nx = Math.min(Math.max(nx, area.x), area.x + area.width - b.width);
+    ny = Math.min(Math.max(ny, area.y), area.y + area.height - b.height);
+    if (nx === b.x && ny === b.y) return;
+    ballWin.setPosition(nx, ny);
+    const off = (ballOpen && ballGeo) ? ballGeo.ball : { left: 0, top: 0 };
+    ballAnchor = { x: nx + off.left, y: ny + off.top };
   });
 
   ipcMain.on('ball:drag-end', () => {
     if (!ballWin || ballWin.isDestroyed()) return;
-    const [x, y] = ballWin.getPosition();
-    ballAnchor = { x, y };
-    updateSettings({ ballPos: { x, y } });
+    if (!ballAnchor) {
+      const [x, y] = ballWin.getPosition();
+      ballAnchor = { x, y };
+    }
+    updateSettings({ ballPos: { x: ballAnchor.x, y: ballAnchor.y } });
+  });
+
+  /** 滚轮换大小：球上滚一下比翻菜单快 */
+  ipcMain.handle('ball:size-step', (_e, dir) => {
+    const order = ['sm', 'md', 'lg'];
+    const cur = readBallPref().size;
+    const at = Math.max(0, order.indexOf(cur));
+    const next = order[Math.min(order.length - 1, Math.max(0, at + (Number(dir) > 0 ? 1 : -1)))];
+    if (next === cur) return { ok: true, size: cur };
+    setBallSize(next);
+    return { ok: true, size: next };
   });
 
   ipcMain.handle('ball:open-host', () => { ensureHostWindow(); return { ok: true }; });
@@ -1884,54 +2117,77 @@ function registerBallIpc() {
   // 主窗口一拿到身份就报过来，球的所有请求都借这个身份
   ipcMain.on('ball:identity', (_e, base, cid) => { reportBallIdentity(base, cid); });
 
-  /** 在文件管理器里定位：只有主机模式能直接指到磁盘，连别人时只能让浏览器去下 */
+  /** 定位：把人带到主界面那一行，滚到中间再闪一下 */
+  ipcMain.handle('ball:locate', async (_e, id) => {
+    const t = ballTarget();
+    if (!t) return { ok: false, error: '本机服务没开' };
+    let win = ballWindowFor(t);
+    // 主窗口可能被收进托盘了、还停在启动页（file://）—— 先把它叫成真正的界面
+    if (!win || win.isDestroyed() || String(win.webContents.getURL()).startsWith('file:')) {
+      win = await ensureHostWindow();
+    }
+    if (!win || win.isDestroyed()) return { ok: false, error: '没有可以定位的窗口' };
+    const ok = await locateInWindow(win, id);
+    return ok ? { ok: true } : { ok: false, error: '这条已不在当前列表里' };
+  });
+
+  /** 打开文件位置：只有本机真有这份文件时才有意义 */
   ipcMain.handle('ball:reveal', (_e, payload) => {
     const t = ballTarget();
     if (!t) return { ok: false, error: '本机服务没开' };
-    const file = payload && payload.file;
-    if (t.kind === 'host' && file) {
-      const p = path.join(server.FILES_DIR, String(file));
-      if (fs.existsSync(p)) { shell.showItemInFolder(p); return { ok: true }; }
-      return { ok: false, error: '文件已经不在了' };
-    }
-    const fid = payload && payload.fid;
-    if (fid) shell.openExternal(ballUrl(t, '/f/' + encodeURIComponent(fid)));
-    return { ok: false, error: '连别人时只能下载查看' };
+    const p = ballLocalCopy(t, payload || {});
+    if (!p) return { ok: false, error: t.kind === 'host' ? '文件已经不在了' : '还没下载到本机' };
+    shell.showItemInFolder(p);
+    return { ok: true };
   });
 
-  ipcMain.handle('ball:send', async (_e, paths) => {
+  /**
+   * 发东西：一段文字 / 一组文件 / 两者一起。
+   * 文字和文件可以同属一条消息 —— 先说一句「这是原图」，附件跟在后面。
+   */
+  ipcMain.handle('ball:send', async (_e, payload) => {
     const t = ballTarget();
     if (!t) return { ok: false, error: '本机服务没开' };
-    const list = (Array.isArray(paths) ? paths : []).filter(Boolean).slice(0, 20);
-    if (!list.length) return { ok: false, error: '没有可发送的文件' };
 
+    const p = payload && typeof payload === 'object' ? payload : { paths: payload };
+    const list = (Array.isArray(p.paths) ? p.paths : []).filter(Boolean).slice(0, 20);
+    const body = String(p.text || '').replace(/\u0000/g, '').trim();
+    if (!list.length && !body) return { ok: false, error: '没有可发送的内容' };
+
+    const cid = ballIdentity();
     const parts = [];
-    let failed = 0;
-    for (const p of list) {
+    const failed = [];
+
+    for (const one of list) {
       try {
-        const st = fs.statSync(p);
-        if (!st.isFile()) { failed++; continue; }
-        const q = '/api/upload?name=' + encodeURIComponent(path.basename(p)) +
-          '&cid=' + encodeURIComponent(ballCid || '');
-        const body = Readable.toWeb(fs.createReadStream(p));
+        const st = fs.statSync(one);
+        if (!st.isFile()) { failed.push(one); continue; }
+        const q = '/api/upload?name=' + encodeURIComponent(path.basename(one)) +
+          '&cid=' + encodeURIComponent(cid);
+        const stream = Readable.toWeb(fs.createReadStream(one));
         const r = await fetch(ballUrl(t, q), {
           method: 'POST',
-          body,
+          body: stream,
           duplex: 'half',
           headers: { ...ballHeaders(), 'content-type': 'application/octet-stream' },
         });
-        if (!r.ok) { failed++; continue; }
+        if (!r.ok) { failed.push(one); continue; }
         const d = await r.json();
-        if (d.part) parts.push(d.part); else failed++;
-      } catch { failed++; }
+        if (d.part) parts.push(d.part); else failed.push(one);
+      } catch { failed.push(one); }
     }
 
-    if (!parts.length) return { ok: false, error: failed ? '文件都没传上去' : '没有可发送的文件' };
+    if (list.length && !parts.length) {
+      return { ok: false, error: failed.length ? '文件都没传上去' : '没有可发送的文件' };
+    }
+
+    // 文字排在最前面：一条消息里先说事，再挂附件
+    const all = body ? [{ type: 'text', text: body }, ...parts] : parts;
     try {
       const r = await fetch(ballUrl(t, '/api/send'), {
         method: 'POST',
         headers: { ...ballHeaders(), 'content-type': 'application/json' },
-        body: JSON.stringify({ cid: ballCid, parts }),
+        body: JSON.stringify({ cid, parts: all }),
       });
       if (!r.ok) {
         const j = await r.json().catch(() => ({}));
@@ -1941,7 +2197,7 @@ function registerBallIpc() {
       return { ok: false, error: '发送失败' };
     }
     refreshTray();
-    return { ok: true, sent: parts.length, failed };
+    return { ok: true, sent: parts.length, failed: failed.length, text: !!body };
   });
 }
 
@@ -1968,6 +2224,7 @@ if (!app.requestSingleInstanceLock()) {
 
     buildMenu();          // 菜单先挂上，别让窗口出来时顶栏是空的
     buildTray();          // 托盘尽早建：关闭按钮的三种结局都依赖它在不在
+    syncBallMetrics();    // 球的尺寸先算好，后面布局都靠它
     registerBallIpc();    // 悬浮球的请求通道先打通，窗口起来就能用
     createHostWindow();   // 窗口与启动页立刻出现 —— 双击就有反馈，不用干等任何东西
     if (readBallPref().enabled) createBallWindow();

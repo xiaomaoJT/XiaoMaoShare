@@ -1648,6 +1648,9 @@ const MIME = {
   '.pdf': 'application/pdf',
   '.txt': 'text/plain; charset=utf-8', '.md': 'text/markdown; charset=utf-8',
   '.json': 'application/json; charset=utf-8', '.csv': 'text/plain; charset=utf-8',
+  // 页面共用的小脚本 / 样式：类型必须给对，否则 nosniff 会把它当二进制拒绝执行
+  '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
   '.zip': 'application/zip', '.html': 'text/plain; charset=utf-8',
 };
 
@@ -1799,8 +1802,8 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // 静态资源（图标 / 品牌图）
-  if (method === 'GET' && /^\/[\w.-]+\.(png|gif|jpe?g|svg|ico|webp)$/i.test(pathname)) {
+  // 静态资源（图标 / 品牌图 / 页面共用的小脚本）
+  if (method === 'GET' && /^\/[\w.-]+\.(png|gif|jpe?g|svg|ico|webp|js|css)$/i.test(pathname)) {
     const filePath = path.join(PUBLIC_DIR, path.basename(pathname));
     fs.readFile(filePath, (err, buf) => {
       if (err) {
