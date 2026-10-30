@@ -590,7 +590,7 @@
     font-size:12.5px;font-weight:550;
   }
   .sel-bar[hidden]{display:none}
-  /* 提示文案比数字长得多（"点卡片选择内容，可打包下载或删除"），
+  /* 提示文案比数字长得多（"点卡片多选，可下载或删除"），
      多了两个动作按钮后必须允许它收缩，否则窄屏会把按钮挤出去 */
   .sel-bar #selCount{
     flex:0 1 auto;min-width:0;
@@ -3238,6 +3238,11 @@
     if (!cid) return;
     state.cid = cid;
     try { localStorage.setItem('xm.cid', cid); } catch (e) {}
+    // 悬浮球是个独立窗口（file:// 加载），拿不到这里的 localStorage ——
+    // 把身份和当前 origin 报给主进程，球的读写都借这份身份
+    if (window.xmDesktop && window.xmDesktop.reportIdentity) {
+      try { window.xmDesktop.reportIdentity(location.origin, cid); } catch (e) {}
+    }
   }
   function newCid() {
     var s = '', abc = 'abcdefghijklmnopqrstuvwxyz0123456789';
@@ -4410,7 +4415,7 @@
   }
   function updateSelBar() {
     var n = state.picked.size;
-    $('selCount').textContent = n ? ('已选 ' + n + ' 项') : '点卡片选择内容，可打包下载或删除';
+    $('selCount').textContent = n ? ('已选 ' + n + ' 项') : '点卡片多选，可下载或删除';
     $('selDl').disabled = !n;
     $('selDel').disabled = !n;
   }

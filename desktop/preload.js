@@ -40,6 +40,13 @@ contextBridge.exposeInMainWorld('xmDesktop', {
   /** 本机服务状态：端口、局域网地址、已连接的其他主机、最近连过 */
   info: () => ipcRenderer.invoke('host:info'),
 
+  /**
+   * 把当前 origin 与设备身份报给主进程。
+   * 悬浮球是个独立窗口，读列表 / 发文件要借这份身份 ——
+   * 它自己是 file:// 加载的，拿不到页面的 localStorage，也不该自己去处理令牌。
+   */
+  reportIdentity: (base, cid) => ipcRenderer.send('ball:identity', base, cid),
+
   /* ---- 启动选择页（desktop/start.html）---- */
 
   /** 读启动方式与最近地址，决定选择页显示选择还是继续转圈 */

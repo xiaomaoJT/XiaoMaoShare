@@ -15,6 +15,7 @@
 const { app, BrowserWindow, ipcMain, Menu, Tray, shell, clipboard, dialog, nativeImage, screen, Notification } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
+const { Readable } = require('node:stream');
 const { once } = require('node:events');
 
 /**
@@ -78,6 +79,12 @@ let quitting = false;
 let tray = null;          // 系统托盘 / 菜单栏图标；建不起来时为 null（Linux 缺 appindicator 之类）
 let closeAsking = false;  // 关闭确认框只允许存在一个，连点红叉不会叠出一串
 let trayHintShown = false; // 「已收进托盘」的气泡只在第一次提示，之后不再打扰
+
+let ballWin = null;       // 悬浮球窗口
+let ballOpen = false;     // 面板是否展开（展开时窗口变大）
+let ballAnchor = null;    // 收起时球的屏幕位置，展开时用它算往哪边弹
+let ballCid = '';         // 主窗口上报的设备身份，球的请求靠它拿权限
+let ballBase = '';        // 主窗口上报的 origin（连别人时是对方的地址）
 
 /* ------------------------------------------------------------ 地址处理 */
 
@@ -555,6 +562,13 @@ function buildMenu() {
             { label: '收入托盘（服务继续）', type: 'radio', checked: closePref === 'tray', click: () => setCloseAction('tray') },
             { label: '完全退出', type: 'radio', checked: closePref === 'quit', click: () => setCloseAction('quit') },
           ],
+        },
+        {
+          // 拖个文件上去就能发出去，不用切窗口
+          label: '显示悬浮球',
+          type: 'checkbox',
+          checked: readBallPref().enabled,
+          click: (item) => setBallEnabled(item.checked),
         },
         { type: 'separator' },
         // 服务跑没跑起来，只有这里看得见 —— 连别人的主机时主窗口是隐藏的，
@@ -1538,6 +1552,12 @@ function trayTemplate(inf) {
         { label: '完全退出', type: 'radio', checked: closePref === 'quit', click: () => setCloseAction('quit') },
       ],
     },
+    {
+      label: '显示悬浮球',
+      type: 'checkbox',
+      checked: readBallPref().enabled,
+      click: (item) => setBallEnabled(item.checked),
+    },
     { type: 'separator' },
     { label: '退出', click: () => app.quit() },
   ];
@@ -1640,6 +1660,298 @@ async function askCloseChoice() {
   // 2 = 取消：什么都不做，窗口原样留着
 }
 
+/* ------------------------------------------------------------ 悬浮球 */
+
+/**
+ * 悬浮球：一个始终置顶的 64px 圆球，拖着文件扔上去就直接发出去，
+ * 点一下展开面板看最近几条。
+ *
+ * 它存在的理由不是「多一个入口」，而是「不打断手上的事」——
+ * 传文件本来要：找窗口 → 切过去 → 选文件 → 发，一套下来十几秒。
+ *
+ * 数据全部经主进程转发，不在球的渲染层直接打请求：
+ * 球要同时服务两种身份（自己是主机：localhost + 主控令牌；连着别人：对方地址 + 授权 cid），
+ * origin 和凭据都只有主进程知道。
+ */
+const BALL_PAGE = path.join(__dirname, 'ball.html');
+const BALL_SIZE = 84;                                    // 球体 64 + 四周 10px 给自绘阴影留位（透明窗口会裁掉超出部分）
+const BALL_GAP = 12;                                     // 球与面板之间
+const BALL_PANEL = { width: 340, height: 420 };
+
+function readBallPref() {
+  const s = readSettings();
+  const p = s.ballPos;
+  return {
+    enabled: s.ballEnabled === true,                     // 默认不起：桌面组件得用户自己同意才出现
+    pos: p && Number.isFinite(p.x) && Number.isFinite(p.y) ? { x: p.x, y: p.y } : null,
+  };
+}
+
+function setBallEnabled(on) {
+  updateSettings({ ballEnabled: !!on });
+  if (on) createBallWindow();
+  else destroyBallWindow();
+  buildMenu();
+  refreshTray();
+  return { ok: true, enabled: !!on };
+}
+
+/** 位置兜底：默认贴右上角；记下来的位置要落回某块屏幕里（拔了外接屏也不会跑到看不见的地方） */
+function clampBallPos(pos) {
+  const area = screen.getDisplayNearestPoint(pos || { x: 200, y: 200 }).workArea;
+  const raw = pos || { x: area.x + area.width - BALL_SIZE - 24, y: area.y + 120 };
+  return {
+    x: Math.round(Math.min(Math.max(raw.x, area.x), area.x + area.width - BALL_SIZE)),
+    y: Math.round(Math.min(Math.max(raw.y, area.y), area.y + area.height - BALL_SIZE)),
+  };
+}
+
+function createBallWindow() {
+  if (ballWin && !ballWin.isDestroyed()) { ballWin.showInactive(); return ballWin; }
+
+  const pos = clampBallPos(readBallPref().pos);
+  ballAnchor = pos;
+  ballOpen = false;
+
+  ballWin = new BrowserWindow({
+    x: pos.x, y: pos.y, width: BALL_SIZE, height: BALL_SIZE,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    resizable: false, maximizable: false, minimizable: false, fullscreenable: false,
+    skipTaskbar: true,          // 任务栏里不留第二个条目，它是个浮件
+    alwaysOnTop: true,
+    hasShadow: false,           // 系统阴影会按矩形画，透明窗口上会露一圈方框
+    show: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'ball-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,   // preload 要用 webUtils 从拖进来的 File 上取真实路径，沙箱下拿不到
+    },
+  });
+
+  // screen-saver 这一级才压得住全屏应用；普通 alwaysOnTop 一进全屏就被盖住
+  ballWin.setAlwaysOnTop(true, 'screen-saver');
+  if (IS_MAC) {
+    try { ballWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch { /* 老系统 */ }
+  }
+
+  ballWin.loadFile(BALL_PAGE);
+  ballWin.once('ready-to-show', () => { if (ballWin && !ballWin.isDestroyed()) ballWin.showInactive(); });
+  ballWin.on('closed', () => { ballWin = null; ballOpen = false; });
+  ballWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  return ballWin;
+}
+
+function destroyBallWindow() {
+  if (!ballWin || ballWin.isDestroyed()) { ballWin = null; return; }
+  // 关窗前把位置记下来，下次还在原地起来
+  try {
+    const [x, y] = ballWin.getPosition();
+    updateSettings({ ballPos: { x, y } });
+  } catch { /* 拿不到就算了 */ }
+  ballWin.destroy();
+  ballWin = null;
+  ballOpen = false;
+}
+
+/**
+ * 展开时窗口要同时装下「球」和「面板」。
+ * 球与面板并排（不是斜对角 —— 那样会空出一个 L 形的洞），
+ * 水平方向默认往右弹、贴右边自动翻到左侧；垂直方向按球的位置决定贴顶还是贴底。
+ */
+function ballLayout() {
+  const anchor = ballAnchor || clampBallPos(readBallPref().pos);
+  const area = screen.getDisplayNearestPoint(anchor).workArea;
+
+  const right = anchor.x + BALL_SIZE + BALL_GAP + BALL_PANEL.width <= area.x + area.width;
+  const down = anchor.y + BALL_PANEL.height <= area.y + area.height;
+
+  const w = BALL_SIZE + BALL_GAP + BALL_PANEL.width;
+  const h = Math.max(BALL_SIZE, BALL_PANEL.height);
+  const x = Math.min(Math.max(right ? anchor.x : anchor.x + BALL_SIZE - w, area.x), area.x + area.width - w);
+  const y = Math.min(Math.max(down ? anchor.y : anchor.y + BALL_SIZE - h, area.y), area.y + area.height - h);
+
+  return {
+    bounds: { x: Math.round(x), y: Math.round(y), width: w, height: h },
+    ball: { left: right ? 0 : w - BALL_SIZE, top: down ? 0 : h - BALL_SIZE },
+    panel: {
+      left: right ? BALL_SIZE + BALL_GAP : 0,
+      top: 0,
+      width: BALL_PANEL.width,
+      height: BALL_PANEL.height,
+    },
+  };
+}
+
+/** 球现在该跟谁打交道：主窗口收起来且开着别人的主机 → 跟对方；否则回本机 */
+function ballTarget() {
+  const opened = [...links.values()].pop();
+  const hostHidden = !hostWin || hostWin.isDestroyed() || !hostWin.isVisible();
+  if (opened && hostHidden) {
+    return { base: opened.url.replace(/\/+$/, ''), kind: 'link', label: '连到 ' + opened.host, port: '' };
+  }
+  // 主窗口自己就在连别人（页面报上来的 origin 不是本机）—— 球跟着它走
+  if (hostHidden && ballBase && !/^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(ballBase)) {
+    const label = ballBase.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+    return { base: ballBase.replace(/\/+$/, ''), kind: 'link', label: '连到 ' + label, port: '' };
+  }
+  const inf = server.serverInfo();
+  if (inf.running) return { base: 'http://127.0.0.1:' + inf.port, kind: 'host', label: '本机主机', port: inf.port };
+  return null;
+}
+
+/** 主机模式带主控令牌（不然读不到私聊、也发不出东西）；连接模式只能靠 cid */
+function ballUrl(t, p) {
+  if (t.kind !== 'host') return t.base + p;
+  return t.base + p + (p.includes('?') ? '&' : '?') + 'host=' + encodeURIComponent(server.hostToken);
+}
+
+function ballHeaders() {
+  const h = {};
+  if (ballCid) h['x-xm-cid'] = ballCid;
+  return h;
+}
+
+function registerBallIpc() {
+  ipcMain.handle('ball:list', async () => {
+    const t = ballTarget();
+    if (!t) return { ok: false, online: false, error: '本机服务没开' };
+    try {
+      const r = await fetch(ballUrl(t, '/api/list'), { headers: ballHeaders() });
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}));
+        return { ok: false, online: false, target: t, error: j.error || ('对方返回 ' + r.status) };
+      }
+      const d = await r.json();
+      const items = (d.items || []).slice(0, 8).map((it) => {
+        const f = (it.parts || []).find((p) => p.kind !== 'text');
+        return {
+          id: it.id, kind: it.kind, text: it.text || '',
+          name: f && f.name, fid: f && f.fid, file: f && f.file,
+          from: it.from, time: it.time,
+        };
+      });
+      const lastSeen = Number(readSettings().ballSeen || 0);
+      return {
+        ok: true, online: true, target: t, port: t.port,
+        items,
+        unread: items.filter((it) => (it.time || 0) > lastSeen).length,
+      };
+    } catch {
+      return { ok: false, online: false, target: t, error: '连不上' };
+    }
+  });
+
+  /** 面板打开过就算看过了 */
+  ipcMain.handle('ball:seen', () => {
+    updateSettings({ ballSeen: Date.now() });
+    return { ok: true };
+  });
+
+  ipcMain.handle('ball:expand', (_e, on) => {
+    if (!ballWin || ballWin.isDestroyed()) return { ball: { left: 0, top: 0 } };
+    ballOpen = !!on;
+    if (!on) {
+      const a = ballAnchor || clampBallPos(readBallPref().pos);
+      ballWin.setBounds({ x: a.x, y: a.y, width: BALL_SIZE, height: BALL_SIZE });
+      return { ball: { left: 0, top: 0 } };
+    }
+    const L = ballLayout();
+    ballWin.setBounds(L.bounds);
+    return { ball: L.ball, panel: L.panel };
+  });
+
+  ipcMain.on('ball:move', (_e, dx, dy) => {
+    if (!ballWin || ballWin.isDestroyed() || ballOpen) return;
+    const [x, y] = ballWin.getPosition();
+    ballWin.setPosition(Math.round(x + (Number(dx) || 0)), Math.round(y + (Number(dy) || 0)));
+  });
+
+  ipcMain.on('ball:drag-end', () => {
+    if (!ballWin || ballWin.isDestroyed()) return;
+    const [x, y] = ballWin.getPosition();
+    ballAnchor = { x, y };
+    updateSettings({ ballPos: { x, y } });
+  });
+
+  ipcMain.handle('ball:open-host', () => { ensureHostWindow(); return { ok: true }; });
+  ipcMain.handle('ball:copy', (_e, text) => { clipboard.writeText(String(text || '')); return { ok: true }; });
+
+  ipcMain.handle('ball:hide', () => setBallEnabled(false));
+
+  // 主窗口一拿到身份就报过来，球的所有请求都借这个身份
+  ipcMain.on('ball:identity', (_e, base, cid) => { reportBallIdentity(base, cid); });
+
+  /** 在文件管理器里定位：只有主机模式能直接指到磁盘，连别人时只能让浏览器去下 */
+  ipcMain.handle('ball:reveal', (_e, payload) => {
+    const t = ballTarget();
+    if (!t) return { ok: false, error: '本机服务没开' };
+    const file = payload && payload.file;
+    if (t.kind === 'host' && file) {
+      const p = path.join(server.FILES_DIR, String(file));
+      if (fs.existsSync(p)) { shell.showItemInFolder(p); return { ok: true }; }
+      return { ok: false, error: '文件已经不在了' };
+    }
+    const fid = payload && payload.fid;
+    if (fid) shell.openExternal(ballUrl(t, '/f/' + encodeURIComponent(fid)));
+    return { ok: false, error: '连别人时只能下载查看' };
+  });
+
+  ipcMain.handle('ball:send', async (_e, paths) => {
+    const t = ballTarget();
+    if (!t) return { ok: false, error: '本机服务没开' };
+    const list = (Array.isArray(paths) ? paths : []).filter(Boolean).slice(0, 20);
+    if (!list.length) return { ok: false, error: '没有可发送的文件' };
+
+    const parts = [];
+    let failed = 0;
+    for (const p of list) {
+      try {
+        const st = fs.statSync(p);
+        if (!st.isFile()) { failed++; continue; }
+        const q = '/api/upload?name=' + encodeURIComponent(path.basename(p)) +
+          '&cid=' + encodeURIComponent(ballCid || '');
+        const body = Readable.toWeb(fs.createReadStream(p));
+        const r = await fetch(ballUrl(t, q), {
+          method: 'POST',
+          body,
+          duplex: 'half',
+          headers: { ...ballHeaders(), 'content-type': 'application/octet-stream' },
+        });
+        if (!r.ok) { failed++; continue; }
+        const d = await r.json();
+        if (d.part) parts.push(d.part); else failed++;
+      } catch { failed++; }
+    }
+
+    if (!parts.length) return { ok: false, error: failed ? '文件都没传上去' : '没有可发送的文件' };
+    try {
+      const r = await fetch(ballUrl(t, '/api/send'), {
+        method: 'POST',
+        headers: { ...ballHeaders(), 'content-type': 'application/json' },
+        body: JSON.stringify({ cid: ballCid, parts }),
+      });
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}));
+        return { ok: false, error: j.error || '发送失败' };
+      }
+    } catch {
+      return { ok: false, error: '发送失败' };
+    }
+    refreshTray();
+    return { ok: true, sent: parts.length, failed };
+  });
+}
+
+/** 主窗口把自己的身份和所在 origin 报过来 —— 球用它读列表、发文件 */
+function reportBallIdentity(base, cid) {
+  if (typeof base === 'string' && /^https?:\/\//i.test(base)) ballBase = base;
+  if (typeof cid === 'string' && cid) ballCid = cid.slice(0, 64);
+  return { ok: true };
+}
+
 /* ------------------------------------------------------------ 生命周期 */
 
 if (!app.requestSingleInstanceLock()) {
@@ -1656,7 +1968,9 @@ if (!app.requestSingleInstanceLock()) {
 
     buildMenu();          // 菜单先挂上，别让窗口出来时顶栏是空的
     buildTray();          // 托盘尽早建：关闭按钮的三种结局都依赖它在不在
+    registerBallIpc();    // 悬浮球的请求通道先打通，窗口起来就能用
     createHostWindow();   // 窗口与启动页立刻出现 —— 双击就有反馈，不用干等任何东西
+    if (readBallPref().enabled) createBallWindow();
 
     setupAutoUpdater();
 

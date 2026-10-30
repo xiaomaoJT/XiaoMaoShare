@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>XiaoMao 互传 · 悬浮球</title>
+<style>
+  :root {
+    --card: #ffffff;
+    --line: #e3e8f0;
+    --ink: #14171c;
+    --ink2: #5a6473;
+    --ink3: #8a94a6;
+    --accent: #4c6ef5;
+    --accent-soft: #eef2ff;
+    --ok: #12b886;
+    --err: #c0392b;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%;
+    background: transparent;         /* 窗口本身是透明的，只有球和面板有实体 */
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                 "Microsoft YaHei", "Hiragino Sans GB", sans-serif;
+    user-select: none;
+    overflow: hidden;
+    color: var(--ink);
+  }
+
+  /* ---------------- 球 ---------------- */
+  #ball {
+    position: absolute; left: 0; top: 0;
+    width: 84px; height: 84px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: default;
+  }
+  #ball .disc {
+    width: 64px; height: 64px; border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 4px 14px -4px rgba(16, 24, 40, .45), 0 0 0 1px rgba(20, 23, 28, .07);
+    overflow: hidden;
+    position: relative;
+    transition: transform .16s cubic-bezier(.2,.8,.3,1), box-shadow .16s;
+  }
+  #ball:hover .disc { transform: scale(1.05); box-shadow: 0 6px 18px -6px rgba(16, 24, 40, .55), 0 0 0 1px rgba(20, 23, 28, .09); }
+  #ball.dragging .disc { transform: scale(.94); }
+  #ball img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+
+  /* 未读角标：比球更靠外一点，不然被圆边吃掉 */
+  #badge {
+    position: absolute; top: 6px; right: 6px;
+    min-width: 20px; height: 20px; padding: 0 6px;
+    border-radius: 10px; background: var(--err);
+    color: #fff; font-size: 11.5px; font-weight: 700; line-height: 20px;
+    text-align: center;
+    box-shadow: 0 2px 6px rgba(192, 57, 43, .45);
+  }
+  #badge[hidden] { display: none; }
+
+  /* 投放高亮：拖动文件悬停时整颗球亮起来 */
+  #ball.drop .disc { transform: scale(1.08); box-shadow: 0 0 0 3px var(--accent), 0 12px 30px -8px rgba(76, 110, 245, .6); }
+  #ball.drop .disc::after {
+    content: '松手发送';
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(76, 110, 245, .86); color: #fff;
+    font-size: 12px; font-weight: 700;
+  }
+
+  /* ---------------- 面板 ---------------- */
+  #panel {
+    position: absolute;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    box-shadow: 0 24px 60px -22px rgba(16, 24, 40, .55);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+    animation: pop .14s ease-out;
+  }
+  #panel[hidden] { display: none; }
+  @keyframes pop { from { opacity: 0; transform: scale(.97); } to { opacity: 1; transform: none; } }
+
+  .p-head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 12px 14px 10px; border-bottom: 1px solid var(--line);
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ink3); flex: none; }
+  .dot.on { background: var(--ok); box-shadow: 0 0 0 3px rgba(18, 184, 134, .16); }
+  .p-title { font-size: 12.5px; font-weight: 600; color: var(--ink); }
+  .p-sub { margin-left: auto; font-size: 11.5px; color: var(--ink3); }
+
+  .p-list { flex: 1; overflow-y: auto; padding: 6px; }
+  .p-list::-webkit-scrollbar { width: 8px; }
+  .p-list::-webkit-scrollbar-thumb { background: #dfe5ef; border-radius: 4px; border: 2px solid #fff; }
+
+  .row {
+    display: flex; gap: 9px; align-items: flex-start;
+    padding: 9px 10px; border-radius: 10px;
+    cursor: default;
+  }
+  .row:hover { background: #f6f8fc; }
+  .row .ico {
+    width: 26px; height: 26px; border-radius: 8px; flex: none;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; background: var(--accent-soft); color: var(--accent);
+  }
+  .row.file .ico { background: #fff4ec; color: #e8562f; }
+  .row .body { min-width: 0; flex: 1; }
+  .row .t1 {
+    font-size: 12.5px; line-height: 1.5; color: var(--ink);
+    overflow: hidden; text-overflow: ellipsis;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    word-break: break-word;
+  }
+  .row .t2 { font-size: 11px; color: var(--ink3); margin-top: 2px; }
+  .row .act { font-size: 11.5px; color: var(--accent); opacity: 0; flex: none; }
+  .row:hover .act { opacity: 1; }
+
+  .empty { padding: 28px 16px; text-align: center; font-size: 12.5px; color: var(--ink3); line-height: 1.7; }
+
+  .p-foot { padding: 10px 12px 12px; border-top: 1px solid var(--line); }
+  .dropzone {
+    border: 1.5px dashed #d5dce8; border-radius: 12px;
+    padding: 12px; text-align: center;
+    font-size: 12px; color: var(--ink3);
+    transition: .15s;
+  }
+  .dropzone.hot { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+  .p-actions { display: flex; gap: 8px; margin-top: 10px; }
+  .btn {
+    flex: 1; height: 34px; border-radius: 10px;
+    border: 1px solid var(--line); background: #fff;
+    font: inherit; font-size: 12.5px; font-weight: 600; color: var(--ink2);
+    cursor: default;
+  }
+  .btn:hover { border-color: #c8d3ea; color: var(--ink); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { filter: brightness(1.06); color: #fff; }
+
+  /* 拖文件的遮罩：铺满整个窗口，落在球和面板上都算 */
+  #dropmask {
+    position: fixed; inset: 0; z-index: 20;
+    display: none; align-items: center; justify-content: center;
+    background: rgba(76, 110, 245, .08);
+    border: 2px dashed var(--accent); border-radius: 18px;
+    color: var(--accent); font-size: 13px; font-weight: 700;
+  }
+  body.dropping #dropmask { display: flex; }
+
+  .toast {
+    position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%);
+    background: rgba(20, 23, 28, .9); color: #fff;
+    font-size: 12px; padding: 7px 12px; border-radius: 9px;
+    opacity: 0; pointer-events: none; transition: opacity .18s;
+    white-space: nowrap; max-width: 92%; overflow: hidden; text-overflow: ellipsis;
+  }
+  .toast.on { opacity: 1; }
+</style>
+</head>
+<body>
+  <div id="ball" title="点一下展开；拖文件进来直接发送">
+    <div class="disc"><img id="logo" alt=""></div>
+    <span id="badge" hidden>0</span>
+  </div>
+
+  <div id="panel" hidden>
+    <div class="p-head">
+      <span class="dot" id="dot"></span>
+      <span class="p-title" id="pTitle">XiaoMao 互传</span>
+      <span class="p-sub" id="pSub"></span>
+    </div>
+    <div class="p-list" id="pList"></div>
+    <div class="p-foot">
+      <div class="dropzone" id="dz">把文件拖到这颗球上，直接发出去</div>
+      <div class="p-actions">
+        <button class="btn" id="btnHide">收起悬浮球</button>
+        <button class="btn primary" id="btnHost">打开主界面</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="dropmask">松开就发送</div>
+  <div class="toast" id="toast"></div>
+
+<script>
+(function () {
+  var api = window.xmBall || {};
+  var $ = function (id) { return document.getElementById(id); };
+  var ball = $('ball');
+  var panel = $('panel');
+  var badge = $('badge');
+  var listEl = $('pList');
+  var toastEl = $('toast');
+  var open = false;
+  var lastSeen = Number(sessionStorage.getItem('ballSeen') || 0);
+  var pollTimer = null;
+
+  $('logo').src = '../public/icon.png';
+
+  function toast(msg) {
+    if (!msg) return;
+    toastEl.textContent = msg;
+    toastEl.classList.add('on');
+    clearTimeout(toast._t);
+    toast._t = setTimeout(function () { toastEl.classList.remove('on'); }, 2000);
+  }
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function ago(t) {
+    var s = Math.max(0, Math.floor((Date.now() - t) / 1000));
+    if (s < 60) return '刚刚';
+    if (s < 3600) return Math.floor(s / 60) + ' 分钟前';
+    if (s < 86400) return Math.floor(s / 3600) + ' 小时前';
+    return Math.floor(s / 86400) + ' 天前';
+  }
+
+  /* ---------------- 位置：主进程算好，这里只负责摆 ---------------- */
+  function layout(r) {
+    if (!r || !r.ball) return;
+    ball.style.left = r.ball.left + 'px';
+    ball.style.top = r.ball.top + 'px';
+    if (r.panel) {
+      panel.hidden = false;
+      panel.style.left = r.panel.left + 'px';
+      panel.style.top = r.panel.top + 'px';
+      panel.style.width = r.panel.width + 'px';
+      panel.style.height = r.panel.height + 'px';
+    } else {
+      panel.hidden = true;
+    }
+  }
+
+  async function setOpen(on) {
+    if (on === open) return;
+    open = on;
+    var r = await api.expand(on);
+    layout(r || {});
+    if (on) {
+      if (api.seen) api.seen();   // 打开就算看过了，角标立刻清
+      badge.hidden = true;
+      poll();
+    }
+  }
+
+  /* ---------------- 拖动 / 点击 ---------------- */
+  var drag = null;
+  ball.addEventListener('pointerdown', function (e) {
+    if (e.button !== 0) return;
+    drag = { sx: e.screenX, sy: e.screenY, lx: e.screenX, ly: e.screenY, moved: false };
+    try { ball.setPointerCapture(e.pointerId); } catch (err) { /* 老内核 */ }
+  });
+  ball.addEventListener('pointermove', function (e) {
+    if (!drag) return;
+    var dx = e.screenX - drag.lx;
+    var dy = e.screenY - drag.ly;
+    if (!drag.moved) {
+      if (Math.hypot(e.screenX - drag.sx, e.screenY - drag.sy) < 4) return;
+      drag.moved = true;
+      ball.classList.add('dragging');
+    }
+    drag.lx = e.screenX;
+    drag.ly = e.screenY;
+    api.move(dx, dy);
+  });
+  ball.addEventListener('pointerup', function (e) {
+    if (!drag) return;
+    var moved = drag.moved;
+    drag = null;
+    ball.classList.remove('dragging');
+    try { ball.releasePointerCapture(e.pointerId); } catch (err) { /* 同上 */ }
+    if (moved) api.dragEnd();
+    else setOpen(!open);
+  });
+
+  /* 面板展开后点外面的球仍能收回；按 Esc 也收 */
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && open) setOpen(false);
+  });
+
+  /* ---------------- 数据 ---------------- */
+  function paint(state) {
+    if (!state) return;
+    var host = state.target && state.target.kind === 'host';
+    $('dot').className = 'dot' + (state.online ? ' on' : '');
+    $('pTitle').textContent = host ? '本机主机' : (state.target && state.target.label) || 'XiaoMao 互传';
+    $('pSub').textContent = state.online ? ('可被连接 · ' + (state.port || '')) : (state.note || '未连接');
+
+    var items = state.items || [];
+    var n = state.unread || 0;
+    badge.hidden = !n;
+    badge.textContent = n > 99 ? '99+' : String(n);
+
+    if (!items.length) {
+      listEl.innerHTML = '<div class="empty">还没有内容<br>把文件拖到球上就能发</div>';
+      return;
+    }
+    listEl.innerHTML = items.map(function (it) {
+      var isFile = it.kind !== 'text';
+      var name = isFile ? (it.name || '文件') : (it.text || '').slice(0, 120);
+      var meta = (it.from ? it.from + ' · ' : '') + ago(it.time);
+      return '<div class="row' + (isFile ? ' file' : '') + '" data-fid="' + esc(it.fid || '') +
+        '" data-file="' + esc(it.file || '') + '" data-text="' + esc(isFile ? '' : (it.text || '')) + '">' +
+        '<div class="ico">' + (isFile ? '件' : '文') + '</div>' +
+        '<div class="body"><div class="t1">' + esc(name) + '</div><div class="t2">' + esc(meta) + '</div></div>' +
+        '<div class="act">' + (isFile ? '定位' : '复制') + '</div>' +
+        '</div>';
+    }).join('');
+  }
+
+  listEl.addEventListener('click', function (e) {
+    var row = e.target.closest('.row');
+    if (!row) return;
+    var fid = row.getAttribute('data-fid');
+    var file = row.getAttribute('data-file');
+    var text = row.getAttribute('data-text');
+    if (fid) api.reveal({ fid: fid, file: file });
+    else if (text) { api.copy(text); toast('已复制'); }
+  });
+
+  async function poll() {
+    try {
+      var st = await api.list();
+      if (st && st.ok) {
+        // 未读只在你没看的时候累加；面板开着就当看过了
+        if (open) {
+          var newest = (st.items || []).reduce(function (m, it) { return Math.max(m, it.time || 0); }, 0);
+          if (newest > lastSeen) {
+            lastSeen = newest;
+            sessionStorage.setItem('ballSeen', String(lastSeen));
+          }
+          st.unread = 0;
+        }
+        paint(st);
+      } else {
+        paint({ online: false, note: (st && st.error) || '未连接', items: [] });
+      }
+    } catch (err) { /* 断网 / 服务停了：保持上一次的样子，别抖 */ }
+  }
+
+  function startPoll() {
+    clearInterval(pollTimer);
+    pollTimer = setInterval(poll, open ? 3000 : 5000);
+    poll();
+  }
+
+  /* ---------------- 拖文件 ---------------- */
+  var dragDepth = 0;
+  window.addEventListener('dragenter', function (e) {
+    e.preventDefault();
+    dragDepth++;
+    document.body.classList.add('dropping');
+  });
+  window.addEventListener('dragover', function (e) { e.preventDefault(); });
+  window.addEventListener('dragleave', function (e) {
+    e.preventDefault();
+    if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove('dropping'); }
+  });
+  window.addEventListener('drop', async function (e) {
+    e.preventDefault();
+    dragDepth = 0;
+    document.body.classList.remove('dropping');
+    var files = e.dataTransfer && e.dataTransfer.files;
+    var paths = api.pathsOf ? api.pathsOf(files) : [];
+    if (!paths.length) return toast('只支持拖本机的文件');
+    toast('正在发送 ' + paths.length + ' 个文件…');
+    var r = await api.send(paths);
+    if (r && r.ok) { toast('已发送 ' + r.sent + ' 个'); poll(); }
+    else toast((r && r.error) || '发送失败');
+  });
+
+  /* ---------------- 按钮 ---------------- */
+  $('btnHost').addEventListener('click', function () { api.openHost(); });
+  $('btnHide').addEventListener('click', function () { api.hide(); });
+
+  if (api.onState) api.onState(function (s) { paint(s); });
+
+  layout({ ball: { left: 0, top: 0 } });
+  startPoll();
+})();
+</script>
+</body>
+</html>
