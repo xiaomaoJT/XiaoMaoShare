@@ -44,7 +44,9 @@
   }
   #ball:hover .disc { transform: scale(1.05); box-shadow: 0 6px 18px -6px rgba(16, 24, 40, .55), 0 0 0 1px rgba(20, 23, 28, .09); }
   #ball.dragging .disc { transform: scale(.94); }
-  #ball img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+  /* 骑行动图：原图四边自带约 14% 白边，缩到 88% 居中后内容四角恰好都落在圆内
+     （整幅铺满时后轮会被圆边切掉一线）。白底与球底同为纯白，接缝不可见。 */
+  #ball img { width: 88%; height: 88%; object-fit: contain; display: block; pointer-events: none; }
 
   /* 未读角标：比球更靠外一点，不然被圆边吃掉 */
   #badge {
@@ -253,7 +255,7 @@
   var pollTimer = null;
   var sending = false;
 
-  $('logo').src = '../public/icon.png';
+  $('logo').src = '../public/logo.gif';   // 会蹬车的动图，Electron 原生播放
 
   function toast(msg) {
     if (!msg) return;
