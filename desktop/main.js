@@ -251,6 +251,20 @@ function createHostWindow() {
  * 如果它还停在启动页而服务已经在跑，顺手补一次跳转，别让用户看到一张过期的选择页。
  */
 async function ensureHostWindow() {
+  // 启动记忆是「连上次那台」且那个窗口还开着（含收进托盘的）→ 直接回到它。
+  // 不做这步的话：主窗口先 show 出来、又按记忆 hide 转投对方窗口 —— 用户看到的就是
+  // 「蹦出两个窗口、第一个闪一下自己关了」的毛躁体验
+  const pref0 = readStartPref();
+  if (pref0.mode === 'link' && pref0.lastLinkUrl) {
+    for (const [, l] of links) {
+      if (l.url === pref0.lastLinkUrl && !l.win.isDestroyed()) {
+        if (l.win.isMinimized()) l.win.restore();
+        l.win.show();
+        l.win.focus();
+        return l.win;
+      }
+    }
+  }
   if (hostWin && !hostWin.isDestroyed()) {
     if (hostWin.isMinimized()) hostWin.restore();
     hostWin.show();
@@ -273,6 +287,25 @@ async function ensureHostWindow() {
   createHostWindow();
   if (hostWin.webContents.isLoading()) await once(hostWin.webContents, 'did-finish-load');
   return hostWin;
+}
+
+/**
+ * 「打开我的主机界面」（菜单 ⌘1 / 悬浮球按钮）：语义就是本机主机 ——
+ * 服务没起就当场起，然后主窗口指到本机界面。
+ * 不能复用 ensureHostWindow：那个按启动记忆走，记忆是「连别人」时
+ * 会把人又带回对方窗口，还让主窗口闪一下 —— 和菜单文案直接打架。
+ */
+async function openMyHost() {
+  const info = await ensureHostServer();
+  if (!info) {
+    startPageError('本机服务没起来。可以再试一次，或者先连别人的主机。');
+    return;
+  }
+  if (!hostWin || hostWin.isDestroyed()) createHostWindow();
+  if (hostWin.isMinimized()) hostWin.restore();
+  hostWin.show();
+  hostWin.focus();
+  hostWin.loadURL(info.hostUrl);
 }
 
 /**
@@ -331,7 +364,9 @@ function openLink(rawUrl) {
     const policy = readClosePref();
     if (policy === 'quit') { e.preventDefault(); setImmediate(() => app.quit()); return; }
     e.preventDefault();
-    const parkAndClose = () => { linkForceClose = true; win.close(); notifyTrayParked(); };
+    // 「收入托盘」是藏起来不是关掉：窗口一销毁，连接、这条记录、悬浮球的数据源全没 ——
+    // 球面板会瞬间变成空的，跟断了线一样。hide 保留现场，托盘/菜单随时叫回来
+    const parkAndClose = () => { linkForceClose = true; win.hide(); notifyTrayParked(); };
     if (policy === 'tray') { parkAndClose(); return; }
     askCloseChoice(parkAndClose);
   });
@@ -576,7 +611,7 @@ function buildMenu() {
     {
       label: '我的主机',
       submenu: [
-        { label: '打开我的主机界面', accelerator: 'CmdOrCtrl+1', click: () => ensureHostWindow() },
+        { label: '打开我的主机界面', accelerator: 'CmdOrCtrl+1', click: () => openMyHost() },
         {
           // 「记住这次选择」的反悔入口：记忆是什么、怎么改，都在这里
           label: '启动时…',
@@ -1520,8 +1555,9 @@ async function applyStartChoice(c) {
 
     if (!(await probeHost(linkUrl))) {
       // 连不上：退回选择页让人自己挑，别擅自把本机服务拉起来 ——
-      // 用户想的是「连他」，结果变成了「当主机」，这属于替人做主
-      if (!remember) updateSettings({ startMode: 'ask' });
+      // 用户想的是「连他」，结果变成了「当主机」，这属于替人做主。
+      // 记忆保留不动：对方可能只是暂时没开，下次还该自动试 ——
+      // 清了记忆的话，一次断线就把「直接连」降级成「每次问我」，用户会觉得记性变差了
       if (!hostWin || hostWin.isDestroyed()) createHostWindow();
       hostWin.show();
       hostWin.focus();
@@ -2339,7 +2375,7 @@ function registerBallIpc() {
     return { ok: true, size: next };
   });
 
-  ipcMain.handle('ball:open-host', () => { ensureHostWindow(); return { ok: true }; });
+  ipcMain.handle('ball:open-host', () => { openMyHost(); return { ok: true }; });
   ipcMain.handle('ball:copy', (_e, text) => { clipboard.writeText(String(text || '')); return { ok: true }; });
 
   ipcMain.handle('ball:hide', () => setBallEnabled(false));
@@ -2495,5 +2531,8 @@ if (!app.requestSingleInstanceLock()) {
       tray = null;
     }
     server.stopServer().finally(() => app.quit());
+    // 硬兜底：任何环节挂住（连接没收尾、对话框占着）都强制走人，
+    // 不然就是用户看到的「托盘没了、Dock 图标还坐着」的半死状态
+    setTimeout(() => { try { app.exit(0); } catch { /* 退出中 */ } }, 3000).unref();
   });
 }
