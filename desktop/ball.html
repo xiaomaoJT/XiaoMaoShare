@@ -40,6 +40,7 @@
     box-shadow: 0 4px 14px -4px rgba(16, 24, 40, .45), 0 0 0 1px rgba(20, 23, 28, .07);
     overflow: hidden;
     position: relative;
+    display: grid; place-items: center;   /* 缩小的 logo 居中，不是贴左上 */
     transition: transform .16s cubic-bezier(.2,.8,.3,1), box-shadow .16s;
   }
   #ball:hover .disc { transform: scale(1.05); box-shadow: 0 6px 18px -6px rgba(16, 24, 40, .55), 0 0 0 1px rgba(20, 23, 28, .09); }
