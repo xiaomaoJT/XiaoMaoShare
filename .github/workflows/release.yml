@@ -24,8 +24,23 @@ jobs:
       - name: 安装依赖
         run: npm ci
 
-      - name: 打包 mac + windows（electron-builder，用 build/icon.png 自动转 icns/ico）
-        run: npm run dist -- --mac --win --publish never
+      - name: 打包 Windows（安装版 nsis + 自解压便携版 SFX）
+        # 先出这两类，此时 win-unpacked 里还没有 portable.mode 标记，
+        # 保证 nsis 安装包不会把数据误写到 Programs 目录
+        run: npm run dist -- --win=nsis,portable --publish never
+
+      - name: 打包 Windows 解压即用便携版（避免 SFX 每次重解压约 8 秒）
+        # 在 win-unpacked 根目录放一个 portable.mode 标记，再压成 zip；
+        # 标记只进 zip，不进上面的 nsis 安装包
+        run: |
+          VER=$(node -p "require('./package.json').version")
+          cd release
+          touch win-unpacked/portable.mode
+          zip -r "XiaoMaoShare-${VER}-win-portable.zip" win-unpacked
+          cd ..
+
+      - name: 打包 macOS（dmg + 自动更新 zip）
+        run: npm run dist -- --mac --publish never
 
       - uses: actions/upload-artifact@v4
         with:

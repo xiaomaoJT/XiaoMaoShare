@@ -50,10 +50,16 @@ function looksLikeOurData(dir) {
   } catch { return false; }
 }
 
-// 免安装版（portable）运行时由启动器注入这个环境变量，指向 exe 所在目录
-const PORTABLE_ROOT = process.env.PORTABLE_EXECUTABLE_DIR || '';
+// 免安装版（portable）数据放在 exe 旁边的 data/ 下，U 盘拷走即整套带走。
+// 两种「免安装」分发形态都识别：
+//   1) electron-builder 的 SFX 自解压包会注入 PORTABLE_EXECUTABLE_DIR（指向临时解压目录）
+//   2) 我们另发的「解压即用」zip 包：在 exe 同级放一个 portable.mode 标记文件来识别
+//      （标记不进 nsis 安装包，避免安装版被误判成便携版而把数据写进 Programs 目录）
+const EXE_DIR = app.isPackaged ? path.dirname(app.getPath('exe')) : '';
+const PORTABLE_ROOT = process.env.PORTABLE_EXECUTABLE_DIR
+  || (EXE_DIR && fs.existsSync(path.join(EXE_DIR, 'portable.mode')) ? EXE_DIR : '');
 
-// 免安装版默认把数据放在 exe 旁边的 data/，U 盘拷走即整套带走；其余仍落 userData
+// 免安装版把数据放在 exe 旁边的 data/；其余仍落 userData
 process.env.XM_DATA_DIR = readDataDirPref() ||
   (PORTABLE_ROOT ? path.join(PORTABLE_ROOT, 'data') : path.join(app.getPath('userData'), 'data'));
 

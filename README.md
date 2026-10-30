@@ -541,6 +541,22 @@ macOS / Windows / Android 安装包已随 v2.0.0 发布于 [GitHub Releases](htt
 | Android | WebView 薄壳（`android/`） | GitHub Actions（ubuntu 自带 SDK，gradle 打包） | `XiaoMaoShare-*-android.apk`（debug 签名，直接装） |
 | iOS | **PWA 为主**；WKWebView 壳为预留（`ios/`） | 免费账号自签需 Xcode，见 [ios/README.md](ios/README.md) | — |
 
+### 各版本怎么选
+
+下载页每张 Release 都包含下面这些文件，按需取：
+
+| 文件 | 说明 | 适合谁 |
+| --- | --- | --- |
+| `XiaoMaoShare-*-win.exe` | **Windows 安装版**：装进系统、支持自动更新（差量下载） | 日常固定使用的电脑，**推荐** |
+| `XiaoMaoShare-*-win-portable.zip` | **Windows 便携版（解压即用）**：解压一次后双击里面的 `XiaoMaoShare.exe` 即开，启动约 1 秒；数据随文件夹走 | 经常在多台机器间拷用、不便安装的场景 |
+| `XiaoMaoShare-*-win-portable.exe` | **Windows 便携版（自解压单文件）**：单个 exe、方便随身带，但每次启动都要重新解压（约数秒） | 偶尔随身带、不常用的情况 |
+| `XiaoMaoShare-*-mac.dmg` | **macOS 安装版**：拖入「应用程序」即装 | macOS 用户 |
+| `XiaoMaoShare-*-mac.zip` | macOS 自动更新专用包，应用自己会取 | 无需手动下载 |
+| `XiaoMaoShare-*-android.apk` | **Android 版**：下载后允许安装即可 | Android 用户 |
+| 无需下载任何包 | **手机 / 平板浏览器**：连同一 Wi-Fi 访问主机地址即用，iOS 可「添加到主屏幕」 | 临时使用、iOS 用户 |
+
+> 桌面版与 apk 是「主机 + 客户端」一体（自己也能当主机）；浏览器 / PWA 只是客户端。`*.blockmap`、`latest*.yml` 是自动更新的元数据，供应用自动下载，无需手动获取。
+
 **发布一次 = 推一个 tag**（Actions 自动构建三端并创建 GitHub Release）：
 
 ```bash
