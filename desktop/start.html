@@ -116,13 +116,22 @@
     font-variant-numeric: tabular-nums; user-select: none;
   }
   .inputwrap .port[hidden] { display: none; }
+  /* 历史条目：本体点击 = 直接连，尾巴 × = 删掉这条记录 */
   .recent { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
   .recent[hidden] { display: none; }
-  .chip {
-    font-size: 12px; padding: 4px 9px; border-radius: 7px;
-    background: #eef1f6; color: var(--ink2); font-variant-numeric: tabular-nums;
+  .chipwrap {
+    display: inline-flex; align-items: stretch; border-radius: 7px;
+    background: #eef1f6; overflow: hidden; font-variant-numeric: tabular-nums;
   }
-  .chip:hover { background: var(--accent-soft); color: var(--accent); }
+  .chipwrap:hover { background: var(--accent-soft); }
+  .chip {
+    font-size: 12px; padding: 4px 9px; color: var(--ink2);
+  }
+  .chipwrap:hover .chip { color: var(--accent); }
+  .chipwrap .del {
+    font-size: 12px; color: var(--ink3); padding: 4px 7px 4px 2px; line-height: 1;
+  }
+  .chipwrap .del:hover { color: var(--err); }
   .recent .none { font-size: 12px; color: var(--ink3); }
 
   .opt { display: flex; align-items: flex-start; gap: 8px; margin-top: 12px; font-size: 12.5px; color: var(--ink2); }
@@ -253,6 +262,7 @@
   var memWhat = document.getElementById('memWhat');
   var memReset = document.getElementById('memReset');
   var busy = false;
+  var curState = null;   // 最近一次 render 的状态，删历史条目后局部重画用
 
   if (api && api.platform) document.documentElement.dataset.platform = api.platform;
 
@@ -331,20 +341,36 @@
     mem.hidden = false;
   }
 
-  function chip(url) {
+  /** 历史条目：点地址直接连（勾着「记住」就连带记住），点 × 只删记录 */
+  function chipWrap(url) {
+    var w = document.createElement('span');
+    w.className = 'chipwrap';
     var b = document.createElement('button');
     b.className = 'chip';
     b.textContent = String(url).replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    b.title = '点击直接连接这台主机';
     b.onclick = function () {
-      urlInp.value = b.textContent;
-      syncPortHint();
-      urlInp.focus();
-      linkCard.classList.add('on');
+      choose({ action: 'link', url: url, keepHost: keepHost.checked, remember: remember.checked });
     };
-    return b;
+    var del = document.createElement('button');
+    del.className = 'del';
+    del.textContent = '×';
+    del.title = '删除这条记录（不影响已开的连接）';
+    del.onclick = function (ev) {
+      ev.stopPropagation();
+      if (!api.forgetLink) return;
+      api.forgetLink(url).then(function (r) {
+        var next = Object.assign({}, curState || {}, { recent: (r && r.recent) || [] });
+        render(next);
+      }).catch(function () { /* 删不掉就留着，别为一条记录报错 */ });
+    };
+    w.appendChild(b);
+    w.appendChild(del);
+    return w;
   }
 
   function render(st) {
+    curState = st;
     if (st.dataDir) document.getElementById('dir').textContent = st.dataDir;
     keepHost.checked = st.keepHost === true;
     if (st.defaultPort) {
@@ -361,7 +387,7 @@
     } else {
       urlInp.value = PREFIX;   // 没连过就垫上 192.168.，用户补完后两段即可
     }
-    list.slice(0, 5).forEach(function (u) { recentBox.appendChild(chip(u)); });
+    list.slice(0, 5).forEach(function (u) { recentBox.appendChild(chipWrap(u)); });
     // 上次那台已经在输入框里了，不重复列；一条别的都没有就整行收起来，别留空行
     if (!recentBox.children.length) {
       if (st.lastLinkUrl) {
@@ -433,6 +459,12 @@
   // 主进程发现服务起不来、或地址不合法时会走这里：退回选择页并说明原因
   api.onStartError(fail);
 
+  // 主进程在导航时随 URL 带回来的启动错误（比如记住了「直接连」但那台已经不在了），
+  // 比消息通道稳 —— 不用赌页面监听器挂好没有
+  var qs = {};
+  try { new URL(location.href).searchParams.forEach(function (v, k) { qs[k] = v; }); } catch (e) { /* 解析不了就当没带 */ }
+  if (qs.startErr) fail(decodeURIComponent(qs.startErr));
+
   // 菜单「连接其他主机…」：把焦点引到右边那张卡
   api.onStartAskLink(function () {
     if (pick.hidden) return;
@@ -448,6 +480,12 @@
     if (st.force || st.mode === 'ask') return render(st);
     // 记住了就直接按记忆走，这里保持启动动画，主进程会接管跳转
     showBoot(st.mode === 'link' ? '正在连接…' : '正在启动服务…');
+    // 兜底：正常情况下主进程马上会把页面接走；万一哪条路径漏了接管，
+    // 6 秒后退回选择页自救，别让人对着一屏转圈干等
+    setTimeout(function () {
+      if (boot.hidden) return;
+      api.startState().then(function (s2) { render(s2 || {}); }).catch(function () { /* 已接管就算了 */ });
+    }, 6000);
   }).catch(function () {
     bootTip.textContent = '读不到启动设置';
   });

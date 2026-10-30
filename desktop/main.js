@@ -263,8 +263,9 @@ async function ensureHostWindow() {
         hostInfo = inf;
         hostWin.loadURL(inf.hostUrl);
       } else if (!u.includes('force=1')) {
-        // 服务没跑：把选择页强制显示出来 —— 否则会卡在启动动画上，看得见却点不动
-        hostWin.loadFile(START_PAGE, { query: { force: '1' } });
+        // 服务没跑：记过启动方式就按记忆重新走一遍（连上次那台 / 起本机服务），
+        // 只有「每次问我」才亮选择页 —— 记了「直接连」还天天被问，等于没记
+        if (!runStartPref()) hostWin.loadFile(START_PAGE, { query: { force: '1' } });
       }
     }
     return hostWin;
@@ -320,12 +321,27 @@ function openLink(rawUrl) {
     return { action: 'deny' };
   });
 
+  // 这是最后一个可见窗口时，点关闭 = 整个应用「消失」进托盘 —— 得和主窗口一个待遇：
+  // 「每次问我」就问一句，别闷声把界面全收走（用户会以为程序退了，连问都不问）
+  let linkForceClose = false;
+  win.on('close', (e) => {
+    if (quitting || linkForceClose) return;
+    const otherVisible = BrowserWindow.getAllWindows().some((w) => !w.isDestroyed() && w !== win && w.isVisible());
+    if (otherVisible || !tray) return;   // 还有别的窗口看着，或没托盘可收：照常关
+    const policy = readClosePref();
+    if (policy === 'quit') { e.preventDefault(); setImmediate(() => app.quit()); return; }
+    e.preventDefault();
+    const parkAndClose = () => { linkForceClose = true; win.close(); notifyTrayParked(); };
+    if (policy === 'tray') { parkAndClose(); return; }
+    askCloseChoice(parkAndClose);
+  });
+
   win.webContents.on('did-fail-load', (_e, code, desc, url, isMainFrame) => {
     if (!isMainFrame || code === -3) return; // -3 = 用户自己取消，不算失败
     win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(offlinePage(n.host)));
   });
 
-  const rec = { id, url: n.url, host: n.host, win };
+  const rec = { id, url: n.url, host: n.host, win, cid: '' };
   links.set(id, rec);
   // 刚开出来的连接窗口多半就是用户接下来在用的窗口 —— 球默认跟着它
   noteBallFocus('link', id);
@@ -345,6 +361,22 @@ function openLink(rawUrl) {
   });
 
   win.loadURL(n.url);
+
+  // 连接窗口不挂 preload（对方页面不该拿到桌面 API），但悬浮球要替这台主机
+  // 发东西，就必须用对方授权过的设备 cid —— 页面把它存在 localStorage('xm.cid')，
+  // 这里读出来记在 rec 上（只进主进程内存，不回传给对方页面）。
+  // 缺了这一步，球只能用自己兜底的陌生 cid，对方会判成「设备未授权」。
+  win.webContents.on('did-finish-load', () => {
+    win.webContents.executeJavaScript("localStorage.getItem('xm.cid')||''", true)
+      .then((cid) => {
+        cid = String(cid || '');
+        if (/^[A-Za-z0-9_-]{3,64}$/.test(cid) && cid !== rec.cid) {
+          rec.cid = cid;
+          refreshBallTarget();
+        }
+      })
+      .catch(() => { /* 页面还没准备好就算了，球那边退回兜底身份 */ });
+  });
   broadcastLinks();
 
   // 地址可能记不住（对方换了 IP），存一份最近的，下次直接点
@@ -990,8 +1022,12 @@ function openDataDirGuide() {
   var p = document.getElementById('p'), st = document.getElementById('st');
   var timer = null;
   function val(){ return p.value.trim(); }
-  function send(t){ document.title = t; }
+  /* 主进程靠 page-title-updated 收消息，而标题没变就不触发这个事件 ——
+     每条消息缀一个自增序号，保证连续点两次按钮主进程也都能收到 */
+  var seq = 0;
+  function send(t){ document.title = t + '\\u200b' + (++seq); }
   window.__setPath = function (d) { p.value = d; };
+  window.__setTip = function (t) { st.className = 'st warn'; st.textContent = t; };
   window.__setStat = function (s) {
     st.className = 'st ' + (!s.exists ? 'err' : s.valid ? 'ok' : 'warn');
     st.textContent = !s.exists ? '❌ 目录不存在，请检查盘符和路径'
@@ -1006,12 +1042,20 @@ function openDataDirGuide() {
     }, 300);
   });
   document.getElementById('b').onclick = function () { send('DDBROWSE:' + encodeURIComponent(val())); };
-  document.getElementById('o').onclick = function () { if (val()) send('DDOK:' + encodeURIComponent(val())); };
+  document.getElementById('o').onclick = function () {
+    if (val()) { send('DDOK:' + encodeURIComponent(val())); return; }
+    /* 输入框空着不该无声无息：让主进程决定 —— 浏览选过就用浏览那个，真没有就提示 */
+    send('DDEMPTY:');
+  };
   document.getElementById('c').onclick = function () { window.close(); };
   p.focus();
 <\/script>`));
 
+  let lastBrowsed = ''; // 「浏览…」选过的目录：输入框空着点「使用此目录」时兜底用它
+
   guideWin.webContents.on('page-title-updated', async (e, title) => {
+    // 页面每条消息都缀了自增序号（逼着标题变化、事件必触发），先剥掉再认指令
+    title = String(title || '').split('\u200b')[0];
     let m = /^DDBROWSE(?::(.*))?$/.exec(title || '');
     if (m) {
       e.preventDefault();
@@ -1023,6 +1067,7 @@ function openDataDirGuide() {
         properties: ['openDirectory', 'createDirectory'],
       });
       if (!res.canceled && res.filePaths && res.filePaths[0]) {
+        lastBrowsed = res.filePaths[0];
         pushToGuide(`window.__setPath && window.__setPath(${JSON.stringify(res.filePaths[0])})`);
         pushStatToGuide(res.filePaths[0]);
       }
@@ -1038,6 +1083,14 @@ function openDataDirGuide() {
     if (m) {
       e.preventDefault();
       try { validateAndApplyDataDir(decodeURIComponent(m[1])); } catch { /* ignore */ }
+      return;
+    }
+    // 输入框空着就点了「使用此目录」：浏览选过的话直接用那个（用户预期就是关窗生效），
+    // 真的什么都没有就回到窗口里说清楚差什么
+    if (/^DDEMPTY:$/.test(title || '')) {
+      e.preventDefault();
+      if (lastBrowsed) validateAndApplyDataDir(lastBrowsed);
+      else pushToGuide(`window.__setTip && window.__setTip('先点「浏览…」选一个目录，或把路径粘进输入框')`);
     }
   });
 
@@ -1414,7 +1467,14 @@ function noticeToHost(text) {
 function startPageError(text) {
   if (hostWin && !hostWin.isDestroyed() && String(hostWin.webContents.getURL()).startsWith('file:')) {
     hostWin.show();
-    hostWin.webContents.send('desktop:start-error', String(text || ''));
+    // 刚 loadFile 完页面可能还在加载，监听器还没挂上 —— 等加载完再发，消息不丢
+    const send = () => {
+      if (hostWin && !hostWin.isDestroyed()) {
+        hostWin.webContents.send('desktop:start-error', String(text || ''));
+      }
+    };
+    if (hostWin.webContents.isLoading()) hostWin.webContents.once('did-finish-load', send);
+    else send();
   } else {
     dialog.showMessageBox({ type: 'warning', message: String(text || '启动失败'), buttons: ['好'], noLink: true });
   }
@@ -1459,10 +1519,18 @@ async function applyStartChoice(c) {
     updateSettings({ lastLinkUrl: linkUrl });
 
     if (!(await probeHost(linkUrl))) {
-      target = 'host';
-      pending = linkHost + ' 连不上，已回到我的主机';
-      // 记忆里那台已经不在了：这次不是用户主动选的，就别让他每次开机都白等 1.2 秒
+      // 连不上：退回选择页让人自己挑，别擅自把本机服务拉起来 ——
+      // 用户想的是「连他」，结果变成了「当主机」，这属于替人做主
       if (!remember) updateSettings({ startMode: 'ask' });
+      if (!hostWin || hostWin.isDestroyed()) createHostWindow();
+      hostWin.show();
+      hostWin.focus();
+      // 错误随页面带过去：刚导航完就 webContents.send 有「监听器还没挂上」的时序坑，
+      // 走 query 最稳 —— 页面初始化时自己读
+      await hostWin.loadFile(START_PAGE, {
+        query: { force: '1', startErr: encodeURIComponent(linkHost + ' 连不上，请重新选择') },
+      });
+      return;
     }
   }
 
@@ -1496,6 +1564,24 @@ async function applyStartChoice(c) {
   }
   // 主窗口藏着，页面提示看不见 —— 这种少见情况用系统弹窗说清楚
   if (pending) dialog.showMessageBox({ type: 'info', message: pending, buttons: ['好'], noLink: true });
+}
+
+/**
+ * 按「启动记忆」走一次。mode 是 ask 就不动（交给选择页），
+ * 记了 host / link 就等价于用户当时勾了「记住」又选了一次。
+ * 冷启动和「主窗口回到启动页」都走这里 —— 只在冷启动走一遍的话，
+ * 窗口后来停在启动页时没人接管，就会永远卡在「正在连接…」的动画上。
+ */
+function runStartPref() {
+  const pref = readStartPref();
+  if (pref.mode === 'ask') return false;
+  applyStartChoice({
+    action: pref.mode === 'link' ? 'link' : 'host',
+    url: pref.lastLinkUrl,
+    keepHost: pref.keepHost,
+    remember: false,
+  }).catch((e) => startPageError('启动失败：' + ((e && e.message) || '未知错误')));
+  return true;
 }
 
 /** 把窗口切回「选择页」：菜单里的「启动方式…」用它，用户随时能改主意 */
@@ -1652,8 +1738,11 @@ function hideToTray() {
   if (!hostWin || hostWin.isDestroyed()) return;
   hostWin.hide();
   refreshTray();
+  notifyTrayParked();
+}
 
-  // 第一次收起时说一声 —— 否则 Windows 用户会以为程序没退干净
+/** 第一次「界面没了但进程还在」时说一声 —— 否则用户会以为程序没退干净 */
+function notifyTrayParked() {
   if (trayHintShown) return;
   trayHintShown = true;
   try {
@@ -1674,16 +1763,22 @@ function hideToTray() {
 /**
  * 关闭确认。之所以默认是「收入托盘」而不是「退出」：
  * 这个程序在后台是有用的（手机还在传），误关的代价比误留高得多。
+ *
+ * @param {() => void} [onTray] 选「收入托盘」后的去处；默认把主窗口藏进托盘。
+ *   连接窗口复用这个询问时传自己的收场（关掉自己、进程留在托盘）。
  */
-async function askCloseChoice() {
+async function askCloseChoice(onTray) {
   if (closeAsking) return;
   closeAsking = true;
 
   const inf = server.serverInfo();
   const port = inf.running ? inf.port : (readPortPref() || DEFAULT_PORT);
+  // 对话框要挂在看得见的窗口上：主窗口收着的时候（连别人模式）挂无主对话框，
+  // 不然询问挂在一个看不见的窗口上，看起来就是「点了关闭没反应」
+  const parent = hostWin && !hostWin.isDestroyed() && hostWin.isVisible() ? hostWin : undefined;
   let r;
   try {
-    r = await dialog.showMessageBox(hostWin && !hostWin.isDestroyed() ? hostWin : undefined, {
+    r = await dialog.showMessageBox(parent, {
       type: 'question',
       title: '关闭窗口',
       message: '关掉窗口后，XiaoMao 互传还要继续接收吗？',
@@ -1704,7 +1799,8 @@ async function askCloseChoice() {
   if (r.response === 0) {
     // 只记「确定」的那两项；勾了记住又点取消，不该产生任何记忆
     if (r.checkboxChecked) setCloseAction('tray');
-    hideToTray();
+    if (typeof onTray === 'function') onTray();
+    else hideToTray();
   } else if (r.response === 1) {
     if (r.checkboxChecked) setCloseAction('quit');
     app.quit();
@@ -1989,8 +2085,19 @@ function ballUrl(t, p) {
   return t.base + p + (p.includes('?') ? '&' : '?') + 'host=' + encodeURIComponent(server.hostToken);
 }
 
-function ballHeaders() {
-  return { 'x-xm-cid': ballIdentity() };
+/**
+ * 这次请求该用哪个设备身份。
+ * 连别人时必须用「对方主机授权过的那台设备」的 cid（从连接窗口的 localStorage 取的）；
+ * 球自己的兜底 cid 在对方眼里是个没授权过的陌生设备，会被判「设备未授权」拒之门外。
+ * 拿不到（窗口还没加载完 / 对方页面没存）才退回球的持久身份。
+ */
+function ballCidFor(t) {
+  if (t && t.kind === 'link') {
+    for (const [, l] of links) {
+      if (l.url.replace(/\/+$/, '') === t.base && l.cid) return l.cid;
+    }
+  }
+  return ballIdentity();
 }
 
 /** 这条内容在本机磁盘上有没有实物：有就能「打开文件位置」 */
@@ -2106,13 +2213,15 @@ function registerBallIpc() {
     const t = ballTarget();
     if (!t) return { ok: false, online: false, error: '本机服务没开' };
     try {
-      const r = await fetch(ballUrl(t, '/api/list'), { headers: ballHeaders() });
+      const r = await fetch(ballUrl(t, '/api/list'), { headers: { 'x-xm-cid': ballCidFor(t) } });
       if (!r.ok) {
         const j = await r.json().catch(() => ({}));
         return { ok: false, online: false, target: t, error: j.error || ('对方返回 ' + r.status) };
       }
       const d = await r.json();
-      const items = (d.items || []).slice(0, 10).map((it) => ballItemView(t, it));
+      // 服务端给的是全量可见列表，这里只裁面板装得下的量；
+      // 之前裁 10 条被用户吐槽「历史记录不全」——面板本身能滚，放宽到 40
+      const items = (d.items || []).slice(0, 40).map((it) => ballItemView(t, it));
       const lastSeen = Number(readSettings().ballSeen || 0);
       return {
         ok: true, online: true, target: t, port: t.port,
@@ -2275,7 +2384,7 @@ function registerBallIpc() {
     const body = String(p.text || '').replace(/\u0000/g, '').trim();
     if (!list.length && !body) return { ok: false, error: '没有可发送的内容' };
 
-    const cid = ballIdentity();
+    const cid = ballCidFor(t);
     const parts = [];
     const failed = [];   // { name, reason } —— 界面要把失败原因念给人听，别只说「失败」
 
@@ -2291,7 +2400,7 @@ function registerBallIpc() {
           method: 'POST',
           body: stream,
           duplex: 'half',
-          headers: { ...ballHeaders(), 'content-type': 'application/octet-stream' },
+          headers: { 'x-xm-cid': cid, 'content-type': 'application/octet-stream' },
         });
         if (!r.ok) {
           const j = await r.json().catch(() => ({}));
@@ -2314,7 +2423,7 @@ function registerBallIpc() {
     try {
       const r = await fetch(ballUrl(t, '/api/send'), {
         method: 'POST',
-        headers: { ...ballHeaders(), 'content-type': 'application/json' },
+        headers: { 'x-xm-cid': cid, 'content-type': 'application/json' },
         body: JSON.stringify({ cid, parts: all }),
       });
       if (!r.ok) {
@@ -2363,15 +2472,7 @@ if (!app.requestSingleInstanceLock()) {
     setupAutoUpdater();
 
     // 记住过就直接按记忆走；没记住（首次一定是）就把选择权交给启动页
-    const pref = readStartPref();
-    if (pref.mode !== 'ask') {
-      applyStartChoice({
-        action: pref.mode === 'link' ? 'link' : 'host',
-        url: pref.lastLinkUrl,
-        keepHost: pref.keepHost,
-        remember: false,
-      }).catch((e) => startPageError('启动失败：' + ((e && e.message) || '未知错误')));
-    }
+    runStartPref();
 
     app.on('activate', () => { ensureHostWindow(); });
   });
