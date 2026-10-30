@@ -198,9 +198,9 @@
         </div>
         <div class="recent" id="recent"></div>
         <label class="opt">
-          <input type="checkbox" id="keepHost" checked>
+          <input type="checkbox" id="keepHost">
           <span>同时开着这台的接收服务，<b>手机/电脑还能传给我</b>
-            <i id="keepNote">只在后台占用 6767 端口，不会多开窗口</i>
+            <i id="keepNote">不勾就纯当客户端；勾了只在后台占用 6767 端口，不会多开窗口</i>
           </span>
         </label>
       </div>
@@ -319,12 +319,12 @@
 
   function render(st) {
     if (st.dataDir) document.getElementById('dir').textContent = st.dataDir;
-    keepHost.checked = st.keepHost !== false;
+    keepHost.checked = st.keepHost === true;
     if (st.defaultPort) {
       DEFAULT_PORT = String(st.defaultPort);
       portHint.textContent = ':' + DEFAULT_PORT;
       document.getElementById('keepNote').textContent =
-        '只在后台占用 ' + DEFAULT_PORT + ' 端口，不会多开窗口';
+        '不勾就纯当客户端；勾了只在后台占用 ' + DEFAULT_PORT + ' 端口，不会多开窗口';
     }
 
     var list = (st.recent || []).filter(function (u) { return u && u !== st.lastLinkUrl; });

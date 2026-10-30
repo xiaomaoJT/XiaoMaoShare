@@ -416,7 +416,7 @@ ipcMain.handle('start:choose', (_e, payload) => {
   applyStartChoice({
     action: p.action === 'link' ? 'link' : 'host',
     url: typeof p.url === 'string' ? p.url : '',
-    keepHost: p.keepHost !== false,
+    keepHost: p.keepHost === true,
     remember: !!p.remember,
   }).catch((e) => startPageError('启动失败：' + ((e && e.message) || '未知错误')));
   return { ok: true };
@@ -1176,13 +1176,15 @@ function checkForUpdatesManually() {
  *   link —— 直接连上次那台；连不上会自动回落到主机界面，不会把人困在空白页
  *
  * keepHost 只对 link 有意义：连别人的同时，本机服务要不要也开着（别人也能传给你）。
+ * 默认 **不** 开 —— 连别人就老实当客户端，不占端口、不弹防火墙；
+ * 想让手机同时能传给自己，得在选择页明确勾上。
  */
 function readStartPref() {
   const s = readSettings();
   return {
     mode: ['ask', 'host', 'link'].includes(s.startMode) ? s.startMode : 'ask',
     lastLinkUrl: typeof s.lastLinkUrl === 'string' ? s.lastLinkUrl : '',
-    keepHost: s.keepHost !== false, // 默认开着：手机随时能连，切回主机也是瞬时的
+    keepHost: s.keepHost === true, // 默认关：纯客户端，不监听任何端口
   };
 }
 
@@ -1296,7 +1298,7 @@ async function applyStartChoice(c) {
   }
 
   if (remember) {
-    updateSettings({ startMode: target === 'link' ? 'link' : 'host', keepHost: c.keepHost !== false });
+    updateSettings({ startMode: target === 'link' ? 'link' : 'host', keepHost: c.keepHost === true });
   }
 
   if (target === 'link') {
@@ -1325,7 +1327,7 @@ async function applyStartChoice(c) {
 
   // ---- 连别人 ----
   // 本机服务起不来不拖累连接：连别人照样能用，只是这台电脑暂时不对外提供服务
-  if (c.keepHost !== false && !(await ensureHostServer())) {
+  if (c.keepHost === true && !(await ensureHostServer())) {
     pending = '本机服务没起来，这次只能当普通设备用';
   }
 
