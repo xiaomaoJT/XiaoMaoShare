@@ -73,7 +73,7 @@
     display: flex; flex-direction: column;
     transition: border-color .15s, box-shadow .15s, transform .15s;
   }
-  .card:hover { border-color: #c8d3ea; box-shadow: 0 10px 24px -16px rgba(20,23,28,.35); }
+  .card:hover { border-color: #c8d3ea; }
   .card.on { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
   .card .t { font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
   .card .d { font-size: 12.5px; color: var(--ink2); line-height: 1.65; margin: 6px 0 0; }
@@ -94,7 +94,6 @@
   .btn:disabled { opacity: .5; cursor: default; }
   .btn.ghost { background: #eef1f6; color: var(--ink); }
 
-  #hostCard { cursor: pointer; }
   #hostCard .go { margin-top: auto; padding-top: 16px; }
   #hostCard .go .btn { width: 100%; }
 
@@ -118,6 +117,7 @@
   }
   .inputwrap .port[hidden] { display: none; }
   .recent { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .recent[hidden] { display: none; }
   .chip {
     font-size: 12px; padding: 4px 9px; border-radius: 7px;
     background: #eef1f6; color: var(--ink2); font-variant-numeric: tabular-nums;
@@ -149,6 +149,16 @@
 
   .err { margin-top: 12px; font-size: 12.5px; color: var(--err); min-height: 18px; }
   .err:empty { visibility: hidden; }
+
+  .mem {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px;
+    margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line);
+    font-size: 12px; color: var(--ink3);
+  }
+  .mem[hidden] { display: none; }
+  .mem b { color: var(--ink2); font-weight: 600; }
+  .mem button { color: var(--accent); font-size: 12px; }
+  .mem button:hover { text-decoration: underline; }
 </style>
 </head>
 <body>
@@ -173,7 +183,7 @@
     <p class="sub">两者都能收发文件，区别只在于「谁开着服务等你连」。</p>
 
     <div class="cards">
-      <div class="card" id="hostCard" role="button" tabindex="0">
+      <div class="card" id="hostCard">
         <div class="t">
           <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg></span>
           当我自己的主机
@@ -215,6 +225,12 @@
         <button id="dirBtn">更改</button>
       </div>
     </div>
+
+    <!-- 记住过的话，这里显示记的是什么，并给一条反悔的路 -->
+    <div class="mem" id="mem" hidden>
+      <span>已记住：<b id="memWhat"></b></span>
+      <button id="memReset">改回每次询问</button>
+    </div>
   </div>
 </div>
 
@@ -230,10 +246,12 @@
   var keepHost = document.getElementById('keepHost');
   var remember = document.getElementById('remember');
   var recentBox = document.getElementById('recent');
-  var hostCard = document.getElementById('hostCard');
   var linkCard = document.getElementById('linkCard');
   var linkGo = document.getElementById('linkGo');
   var hostGo = document.getElementById('hostGo');
+  var mem = document.getElementById('mem');
+  var memWhat = document.getElementById('memWhat');
+  var memReset = document.getElementById('memReset');
   var busy = false;
 
   if (api && api.platform) document.documentElement.dataset.platform = api.platform;
@@ -304,6 +322,15 @@
 
   /* ---------- 渲染 ---------- */
 
+  /** 记住过就把「记住的是什么」写出来 —— 只记不说话，用户不知道怎么取消 */
+  function paintMem(st) {
+    if (!st || st.mode === 'ask') { mem.hidden = true; return; }
+    memWhat.textContent = st.mode === 'link'
+      ? '启动时直接连 ' + String(st.lastLinkUrl || '上次那台').replace(/^https?:\/\//, '').replace(/\/+$/, '')
+      : '启动时直接进入我的主机';
+    mem.hidden = false;
+  }
+
   function chip(url) {
     var b = document.createElement('button');
     b.className = 'chip';
@@ -331,16 +358,20 @@
     recentBox.textContent = '';
     if (st.lastLinkUrl) {
       urlInp.value = String(st.lastLinkUrl).replace(/^https?:\/\//, '').replace(/\/+$/, '');
-      recentBox.appendChild(chip(st.lastLinkUrl));
     } else {
       urlInp.value = PREFIX;   // 没连过就垫上 192.168.，用户补完后两段即可
     }
     list.slice(0, 5).forEach(function (u) { recentBox.appendChild(chip(u)); });
+    // 上次那台已经在输入框里了，不重复列；一条别的都没有就整行收起来，别留空行
     if (!recentBox.children.length) {
-      var n = document.createElement('span');
-      n.className = 'none';
-      n.textContent = '连过一次之后，地址会记在这里';
-      recentBox.appendChild(n);
+      if (st.lastLinkUrl) {
+        recentBox.hidden = true;
+      } else {
+        var n = document.createElement('span');
+        n.className = 'none';
+        n.textContent = '连过一次之后，地址会记在这里';
+        recentBox.appendChild(n);
+      }
     }
     syncPortHint();
     showPick();
@@ -355,14 +386,9 @@
 
   /* ---------- 事件 ---------- */
 
-  hostCard.onclick = function (e) {
-    if (e.target.closest('#hostGo') || !e.target.closest('.card')) return;
-    pickHost();
-  };
-  hostCard.addEventListener('keydown', function (e) {
-    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pickHost(); }
-  });
-  hostGo.onclick = function (e) { e.stopPropagation(); pickHost(); };
+  // 只有按钮能进 —— 卡片本身不做点击热区。整块可点会让人误触：
+  // 想凑近读一下说明，或者想拖窗口，结果直接跳走了
+  hostGo.onclick = pickHost;
   linkGo.onclick = pickLink;
 
   linkCard.addEventListener('focusin', function () { linkCard.classList.add('on'); });
@@ -388,6 +414,17 @@
 
   document.getElementById('dirBtn').onclick = function () { api.startDataDir(); };
 
+  memReset.onclick = function () {
+    if (!api.startForget) return;
+    api.startForget().then(function () {
+      mem.hidden = true;
+      remember.checked = false;
+      errBox.textContent = '';
+    }).catch(function () {
+      errBox.textContent = '没能改回来，稍后再试一次';
+    });
+  };
+
   if (!api || !api.startChoose) {
     bootTip.textContent = '这个页面要在桌面端打开';
     return;
@@ -406,7 +443,8 @@
 
   api.startState().then(function (st) {
     st = st || {};
-    // force：菜单里主动点了「启动方式…」，不管记没记住都问一次
+    paintMem(st);
+    // force：菜单里主动点了「现在重新选一次」，不管记没记住都问一次
     if (st.force || st.mode === 'ask') return render(st);
     // 记住了就直接按记忆走，这里保持启动动画，主进程会接管跳转
     showBoot(st.mode === 'link' ? '正在连接…' : '正在启动服务…');

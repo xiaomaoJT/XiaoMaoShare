@@ -51,6 +51,9 @@ contextBridge.exposeInMainWorld('xmDesktop', {
   /** 选择页底部的「数据目录 / 更改」 */
   startDataDir: () => ipcRenderer.invoke('start:dataDir'),
 
+  /** 反悔「记住这次选择」：把启动记忆改回「每次问」 */
+  startForget: () => ipcRenderer.invoke('start:forget'),
+
   /** 连到别人的主机；返回 { ok, id } 或 { error } */
   connect: (url) => ipcRenderer.invoke('link:connect', url),
   closeLink: (id) => ipcRenderer.invoke('link:close', id),

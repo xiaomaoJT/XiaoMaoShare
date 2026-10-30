@@ -424,6 +424,9 @@ ipcMain.handle('start:choose', (_e, payload) => {
 
 ipcMain.handle('start:dataDir', () => { openDataDirGuide(); return { ok: true }; });
 
+// 「记住这次选择」的反悔：选择页底部那行「改回每次询问」
+ipcMain.handle('start:forget', () => setStartMode('ask'));
+
 ipcMain.handle('link:connect', (_e, url) => openLink(url));
 
 ipcMain.handle('link:close', (_e, id) => {
@@ -469,6 +472,7 @@ ipcMain.handle('link:forget', (_e, url) => {
 function buildMenu() {
   const recent = readRecent();
   const opened = linkSnapshot();
+  const startPref = readStartPref();
 
   const linkItems = opened.length
     ? opened.map((l) => ({
@@ -497,7 +501,35 @@ function buildMenu() {
       label: '我的主机',
       submenu: [
         { label: '打开我的主机界面', accelerator: 'CmdOrCtrl+1', click: () => ensureHostWindow() },
-        { label: '启动方式…', accelerator: 'CmdOrCtrl+Shift+S', click: () => openStartChooser() },
+        {
+          // 「记住这次选择」的反悔入口：记忆是什么、怎么改，都在这里
+          label: '启动时…',
+          submenu: [
+            {
+              label: '每次让我选',
+              type: 'radio',
+              checked: startPref.mode === 'ask',
+              click: () => setStartMode('ask'),
+            },
+            {
+              label: '直接进入我的主机',
+              type: 'radio',
+              checked: startPref.mode === 'host',
+              click: () => setStartMode('host'),
+            },
+            {
+              label: startPref.lastLinkUrl
+                ? '直接连上次的主机（' + startPref.lastLinkUrl.replace(/^https?:\/\//, '') + '）'
+                : '直接连上次的主机',
+              type: 'radio',
+              checked: startPref.mode === 'link',
+              // 还没连过任何主机时，先让人去选一台，而不是记一个空地址
+              click: () => (startPref.lastLinkUrl ? setStartMode('link') : openStartChooser()),
+            },
+            { type: 'separator' },
+            { label: '现在重新选一次…', accelerator: 'CmdOrCtrl+Shift+S', click: () => openStartChooser() },
+          ],
+        },
         { type: 'separator' },
         // 服务跑没跑起来，只有这里看得见 —— 连别人的主机时主窗口是隐藏的，
         // 「手机现在还传不传得给我」全看这一行
@@ -1186,6 +1218,17 @@ function readStartPref() {
     lastLinkUrl: typeof s.lastLinkUrl === 'string' ? s.lastLinkUrl : '',
     keepHost: s.keepHost === true, // 默认关：纯客户端，不监听任何端口
   };
+}
+
+/**
+ * 改「启动记忆」。菜单里的三个单选、选择页的「改回每次询问」都走这里，
+ * 免得两处各写一遍 updateSettings，改着改着就不一致了。
+ */
+function setStartMode(mode) {
+  const m = ['ask', 'host', 'link'].includes(mode) ? mode : 'ask';
+  updateSettings({ startMode: m });
+  buildMenu(); // 单选勾选状态要立刻跟上
+  return { ok: true, mode: m };
 }
 
 /**
