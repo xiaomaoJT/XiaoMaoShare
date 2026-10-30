@@ -115,8 +115,11 @@ function isSelf(rawUrl) {
 
 /* ------------------------------------------------------------ 窗口 */
 
-/** 启动页：双击后立刻显示，不依赖本地服务器是否已起好 */
-const SPLASH = path.join(__dirname, 'splash.html');
+/**
+ * 启动页：双击后立刻显示，不依赖本地服务器是否已起好。
+ * 它身兼三职：加载动画、启动方式选择、以及「服务没起时」的选择入口。
+ */
+const START_PAGE = path.join(__dirname, 'start.html');
 
 /** 读整个 settings.json（各偏好共用一个文件） */
 function readSettings() {
@@ -173,9 +176,9 @@ function createHostWindow() {
   if (saved && saved.isMaximized) hostWin.maximize();
 
   // 先显示启动页（不依赖本地服务器，双击后立即有反馈），服务就绪后再换真实页
-  hostWin.loadFile(SPLASH);
+  if (hostInfo) hostWin.loadURL(hostInfo.hostUrl); // 窗口重建时服务已在跑，直接进真实页，不必闪一下启动页
+  else hostWin.loadFile(START_PAGE);
   hostWin.show();
-  if (hostInfo) hostWin.loadURL(hostInfo.hostUrl); // 窗口重建时服务已在跑，直接进真实页
 
   // 记住窗口大小与位置：拖动/缩放中只更新内存里的还原态，防抖 400ms 落盘；
   // 最大化、全屏、最小化时的瞬时几何不记录，还原态始终是上一次「正常」的样子
@@ -210,12 +213,28 @@ function createHostWindow() {
   return hostWin;
 }
 
-/** 主窗口可能被关掉了，任何「要跟用户说话」的动作都先把它叫回来 */
+/**
+ * 主窗口可能被关掉了，也可能在「连接模式」下被藏起来了 ——
+ * 任何「要跟用户说话」的动作都先把它叫回来。
+ * 如果它还停在启动页而服务已经在跑，顺手补一次跳转，别让用户看到一张过期的选择页。
+ */
 async function ensureHostWindow() {
   if (hostWin && !hostWin.isDestroyed()) {
     if (hostWin.isMinimized()) hostWin.restore();
     hostWin.show();
     hostWin.focus();
+    const u = String(hostWin.webContents.getURL());
+    if (u.startsWith('file:')) {
+      const inf = server.serverInfo();
+      if (inf.running) {
+        // 服务在跑：直接进真实界面，别让用户看到一张过期的启动页
+        hostInfo = inf;
+        hostWin.loadURL(inf.hostUrl);
+      } else if (!u.includes('force=1')) {
+        // 服务没跑：把选择页强制显示出来 —— 否则会卡在启动动画上，看得见却点不动
+        hostWin.loadFile(START_PAGE, { query: { force: '1' } });
+      }
+    }
     return hostWin;
   }
   createHostWindow();
@@ -278,6 +297,9 @@ function openLink(rawUrl) {
   win.on('closed', () => {
     links.delete(id);
     broadcastLinks();
+    // 「只连别人」时主窗口是藏着的，关掉这个窗口不会触发 window-all-closed，
+    // 得自己判断一次，否则会留下一个看不见却在后台常驻的进程
+    quitIfNoVisibleWindow();
   });
 
   win.loadURL(n.url);
@@ -286,6 +308,18 @@ function openLink(rawUrl) {
   // 地址可能记不住（对方换了 IP），存一份最近的，下次直接点
   rememberLink(n.url);
   return { ok: true, id };
+}
+
+/**
+ * 菜单 / 快捷键想「填个地址连别人」时统一走这里。
+ * 主窗口可能停在启动页：那就让选择页把焦点引到右边那张卡，
+ * 而不是往一个不认识 desktop:open-connect 的页面里发消息。
+ */
+async function openConnectPanel() {
+  const w = await ensureHostWindow();
+  const atStartPage = String(w.webContents.getURL()).startsWith('file:');
+  if (w.webContents.isLoading()) await once(w.webContents, 'did-finish-load');
+  w.webContents.send(atStartPage ? 'desktop:start-ask-link' : 'desktop:open-connect');
 }
 
 /** 连不上时给一页人话，而不是 Electron 那句 ERR_CONNECTION_REFUSED */
@@ -355,6 +389,38 @@ function desktopState() {
 /* ------------------------------------------------------------ IPC */
 
 ipcMain.handle('host:info', () => desktopState());
+
+/* ---- 启动选择页（desktop/start.html）---- */
+
+ipcMain.handle('start:state', (e) => {
+  const p = readStartPref();
+  // 菜单里主动点「启动方式…」时会在 URL 上带 force=1：不管记没记住都问一次
+  let force = false;
+  try { force = new URL(e.sender.getURL()).searchParams.get('force') === '1'; } catch { /* file:// 解析失败就当没带 */ }
+  return {
+    force,
+    mode: p.mode,
+    lastLinkUrl: p.lastLinkUrl,
+    keepHost: p.keepHost,
+    recent: readRecent(),
+    dataDir: server.DATA_DIR,
+  };
+});
+
+ipcMain.handle('start:choose', (_e, payload) => {
+  const p = payload || {};
+  // 先把回复给出去再干活：接下来会 loadURL 把发问的这个页面换掉，
+  // 不在页面销毁前来回跑一趟，免得渲染端拿到一个「帧已销毁」的异常
+  applyStartChoice({
+    action: p.action === 'link' ? 'link' : 'host',
+    url: typeof p.url === 'string' ? p.url : '',
+    keepHost: p.keepHost !== false,
+    remember: !!p.remember,
+  }).catch((e) => startPageError('启动失败：' + ((e && e.message) || '未知错误')));
+  return { ok: true };
+});
+
+ipcMain.handle('start:dataDir', () => { openDataDirGuide(); return { ok: true }; });
 
 ipcMain.handle('link:connect', (_e, url) => openLink(url));
 
@@ -428,11 +494,12 @@ function buildMenu() {
     {
       label: '我的主机',
       submenu: [
-        { label: '显示主窗口', accelerator: 'CmdOrCtrl+1', click: () => ensureHostWindow() },
+        { label: '打开我的主机界面', accelerator: 'CmdOrCtrl+1', click: () => ensureHostWindow() },
+        { label: '启动方式…', accelerator: 'CmdOrCtrl+Shift+S', click: () => openStartChooser() },
         { type: 'separator' },
         {
           label: '复制局域网地址',
-          enabled: !!(hostInfo && hostInfo.lan.length),
+          enabled: !!server.serverInfo().running && !!(hostInfo && hostInfo.lan.length),
           click: () => {
             const url = hostInfo && hostInfo.lan[0] && hostInfo.lan[0].url;
             if (!url) return;
@@ -442,11 +509,13 @@ function buildMenu() {
         },
         {
           label: '复制本机主控地址',
+          enabled: !!server.serverInfo().running,
           click: () => { clipboard.writeText(server.serverInfo().hostUrl); },
         },
         { type: 'separator' },
         {
           label: '更改端口…',
+          enabled: !!server.serverInfo().running,
           click: async () => {
             const cur = server.serverInfo().port || readPortPref() || DEFAULT_PORT;
             const p = await askPort(cur);
@@ -502,10 +571,7 @@ function buildMenu() {
         {
           label: '连接其他主机…',
           accelerator: 'CmdOrCtrl+L',
-          click: async () => {
-            const w = await ensureHostWindow();
-            w.webContents.send('desktop:open-connect');
-          },
+          click: () => openConnectPanel(),
         },
         { type: 'separator' },
         ...linkItems,
@@ -1090,6 +1156,202 @@ function checkForUpdatesManually() {
     .catch(() => { /* error 事件里统一兜底 */ });
 }
 
+/* ------------------------------------------------- 启动方式：当主机还是连别人 */
+
+/**
+ * 记住的启动方式（settings.json）：
+ *   ask  —— 每次打开都问；没设置过就是它，所以首次必然会给选择
+ *   host —— 直接进自己的主机界面
+ *   link —— 直接连上次那台；连不上会自动回落到主机界面，不会把人困在空白页
+ *
+ * keepHost 只对 link 有意义：连别人的同时，本机服务要不要也开着（别人也能传给你）。
+ */
+function readStartPref() {
+  const s = readSettings();
+  return {
+    mode: ['ask', 'host', 'link'].includes(s.startMode) ? s.startMode : 'ask',
+    lastLinkUrl: typeof s.lastLinkUrl === 'string' ? s.lastLinkUrl : '',
+    keepHost: s.keepHost !== false, // 默认开着：手机随时能连，切回主机也是瞬时的
+  };
+}
+
+/**
+ * 起本机服务（幂等）。端口被占就按老规矩换一个；用户放弃则返回 null，
+ * 由调用方决定收场 —— 「当主机」失败该留在选择页，「连别人」失败不该拖累连接。
+ */
+async function ensureHostServer() {
+  const inf = server.serverInfo();
+  if (inf.running) { hostInfo = inf; return hostInfo; }
+
+  const pref = readPortPref() || DEFAULT_PORT;
+  let err = null;
+  try { hostInfo = await server.startServer({ port: pref }); } catch (e) { err = e; }
+
+  while (!hostInfo) {
+    const choice = dialog.showMessageBoxSync({
+      type: 'warning',
+      title: '服务起不来',
+      message: '端口被占用或不可用',
+      detail: ((err && err.message) || '未知错误') + '\n\n可以换个端口再试，默认 ' + DEFAULT_PORT + '。',
+      buttons: ['换个端口', '先不启动'],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (choice !== 0) return null;
+    const p = await askPort(pref);
+    if (!p) return null;
+    try { hostInfo = await server.startServer({ port: p }); } catch (e) { err = e; }
+  }
+
+  writePortPref(hostInfo.port); // 记住实际端口，地址才稳定
+  buildMenu();                  // 菜单里的「复制局域网地址」等项要跟着解禁
+  return hostInfo;
+}
+
+/**
+ * 连之前先探一下（一个很小的 GET，1.2 秒超时）。
+ * 目的只有一个：上次那台关机了，别把用户丢进「连不上」的页面里出不来。
+ */
+function probeHost(url, ms = 1200) {
+  return new Promise((resolve) => {
+    let u;
+    try { u = new URL(url); } catch { return resolve(false); }
+    const lib = u.protocol === 'https:' ? require('node:https') : require('node:http');
+    let settled = false;
+    const done = (v) => { if (!settled) { settled = true; resolve(v); } };
+    try {
+      const req = lib.request({
+        host: u.hostname,
+        port: u.port || (u.protocol === 'https:' ? 443 : 80),
+        path: (u.pathname || '/') + (u.search || ''),
+        method: 'GET',
+        timeout: ms,
+        rejectUnauthorized: false, // 对方用自签证书时也别误判成「连不上」
+      }, (res) => { res.destroy(); done(true); });
+      req.on('timeout', () => { req.destroy(); done(false); });
+      req.on('error', () => done(false));
+      req.end();
+    } catch { done(false); }
+  });
+}
+
+/** 给主窗口页面发一条轻提示（页面还没加载完就等加载完再发） */
+function noticeToHost(text) {
+  if (!hostWin || hostWin.isDestroyed()) return;
+  const send = () => { if (hostWin && !hostWin.isDestroyed()) hostWin.webContents.send('desktop:notice', String(text)); };
+  if (hostWin.webContents.isLoading()) hostWin.webContents.once('did-finish-load', send);
+  else send();
+}
+
+/** 启动阶段的错误回显到选择页（页面没在的话退化成系统弹窗） */
+function startPageError(text) {
+  if (hostWin && !hostWin.isDestroyed() && String(hostWin.webContents.getURL()).startsWith('file:')) {
+    hostWin.show();
+    hostWin.webContents.send('desktop:start-error', String(text || ''));
+  } else {
+    dialog.showMessageBox({ type: 'warning', message: String(text || '启动失败'), buttons: ['好'], noLink: true });
+  }
+}
+
+/** 首次运行的数据目录引导：等服务/界面稳定后再弹，别盖住启动选择页 */
+function maybeFirstRunGuide() {
+  if (readDataDirPref() || readGuideDismissed()) return;
+  openDataDirGuide();
+}
+
+/**
+ * 执行一次启动选择。这是「打开应用之后到底走去哪」的唯一入口，
+ * 启动记忆、菜单切换、选择页回传都走它，行为才不会分叉。
+ *
+ * @param {{action:'host'|'link', url?:string, keepHost?:boolean, remember?:boolean}} c
+ */
+async function applyStartChoice(c) {
+  const remember = !!c.remember;
+  let target = c.action === 'link' ? 'link' : 'host';
+  let linkUrl = '';
+  let linkHost = '';
+  let pending = '';
+
+  if (target === 'link') {
+    const n = normalizeLink(c.url || '');
+    // 地址不合法、或指向自己，就没得连 —— 干脆当主机
+    if (n.error || isSelf(n.url)) {
+      target = 'host';
+      if (n.error && !/先填对方的地址/.test(n.error)) pending = n.error + '，已回到我的主机';
+    } else {
+      linkUrl = n.url;
+      linkHost = n.host;
+    }
+  }
+
+  if (remember) {
+    updateSettings({ startMode: target === 'link' ? 'link' : 'host', keepHost: c.keepHost !== false });
+  }
+
+  if (target === 'link') {
+    updateSettings({ lastLinkUrl: linkUrl });
+
+    if (!(await probeHost(linkUrl))) {
+      target = 'host';
+      pending = linkHost + ' 连不上，已回到我的主机';
+      // 记忆里那台已经不在了：这次不是用户主动选的，就别让他每次开机都白等 1.2 秒
+      if (!remember) updateSettings({ startMode: 'ask' });
+    }
+  }
+
+  if (target === 'host') {
+    const info = await ensureHostServer();
+    if (!info) {
+      startPageError('本机服务没起来。可以再试一次，或者先连别人的主机。');
+      return;
+    }
+    if (!hostWin || hostWin.isDestroyed()) createHostWindow();
+    hostWin.loadURL(info.hostUrl);
+    if (pending) noticeToHost(pending);
+    maybeFirstRunGuide();
+    return;
+  }
+
+  // ---- 连别人 ----
+  // 本机服务起不来不拖累连接：连别人照样能用，只是这台电脑暂时不对外提供服务
+  if (c.keepHost !== false && !(await ensureHostServer())) {
+    pending = '本机服务没起来，这次只能当普通设备用';
+  }
+
+  if (!hostWin || hostWin.isDestroyed()) createHostWindow();
+  hostWin.hide();
+
+  const r = openLink(linkUrl);
+  if (r.error) {
+    hostWin.show();
+    startPageError(r.error);
+    return;
+  }
+  // 主窗口藏着，页面提示看不见 —— 这种少见情况用系统弹窗说清楚
+  if (pending) dialog.showMessageBox({ type: 'info', message: pending, buttons: ['好'], noLink: true });
+}
+
+/** 把窗口切回「选择页」：菜单里的「启动方式…」用它，用户随时能改主意 */
+async function openStartChooser() {
+  if (!hostWin || hostWin.isDestroyed()) createHostWindow();
+  hostWin.show();
+  hostWin.focus();
+  await hostWin.loadFile(START_PAGE, { query: { force: '1' } });
+  hostWin.show();
+  hostWin.focus();
+}
+
+/**
+ * 没有可见窗口了就该退出（Windows / Linux）。
+ * 连接模式下主窗口是 hide() 着的，它不算可见窗口 —— 所以不能让
+ * window-all-closed 来判断，否则关掉对方的窗口后进程会赖在后台。
+ */
+function quitIfNoVisibleWindow() {
+  if (IS_MAC) return; // mac 惯例外：关窗不退，Dock 点回来
+  const anyVisible = BrowserWindow.getAllWindows().some((w) => !w.isDestroyed() && w.isVisible());
+  if (!anyVisible) app.quit();
+}
+
 /* ------------------------------------------------------------ 生命周期 */
 
 if (!app.requestSingleInstanceLock()) {
@@ -1098,47 +1360,21 @@ if (!app.requestSingleInstanceLock()) {
   app.on('second-instance', () => { ensureHostWindow(); });
 
   app.whenReady().then(async () => {
-    // 上次用过的端口优先（哪怕是被占用后自动挪过位的），地址才稳定
-    const pref = readPortPref() || DEFAULT_PORT;
-    let err = null;
+    buildMenu();          // 菜单先挂上，别让窗口出来时顶栏是空的
+    createHostWindow();   // 窗口与启动页立刻出现 —— 双击就有反馈，不用干等任何东西
 
-    // 1. 窗口与启动页立刻出现 —— 双击就有反馈，不必干等本地服务拉起
-    createHostWindow();
-
-    // 2. 后台把本地服务拉起来（启动页已先显示，这段时间用户看到的是加载动画）
-    try {
-      hostInfo = await server.startServer({ port: pref });
-    } catch (e) {
-      err = e;
-    }
-
-    // 起不来（端口段被占满、权限不够等）：给一次「换个端口重试」的机会，而不是直接死
-    while (!hostInfo) {
-      const choice = dialog.showMessageBoxSync({
-        type: 'warning',
-        title: '服务起不来',
-        message: '端口被占用或不可用',
-        detail: (err && err.message) + '\n\n可以换个端口再试，默认 6767。',
-        buttons: ['换个端口', '退出'],
-        defaultId: 0,
-        cancelId: 1,
-      });
-      if (choice !== 0) { app.exit(1); return; }
-      const p = await askPort(pref);
-      if (!p) { app.exit(1); return; }
-      try {
-        hostInfo = await server.startServer({ port: p });
-      } catch (e) { err = e; }
-    }
-
-    writePortPref(hostInfo.port); // 记住实际跑起来的端口（可能因占用偏移过）
-    buildMenu();
-    hostWin.loadURL(hostInfo.hostUrl);  // 服务已就绪，无缝切到真实界面（页面内还有加载遮罩兜底）
     setupAutoUpdater();
 
-    // 首次使用引导：先让界面正常起来，再温和地弹一次数据目录引导（不阻塞、可关、关了不再弹）。
-    // 不做任何文件系统扫描 —— 用户想沿用旧数据，自己知道它在哪里。
-    if (!readDataDirPref() && !readGuideDismissed()) openDataDirGuide();
+    // 记住过就直接按记忆走；没记住（首次一定是）就把选择权交给启动页
+    const pref = readStartPref();
+    if (pref.mode !== 'ask') {
+      applyStartChoice({
+        action: pref.mode === 'link' ? 'link' : 'host',
+        url: pref.lastLinkUrl,
+        keepHost: pref.keepHost,
+        remember: false,
+      }).catch((e) => startPageError('启动失败：' + ((e && e.message) || '未知错误')));
+    }
 
     app.on('activate', () => { ensureHostWindow(); });
   });

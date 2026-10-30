@@ -3169,6 +3169,8 @@
       // 菜单里点「连接其他主机…」时由主进程通知过来，打开的是同一块面板
       if (api.onOpenConnect) api.onOpenConnect(openPanel);
       if (api.onLinks) api.onLinks(function () { paint(); });
+      // 主进程的一句话提示（例如启动时「上次那台主机连不上，已回到我的主机」）
+      if (api.onNotice) api.onNotice(function (text) { if (text) toast(String(text)); });
     }
 
     return { available: !!api, applyShell: applyShell, open: openPanel };

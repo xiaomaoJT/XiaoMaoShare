@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>XiaoMao 互传</title>
+<style>
+  :root {
+    --bg: #f2f4f7;
+    --card: #ffffff;
+    --line: #e3e8f0;
+    --ink: #14171c;
+    --ink2: #5a6473;
+    --ink3: #8a94a6;
+    --accent: #4c6ef5;
+    --accent-soft: #eef2ff;
+    --warm: #e8562f;
+    --err: #c0392b;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                 "Microsoft YaHei", "Hiragino Sans GB", sans-serif;
+    user-select: none;
+    overflow: hidden;
+  }
+
+  /* 顶部一条透明拖拽区：无边框窗口也能拖动（压在选择页之上，不然会被内容盖住） */
+  #drag { position: fixed; inset: 0 0 auto 0; height: 46px; z-index: 10; -webkit-app-region: drag; }
+  html[data-platform="darwin"] #drag { height: 62px; }
+
+  .center { height: 100%; display: flex; align-items: center; justify-content: center; padding: 28px; }
+
+  /* ---------------- 启动动画（默认就是它，避免先亮一下再跳） ---------------- */
+  #boot { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+  #boot[hidden] { display: none; }
+  .mark {
+    width: 72px; height: 72px; border-radius: 20px;
+    background: linear-gradient(135deg, #4c6ef5 0%, #5b8def 45%, #e8562f 130%);
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 10px 30px -10px rgba(76,110,245,.55);
+  }
+  .mark span { color: #fff; font-size: 34px; font-weight: 800; letter-spacing: 1px; }
+  .brand { font-size: 17px; font-weight: 700; letter-spacing: .5px; }
+  .spin {
+    width: 24px; height: 24px; border-radius: 50%;
+    border: 3px solid #d7dded; border-top-color: var(--accent);
+    animation: sp .8s linear infinite;
+  }
+  @keyframes sp { to { transform: rotate(360deg); } }
+  .boot-tip { font-size: 13px; color: var(--ink2); }
+
+  /* ---------------- 选择页 ---------------- */
+  #pick { width: 100%; max-width: 880px; }
+  #pick[hidden] { display: none; }
+  .head { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
+  .head .mark { width: 38px; height: 38px; border-radius: 11px; box-shadow: 0 6px 16px -8px rgba(76,110,245,.6); }
+  .head .mark span { font-size: 19px; }
+  .head .brand { font-size: 15px; }
+  h1 { font-size: 21px; margin: 18px 0 4px; letter-spacing: .3px; }
+  .sub { font-size: 13px; color: var(--ink2); margin: 0 0 20px; }
+
+  .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 720px) { .cards { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 18px;
+    display: flex; flex-direction: column;
+    transition: border-color .15s, box-shadow .15s, transform .15s;
+  }
+  .card:hover { border-color: #c8d3ea; box-shadow: 0 10px 24px -16px rgba(20,23,28,.35); }
+  .card.on { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .card .t { font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+  .card .d { font-size: 12.5px; color: var(--ink2); line-height: 1.65; margin: 6px 0 0; }
+  .card .ico {
+    width: 30px; height: 30px; border-radius: 9px; background: var(--accent-soft);
+    display: flex; align-items: center; justify-content: center; color: var(--accent);
+  }
+  .card .ico svg { width: 17px; height: 17px; }
+
+  button { font-family: inherit; cursor: pointer; border: 0; background: none; color: inherit; }
+  .btn {
+    height: 38px; padding: 0 16px; border-radius: 10px;
+    background: var(--accent); color: #fff; font-size: 13px; font-weight: 600;
+    transition: filter .15s;
+  }
+  .btn:hover { filter: brightness(1.06); }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .btn.ghost { background: #eef1f6; color: var(--ink); }
+
+  #hostCard { cursor: pointer; }
+  #hostCard .go { margin-top: auto; padding-top: 16px; }
+  #hostCard .go .btn { width: 100%; }
+
+  #linkCard.on { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .field { margin-top: 14px; display: flex; gap: 8px; }
+  input[type="text"] {
+    flex: 1; min-width: 0; height: 38px; padding: 0 12px;
+    border: 1px solid var(--line); border-radius: 10px; background: #fbfcfe;
+    font: inherit; font-size: 13px; color: var(--ink); outline: none;
+  }
+  input[type="text"]:focus { border-color: var(--accent); background: #fff; }
+  .recent { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .chip {
+    font-size: 12px; padding: 4px 9px; border-radius: 7px;
+    background: #eef1f6; color: var(--ink2); font-variant-numeric: tabular-nums;
+  }
+  .chip:hover { background: var(--accent-soft); color: var(--accent); }
+  .recent .none { font-size: 12px; color: var(--ink3); }
+
+  .opt { display: flex; align-items: flex-start; gap: 8px; margin-top: 12px; font-size: 12.5px; color: var(--ink2); }
+  .opt input { margin: 3px 0 0; accent-color: var(--accent); }
+  .opt b { color: var(--ink); font-weight: 600; }
+
+  .foot {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 16px; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line);
+    font-size: 12.5px; color: var(--ink2);
+  }
+  .foot label { display: flex; align-items: center; gap: 7px; cursor: pointer; }
+  .foot input { accent-color: var(--accent); margin: 0; }
+  .dir {
+    display: flex; align-items: center; gap: 6px; min-width: 0;
+    color: var(--ink3); font-size: 12px;
+  }
+  .dir code {
+    max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    background: #eef1f6; padding: 2px 6px; border-radius: 5px;
+  }
+  .dir button { color: var(--accent); font-size: 12px; }
+
+  .err { margin-top: 12px; font-size: 12.5px; color: var(--err); min-height: 18px; }
+  .err:empty { visibility: hidden; }
+</style>
+</head>
+<body>
+<div id="drag"></div>
+
+<div class="center">
+  <!-- 启动动画 / 执行中 -->
+  <div id="boot">
+    <div class="mark"><span>帽</span></div>
+    <div class="brand">XiaoMao 互传</div>
+    <div class="spin"></div>
+    <div class="boot-tip" id="bootTip">正在启动…</div>
+  </div>
+
+  <!-- 选择页 -->
+  <div id="pick" hidden>
+    <div class="head">
+      <div class="mark"><span>帽</span></div>
+      <div class="brand">XiaoMao 互传</div>
+    </div>
+    <h1>这次要做什么？</h1>
+    <p class="sub">两者都能收发文件，区别只在于「谁开着服务等你连」。</p>
+
+    <div class="cards">
+      <div class="card" id="hostCard" role="button" tabindex="0">
+        <div class="t">
+          <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg></span>
+          当我自己的主机
+        </div>
+        <p class="d">别人用局域网地址连这台电脑，把东西传给你。手机会出现在「待授权」里，由你放行。</p>
+        <div class="go"><button class="btn" id="hostGo">进入我的主机</button></div>
+      </div>
+
+      <div class="card" id="linkCard">
+        <div class="t">
+          <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.1 0l3-3a5 5 0 0 0-7.1-7.1L11 5"/><path d="M14 11a5 5 0 0 0-7.1 0l-3 3a5 5 0 0 0 7.1 7.1L13 19"/></svg></span>
+          连接别人的主机
+        </div>
+        <p class="d">我当普通设备，用别人开着的服务。不需要对方做任何设置。</p>
+        <div class="field">
+          <input type="text" id="url" placeholder="192.168.1.20:6767" spellcheck="false" autocomplete="off">
+          <button class="btn" id="linkGo">连接</button>
+        </div>
+        <div class="recent" id="recent"></div>
+        <label class="opt">
+          <input type="checkbox" id="keepHost" checked>
+          <span>同时让本机保持<b>可被连接</b>，别人也能传给你</span>
+        </label>
+      </div>
+    </div>
+
+    <div class="err" id="err"></div>
+
+    <div class="foot">
+      <label><input type="checkbox" id="remember"> 记住这次选择，以后不再问</label>
+      <div class="dir">
+        数据目录 <code id="dir">…</code>
+        <button id="dirBtn">更改</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var api = window.xmDesktop || null;
+  var boot = document.getElementById('boot');
+  var bootTip = document.getElementById('bootTip');
+  var pick = document.getElementById('pick');
+  var errBox = document.getElementById('err');
+  var urlInp = document.getElementById('url');
+  var keepHost = document.getElementById('keepHost');
+  var remember = document.getElementById('remember');
+  var recentBox = document.getElementById('recent');
+  var hostCard = document.getElementById('hostCard');
+  var linkCard = document.getElementById('linkCard');
+  var linkGo = document.getElementById('linkGo');
+  var hostGo = document.getElementById('hostGo');
+  var busy = false;
+
+  if (api && api.platform) document.documentElement.dataset.platform = api.platform;
+
+  function showBoot(tip) { bootTip.textContent = tip || '正在启动…'; boot.hidden = false; pick.hidden = true; }
+  function showPick() { boot.hidden = true; pick.hidden = false; }
+
+  function fail(msg) {
+    busy = false;
+    hostGo.disabled = false;
+    linkGo.disabled = false;
+    showPick();
+    errBox.textContent = msg || '';
+    bootTip.textContent = '正在启动…';
+  }
+
+  function choose(payload) {
+    if (busy) return;
+    busy = true;
+    errBox.textContent = '';
+    hostGo.disabled = true;
+    linkGo.disabled = true;
+    showBoot(payload.action === 'link' ? '正在连接…' : '正在启动服务…');
+    api.startChoose(payload).catch(function () { fail('启动失败了，再试一次'); });
+  }
+
+  function pickHost() {
+    choose({ action: 'host', remember: remember.checked });
+  }
+
+  function pickLink() {
+    var raw = (urlInp.value || '').trim();
+    if (!raw) {
+      errBox.textContent = '先填对方的地址，例如 192.168.1.20:6767';
+      urlInp.focus();
+      return;
+    }
+    choose({ action: 'link', url: raw, keepHost: keepHost.checked, remember: remember.checked });
+  }
+
+  /* ---------- 渲染 ---------- */
+
+  function chip(url) {
+    var b = document.createElement('button');
+    b.className = 'chip';
+    b.textContent = String(url).replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    b.onclick = function () {
+      urlInp.value = b.textContent;
+      urlInp.focus();
+      linkCard.classList.add('on');
+    };
+    return b;
+  }
+
+  function render(st) {
+    if (st.dataDir) document.getElementById('dir').textContent = st.dataDir;
+    keepHost.checked = st.keepHost !== false;
+
+    var list = (st.recent || []).filter(function (u) { return u && u !== st.lastLinkUrl; });
+    recentBox.textContent = '';
+    if (st.lastLinkUrl) {
+      urlInp.value = String(st.lastLinkUrl).replace(/^https?:\/\//, '').replace(/\/+$/, '');
+      recentBox.appendChild(chip(st.lastLinkUrl));
+    }
+    list.slice(0, 5).forEach(function (u) { recentBox.appendChild(chip(u)); });
+    if (!recentBox.children.length) {
+      var n = document.createElement('span');
+      n.className = 'none';
+      n.textContent = '连过一次之后，地址会记在这里';
+      recentBox.appendChild(n);
+    }
+    showPick();
+    (urlInp.value ? linkGo : hostGo).focus();
+  }
+
+  /* ---------- 事件 ---------- */
+
+  hostCard.onclick = function (e) {
+    if (e.target.closest('#hostGo') || !e.target.closest('.card')) return;
+    pickHost();
+  };
+  hostCard.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pickHost(); }
+  });
+  hostGo.onclick = function (e) { e.stopPropagation(); pickHost(); };
+  linkGo.onclick = pickLink;
+
+  linkCard.addEventListener('focusin', function () { linkCard.classList.add('on'); });
+  linkCard.addEventListener('focusout', function () { linkCard.classList.remove('on'); });
+
+  urlInp.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); pickLink(); }
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && !pick.hidden) errBox.textContent = '';
+  });
+
+  document.getElementById('dirBtn').onclick = function () { api.startDataDir(); };
+
+  if (!api || !api.startChoose) {
+    bootTip.textContent = '这个页面要在桌面端打开';
+    return;
+  }
+
+  // 主进程发现服务起不来、或地址不合法时会走这里：退回选择页并说明原因
+  api.onStartError(fail);
+
+  // 菜单「连接其他主机…」：把焦点引到右边那张卡
+  api.onStartAskLink(function () {
+    if (pick.hidden) return;
+    linkCard.classList.add('on');
+    urlInp.focus();
+    urlInp.select();
+  });
+
+  api.startState().then(function (st) {
+    st = st || {};
+    // force：菜单里主动点了「启动方式…」，不管记没记住都问一次
+    if (st.force || st.mode === 'ask') return render(st);
+    // 记住了就直接按记忆走，这里保持启动动画，主进程会接管跳转
+    showBoot(st.mode === 'link' ? '正在连接…' : '正在启动服务…');
+  }).catch(function () {
+    bootTip.textContent = '读不到启动设置';
+  });
+})();
+</script>
+</body>
+</html>
