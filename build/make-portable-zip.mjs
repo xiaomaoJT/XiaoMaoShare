@@ -4,6 +4,9 @@
 // 关键点：portable.mode 标记只允许出现在 zip 里。
 // 如果它残留在 win-unpacked，下次打 nsis 安装包时安装版会被误判成便携版，
 // 数据就会写进 Programs 目录（权限不足直接报错）。所以打完立刻删掉。
+//
+// 压缩工具按平台自动选：Windows 没有 zip 命令，退到系统自带的 tar（Win10 1803+）
+// 或 PowerShell 的 Compress-Archive，保证 mac / Windows 都能一条命令跑通。
 
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -28,14 +31,47 @@ if (!unpacked || !fs.existsSync(unpacked)) {
 const marker = path.join(unpacked, 'portable.mode');
 const zipName = `XiaoMaoShare-${version}-win-portable.zip`;
 const zipPath = path.join(releaseDir, zipName);
+const opts = { cwd: releaseDir, stdio: 'inherit' };
+
+// 依次尝试，能跑通就用，全挂才报错
+const packers = [
+  // 1) macOS / Linux 的 zip
+  ['zip', () => execFileSync('zip', ['-r', '-q', zipName, unpackedName], opts)],
+  // 2) Windows 10+ 自带 bsdtar，-a 按扩展名自动选 zip 格式
+  ['tar', () => execFileSync('tar', ['-a', '-c', '-f', zipName, unpackedName], opts)],
+  // 3) 兜底 PowerShell（慢一些，但任何 Windows 都有）
+  ['powershell', () => execFileSync(
+    'powershell',
+    ['-NoProfile', '-Command',
+      `Compress-Archive -Path '${unpackedName}' -DestinationPath '${zipName}' -Force`],
+    opts,
+  )],
+];
 
 fs.writeFileSync(marker, '');
 fs.rmSync(zipPath, { force: true });
 
+let used = null;
+const failures = [];
+
 try {
-  execFileSync('zip', ['-r', '-q', zipName, unpackedName], { cwd: releaseDir, stdio: 'inherit' });
+  for (const [name, run] of packers) {
+    try {
+      run();
+      used = name;
+      break;
+    } catch (e) {
+      failures.push(`${name}: ${e.code || e.message}`);
+    }
+  }
+
+  if (!used) {
+    throw new Error(`压缩全部失败：\n  ${failures.join('\n  ')}`);
+  }
+
   const mb = (fs.statSync(zipPath).size / 1024 / 1024).toFixed(1);
-  console.log(`\n✓ 便携版已生成：release/${zipName}（${mb} MB）`);
+  console.log(`\n✓ 便携版已生成：release/${zipName}（${mb} MB，用 ${used} 压缩）`);
 } finally {
+  // 标记用完就删：留在 win-unpacked 里会污染下一次 nsis 打包
   fs.rmSync(marker, { force: true });
 }
