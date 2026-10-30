@@ -499,6 +499,15 @@ function buildMenu() {
         { label: '打开我的主机界面', accelerator: 'CmdOrCtrl+1', click: () => ensureHostWindow() },
         { label: '启动方式…', accelerator: 'CmdOrCtrl+Shift+S', click: () => openStartChooser() },
         { type: 'separator' },
+        // 服务跑没跑起来，只有这里看得见 —— 连别人的主机时主窗口是隐藏的，
+        // 「手机现在还传不传得给我」全看这一行
+        server.serverInfo().running
+          ? { label: `本机可被连接 · 端口 ${server.serverInfo().port}`, enabled: false }
+          : {
+            label: '本机未开接收服务（点击开启）',
+            click: () => { ensureHostServer().then(() => buildMenu()); },
+          },
+        { type: 'separator' },
         {
           label: '复制局域网地址',
           enabled: !!server.serverInfo().running && !!(hostInfo && hostInfo.lan.length),
