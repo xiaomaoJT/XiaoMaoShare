@@ -125,6 +125,13 @@ function isSelf(rawUrl) {
  */
 const START_PAGE = path.join(__dirname, 'start.html');
 
+/**
+ * 应用图标。每个窗口都要显式挂上 —— 不挂的话，窗口标题栏和任务栏会退回
+ * electron.exe 自带的默认图标：打包后 exe 有自己的图标能盖住，`npm run desktop`
+ * 开发模式盖不住，一眼就是 Electron。mac 上窗口没有图标位，改用 Dock 图标。
+ */
+const APP_ICON = path.join(__dirname, '..', 'public', 'icon.png');
+
 /** 读整个 settings.json（各偏好共用一个文件） */
 function readSettings() {
   try { return JSON.parse(fs.readFileSync(SETTINGS_FILE(), 'utf8')) || {}; } catch { return {}; }
@@ -164,6 +171,7 @@ function createHostWindow() {
     minWidth: 640,
     minHeight: 520,
     title: 'XiaoMao 互传',
+    icon: APP_ICON,
     backgroundColor: '#f4f6f9',
     show: false,
     // macOS 去掉系统标题栏，把红绿灯压进页面顶栏，App 感更强
@@ -274,6 +282,7 @@ function openLink(rawUrl) {
     minWidth: 560,
     minHeight: 480,
     title: `连到 ${n.host}`,
+    icon: APP_ICON,
     backgroundColor: '#f4f6f9',
     webPreferences: {
       contextIsolation: true,
@@ -712,6 +721,7 @@ function askPort(current) {
       parent: hostWin && !hostWin.isDestroyed() ? hostWin : undefined,
       modal: !!(hostWin && !hostWin.isDestroyed()),
       title: '选择端口',
+      icon: APP_ICON,
       resizable: false,
       show: false,
       webPreferences: { contextIsolation: true, nodeIntegration: false },
@@ -873,6 +883,7 @@ function openDataDirGuide() {
     parent: hostWin && !hostWin.isDestroyed() ? hostWin : undefined,
     modal: false, // 不挡主界面，随手可关
     title: '数据目录',
+    icon: APP_ICON,
     resizable: false,
     show: false,
     webPreferences: { contextIsolation: true, nodeIntegration: false },
@@ -1060,6 +1071,7 @@ function updShow(state, extra) {
       width: 380,
       height: 128,
       title: '检查更新',
+      icon: APP_ICON,
       resizable: false,
       minimizable: false,
       maximizable: false,
@@ -1636,6 +1648,12 @@ if (!app.requestSingleInstanceLock()) {
   app.on('second-instance', () => { ensureHostWindow(); });
 
   app.whenReady().then(async () => {
+    // macOS 开发模式下 Dock 上是 Electron 自带图标（装成 app 才有自己的），
+    // 运行时换成我们的，免得调试时 Dock 里一直坐着一个 Electron
+    if (IS_MAC && app.dock) {
+      try { app.dock.setIcon(APP_ICON); } catch { /* 无 Dock 的环境就算了 */ }
+    }
+
     buildMenu();          // 菜单先挂上，别让窗口出来时顶栏是空的
     buildTray();          // 托盘尽早建：关闭按钮的三种结局都依赖它在不在
     createHostWindow();   // 窗口与启动页立刻出现 —— 双击就有反馈，不用干等任何东西
