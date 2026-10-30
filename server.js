@@ -3366,25 +3366,49 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // 删除单条：主设备可删任意，其他设备只能删自己发的
+  // 删除：单条用 id=xxx，批量用 ids=a,b,c（多选删除）。
+  // 主设备可删任意，其他设备只能删自己发的 —— 批量时逐条判定，
+  // 有权限的照删，越权的跳过并回报数量，不是「有一条不行就整批失败」。
   if (method === 'DELETE' && pathname === '/api/item') {
-    const id = url.searchParams.get('id');
-    const idx = items.findIndex((it) => it.id === id);
-    if (idx === -1) return json(res, 404, { error: '不存在' });
+    const bulk = !!url.searchParams.get('ids');
+    const ids = (url.searchParams.get('ids') || url.searchParams.get('id') || '')
+      .split(',').map((s) => s.trim()).filter(Boolean);
+    if (!ids.length) return json(res, 400, { error: '没指定要删哪一条' });
 
-    const target = items[idx];
     const cidDel = cidOf(req, url.searchParams.get('cid'));
     const me = cidDel ? clients.get(cidDel) : null;
-    const isMine = me && samePerson(me.cid, target.owner);
-    if (!canManage(req, cidDel) && !isMine) {
+    const manage = canManage(req, cidDel);
+
+    const hit = [];
+    let denied = 0;
+    let missing = 0;
+    for (const id of ids) {
+      const idx = items.findIndex((it) => it.id === id);
+      if (idx === -1) { missing++; continue; }
+      const target = items[idx];
+      const isMine = me && samePerson(me.cid, target.owner);
+      if (!manage && !isMine) { denied++; continue; }
+      hit.push(idx);
+    }
+
+    // 从后往前切，前面元素的下标才不会漂
+    hit.sort((a, b) => b - a).forEach((i) => {
+      const it = items[i];
+      items.splice(i, 1);
+      unlinkParts(allPartsOf(it));
+    });
+    if (hit.length) {
+      reindexFiles();
+      saveIndex();
+    }
+
+    // 单条删除保持老口径（404 不存在 / 403 没权限），前端的错误文案不用跟着改
+    if (!bulk && !hit.length) {
+      if (missing) return json(res, 404, { error: '不存在' });
       return json(res, 403, { error: '只能删除自己发送的内容' });
     }
 
-    items.splice(idx, 1);
-    unlinkParts(allPartsOf(target));
-    reindexFiles();
-    saveIndex();
-    json(res, 200, { ok: true });
+    json(res, 200, { ok: true, deleted: hit.length, denied, missing });
     return;
   }
 

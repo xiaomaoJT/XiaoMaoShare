@@ -590,6 +590,17 @@
     font-size:12.5px;font-weight:550;
   }
   .sel-bar[hidden]{display:none}
+  /* 提示文案比数字长得多（"点卡片选择内容，可打包下载或删除"），
+     多了两个动作按钮后必须允许它收缩，否则窄屏会把按钮挤出去 */
+  .sel-bar #selCount{
+    flex:0 1 auto;min-width:0;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  }
+  .sel-bar .mini{flex:none}
+  @media (max-width:440px){
+    .sel-bar{gap:6px;padding:8px 10px}
+    .sel-bar .mini{padding-left:9px;padding-right:9px}
+  }
 
   .feed{display:flex;flex-direction:column;gap:10px}
   .card{
@@ -2324,6 +2335,7 @@
   <div class="spacer"></div>
   <button class="mini" id="selAll" type="button">全选</button>
   <button class="mini ok" id="selDl" type="button">打包下载</button>
+  <button class="mini bad" id="selDel" type="button">删除选中</button>
   <button class="mini" id="selExit" type="button">退出</button>
 </div>
 
@@ -4398,8 +4410,9 @@
   }
   function updateSelBar() {
     var n = state.picked.size;
-    $('selCount').textContent = n ? ('已选 ' + n + ' 项') : '点卡片选择要下载的内容';
+    $('selCount').textContent = n ? ('已选 ' + n + ' 项') : '点卡片选择内容，可打包下载或删除';
     $('selDl').disabled = !n;
+    $('selDel').disabled = !n;
   }
   async function downloadZip() {
     var ids = [];
@@ -4424,6 +4437,34 @@
     } catch (e) {
       toast(e.message || '打包失败');
     }
+  }
+
+  /**
+   * 批量删除。一次请求删完 —— 逐条 DELETE 会让服务端反复写索引，
+   * 选几十条就要等半天。权限由服务端逐条判，越权的跳过并回报数量。
+   */
+  async function removePicked() {
+    var ids = [];
+    state.picked.forEach(function (id) { ids.push(id); });
+    if (!ids.length) return;
+    var ok = await Dialog.confirm({
+      title: '删除选中的 ' + ids.length + ' 项？',
+      desc: '内容里的文件会从本机一并删除，不可恢复。只能删自己发的；别人的内容要主设备权限。',
+      ok: '删除', danger: true
+    });
+    if (!ok) return;
+    try {
+      var r = await api('/api/item?ids=' + encodeURIComponent(ids.join(',')) +
+        '&cid=' + encodeURIComponent(state.cid), { method: 'DELETE' });
+      var n = (r && r.deleted) || 0;
+      var d = (r && r.denied) || 0;
+      if (n && d) toast('已删除 ' + n + ' 项，' + d + ' 项没有权限（只能删自己发的）');
+      else if (n) toast('已删除 ' + n + ' 项');
+      else if (d) toast('这些内容是别人发的，你没有删除权限');
+      else toast('没有可删除的内容');
+      setPickMode(false);
+      poll(true);
+    } catch (e) { toast(e.message || '删除失败'); }
   }
 
   /** 长内容默认折叠：超过约 7 行才收起并给「展开全文」 */
@@ -8743,6 +8784,7 @@
     updateSelBar();
   });
   $('selDl').addEventListener('click', downloadZip);
+  $('selDel').addEventListener('click', removePicked);
 
   // 手机切到后台会暂停定时器，回到前台立刻补一次，别让用户盯着旧列表
   document.addEventListener('visibilitychange', function () {
