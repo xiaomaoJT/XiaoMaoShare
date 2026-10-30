@@ -358,9 +358,17 @@ function openLink(rawUrl) {
   // 「每次问我」就问一句，别闷声把界面全收走（用户会以为程序退了，连问都不问）
   let linkForceClose = false;
   win.on('close', (e) => {
-    if (quitting || linkForceClose) return;
-    const otherVisible = BrowserWindow.getAllWindows().some((w) => !w.isDestroyed() && w !== win && w.isVisible());
-    if (otherVisible || !tray) return;   // 还有别的窗口看着，或没托盘可收：照常关
+    if (quitting || linkForceClose || win.__xmNoAsk) return;
+    // 悬浮球是浮件，不该算「还有别的窗口看着」—— 否则一开球，关闭就永远问不出口
+    const otherVisible = BrowserWindow.getAllWindows().some(
+      (w) => !w.isDestroyed() && w !== win && w !== ballWin && w.isVisible(),
+    );
+    if (!tray) return;   // 没托盘可收：照常关
+    // 球正指着这条连接：直接关掉球就瞬间没数据了（用户看到的是「一关窗口球就空了」）。
+    // 这种情况按关闭策略处理 —— 收托盘是藏起来，连接和球的数据源都留着
+    const bt = ballWin && !ballWin.isDestroyed() ? ballTarget() : null;
+    const ballNeeds = !!(bt && bt.kind === 'link' && bt.base === n.url.replace(/\/+$/, ''));
+    if (otherVisible && !ballNeeds) return;
     const policy = readClosePref();
     if (policy === 'quit') { e.preventDefault(); setImmediate(() => app.quit()); return; }
     e.preventDefault();
@@ -378,6 +386,8 @@ function openLink(rawUrl) {
 
   const rec = { id, url: n.url, host: n.host, win, cid: '' };
   links.set(id, rec);
+  // 球以后要替这台发东西：先把地址记住（cid 等页面加载出来再补）
+  rememberBallLink(n.url, '');
   // 刚开出来的连接窗口多半就是用户接下来在用的窗口 —— 球默认跟着它
   noteBallFocus('link', id);
   win.on('focus', () => noteBallFocus('link', id));
@@ -407,6 +417,7 @@ function openLink(rawUrl) {
         cid = String(cid || '');
         if (/^[A-Za-z0-9_-]{3,64}$/.test(cid) && cid !== rec.cid) {
           rec.cid = cid;
+          rememberBallLink(n.url, cid);
           refreshBallTarget();
         }
       })
@@ -541,7 +552,9 @@ ipcMain.handle('link:connect', (_e, url) => openLink(url));
 
 ipcMain.handle('link:close', (_e, id) => {
   const l = links.get(id);
-  if (l) { l.win.close(); return { ok: true }; }
+  // 明确的「断开这台」：别再拿应用级的关闭询问拦一道，那问的是「还要不要接收」，
+  // 和用户点的是两回事。断开的同时忘掉球记的那台，否则球还会往已断开的地址发
+  if (l) { forgetBallLink(l.url); l.win.__xmNoAsk = true; l.win.close(); return { ok: true }; }
   return { error: '这个窗口已经关了' };
 });
 
@@ -613,6 +626,13 @@ function buildMenu() {
       submenu: [
         { label: '打开我的主机界面', accelerator: 'CmdOrCtrl+1', click: () => openMyHost() },
         {
+          // 退出当前状态、重新挑一次。主机模式下会把接收服务一起关掉 ——
+          // 不关的话界面回选择页、后面却还开着端口，用户以为已经退出了
+          label: '返回选择页…',
+          accelerator: 'CmdOrCtrl+Shift+S',
+          click: () => backToChooser(),
+        },
+        {
           // 「记住这次选择」的反悔入口：记忆是什么、怎么改，都在这里
           label: '启动时…',
           submenu: [
@@ -638,7 +658,7 @@ function buildMenu() {
               click: () => (startPref.lastLinkUrl ? setStartMode('link') : openStartChooser()),
             },
             { type: 'separator' },
-            { label: '现在重新选一次…', accelerator: 'CmdOrCtrl+Shift+S', click: () => openStartChooser() },
+            { label: '现在重新选一次…', click: () => backToChooser() },
           ],
         },
         {
@@ -686,8 +706,15 @@ function buildMenu() {
         // 「手机现在还传不传得给我」全看这一行
         server.serverInfo().running
           ? { label: `本机可被连接 · 端口 ${server.serverInfo().port}`, enabled: false }
+          : { label: '本机未开接收服务', enabled: false },
+        server.serverInfo().running
+          ? {
+            // 只关服务，别的都不动：连着的别人的窗口照常、悬浮球自动改发对方
+            label: '关闭本机接收服务（其它连接保持）',
+            click: () => stopHostService(),
+          }
           : {
-            label: '本机未开接收服务（点击开启）',
+            label: '开启本机接收服务',
             click: () => { ensureHostServer().then(() => buildMenu()); },
           },
         { type: 'separator' },
@@ -1464,6 +1491,40 @@ async function ensureHostServer() {
 }
 
 /**
+ * 单独关掉本机接收服务，别的不动。
+ *
+ * 现在的真实场景：一台主机给多台设备当接收方，同时自己也可能连着别人的主机。
+ * 「关掉本机接收」和「退出程序」是两件事 —— 只想让手机暂时传不进来，不该连带
+ * 把连着的别人的窗口一起关了。
+ */
+async function stopHostService() {
+  if (!server.serverInfo().running) return { ok: true, already: true };
+  await server.stopServer();
+  hostInfo = null;
+  buildMenu();
+  refreshTray();
+
+  // 主窗口要是正停在本机界面，页面上的操作已经全打空了 —— 挪回选择页说清楚
+  if (hostWin && !hostWin.isDestroyed()) {
+    const u = String(hostWin.webContents.getURL());
+    if (/^https?:\/\/127\.0\.0\.1/i.test(u) || /^https?:\/\/localhost/i.test(u)) {
+      hostWin.loadFile(START_PAGE, { query: { force: '1', startErr: encodeURIComponent('本机接收服务已关闭') } });
+      hostWin.show();
+      hostWin.focus();
+    }
+  }
+  // 球的目标可能在刚才那个服务上 —— 让它自己重新算一遍
+  refreshBallTarget();
+  return { ok: true };
+}
+
+/** 返回选择页 = 退出当前状态：主机模式下先把接收服务关掉，免得界面还挂着「本机可被连接」 */
+async function backToChooser() {
+  if (server.serverInfo().running) await stopHostService();
+  await openStartChooser();
+}
+
+/**
  * 连之前先探一下（一个很小的 GET，1.2 秒超时）。
  * 目的只有一个：上次那台关机了，别把用户丢进「连不上」的页面里出不来。
  */
@@ -1640,7 +1701,9 @@ async function openStartChooser() {
  */
 function quitIfNoVisibleWindow() {
   if (IS_MAC) return; // mac 惯例外：关窗不退，Dock 点回来
-  const anyVisible = BrowserWindow.getAllWindows().some((w) => !w.isDestroyed() && w.isVisible());
+  const anyVisible = BrowserWindow.getAllWindows().some(
+    (w) => !w.isDestroyed() && w !== ballWin && w.isVisible(),
+  );
   if (anyVisible) return;
   if (tray && readClosePref() !== 'quit') return;
   app.quit();
@@ -1698,8 +1761,11 @@ function trayTemplate(inf) {
     { type: 'separator' },
     inf.running
       ? { label: `本机可被连接 · 端口 ${inf.port}`, enabled: false }
+      : { label: '本机未开接收服务', enabled: false },
+    inf.running
+      ? { label: '关闭本机接收服务（其它连接保持）', click: () => stopHostService() }
       : {
-        label: '本机未开接收服务（点击开启）',
+        label: '开启本机接收服务',
         click: () => ensureHostServer().then(() => { buildMenu(); refreshTray(); }),
       },
     {
@@ -1771,8 +1837,12 @@ function handleHostClose(e) {
 }
 
 function hideToTray() {
-  if (!hostWin || hostWin.isDestroyed()) return;
-  hostWin.hide();
+  // 「收入托盘」= 整个界面收起来，不只是主窗口：多客户端场景下对方窗口还晾在
+  // 桌面上，用户会以为没关干净。球是常驻浮件，不算界面，留着
+  if (hostWin && !hostWin.isDestroyed()) hostWin.hide();
+  for (const [, l] of links) {
+    if (l.win && !l.win.isDestroyed() && l.win.isVisible()) l.win.hide();
+  }
   refreshTray();
   notifyTrayParked();
 }
@@ -2045,6 +2115,21 @@ function ballLayout() {
  *   2. 否则跟随「最近用过的那个窗口」—— 你在用哪个窗口，球就跟着谁
  *   3. 目标没了（那台断开了 / 本机服务停了）→ 看另一个还有没有，都没有就当没目标
  */
+/** 记住「上次连的那台」（地址 + 对方授权的 cid）：窗口关掉之后，球还能继续用它 */
+function rememberBallLink(url, cid) {
+  const u = String(url || '').replace(/\/+$/, '');
+  if (!u) return;
+  const prev = readSettings().ballLast;
+  const keep = prev && prev.url === u ? prev.cid : '';
+  updateSettings({ ballLast: { url: u, cid: cid || keep || '' } });
+}
+
+function forgetBallLink(url) {
+  const u = String(url || '').replace(/\/+$/, '');
+  const prev = readSettings().ballLast;
+  if (prev && (!u || prev.url === u)) updateSettings({ ballLast: null });
+}
+
 function ballTarget() {
   const inf = server.serverInfo();
   const host = inf.running
@@ -2074,8 +2159,18 @@ function ballTarget() {
     const t = byId(ballLastFocus.id);
     if (t) return t;
   }
-  // 最近用的是主窗口（或从没用过）→ 只能是本机；本机没开服务就只能空着
-  return host;
+  // 最近用的是主窗口（或从没用过）→ 本机优先
+  if (host) return host;
+
+  // 本机没开服务、连接窗口也关了 —— 但球刚才还连着某台，别让它瞬间变空。
+  // 用记下来的地址 + cid 继续说话（只影响球，不复活窗口）
+  const bl = readSettings().ballLast;
+  if (bl && bl.url) {
+    let label = bl.url;
+    try { label = '连到 ' + new URL(bl.url).host; } catch { /* 地址坏了就当纯文本 */ }
+    return { base: bl.url, kind: 'link', label, port: '', id: '' };
+  }
+  return null;
 }
 
 /** 手动选定的目标：{ kind:'host' } 或 { kind:'link', url } */
@@ -2132,6 +2227,9 @@ function ballCidFor(t) {
     for (const [, l] of links) {
       if (l.url.replace(/\/+$/, '') === t.base && l.cid) return l.cid;
     }
+    // 窗口关了也别丢身份：上次连这台时对方授权的 cid 记在设置里
+    const bl = readSettings().ballLast;
+    if (bl && bl.url === t.base && bl.cid) return bl.cid;
   }
   return ballIdentity();
 }
