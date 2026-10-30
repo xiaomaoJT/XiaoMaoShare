@@ -88,6 +88,8 @@ let ballAnchor = null;    // 球的屏幕位置（收起时就是窗口位置，
 let ballGeo = null;       // 上一次算出来的展开布局，拖动时用它把窗口位移换算回球位
 let ballCid = '';         // 主窗口上报的设备身份，球的请求靠它拿权限
 let ballBase = '';        // 主窗口上报的 origin（连别人时是对方的地址）
+let ballLastFocus = null; // 最近用的是哪个窗口：{ kind:'host' } / { kind:'link', id }
+let ballPinCache;         // 手动选定的目标（undefined = 还没从设置里读过）
 let ballDiscPx = 64;      // 当前球体直径（跟着设置走）
 let ballBoxPx = 84;       // 当前球窗口边长 = 球体 + 一圈给阴影留的空白
 
@@ -237,6 +239,9 @@ function createHostWindow() {
   // 关窗只是收起界面：主机还在跑，手机照样能传
   hostWin.on('closed', () => { hostWin = null; });
 
+  // 悬浮球「跟随最近用的窗口」靠这个：点过哪个窗口，球就发给谁
+  hostWin.on('focus', () => noteBallFocus('host'));
+
   return hostWin;
 }
 
@@ -322,9 +327,18 @@ function openLink(rawUrl) {
 
   const rec = { id, url: n.url, host: n.host, win };
   links.set(id, rec);
+  // 刚开出来的连接窗口多半就是用户接下来在用的窗口 —— 球默认跟着它
+  noteBallFocus('link', id);
+  win.on('focus', () => noteBallFocus('link', id));
   win.on('closed', () => {
     links.delete(id);
     broadcastLinks();
+    // 球正指着这台就把记忆清掉，下次按「最近用的窗口」重新算
+    if (ballLastFocus && ballLastFocus.kind === 'link' && ballLastFocus.id === id) noteBallFocus('host');
+    const pin = ballPinRead();
+    if (pin && pin.kind === 'link' && String(pin.url || '').replace(/\/+$/, '') === n.url.replace(/\/+$/, '')) {
+      ballPinWrite(null);
+    }
     // 「只连别人」时主窗口是藏着的，关掉这个窗口不会触发 window-all-closed，
     // 得自己判断一次，否则会留下一个看不见却在后台常驻的进程
     quitIfNoVisibleWindow();
@@ -397,6 +411,7 @@ function broadcastLinks() {
     if (!w.isDestroyed()) w.webContents.send('desktop:links', snap);
   }
   buildMenu();
+  refreshBallTarget();   // 连上 / 断开都会影响球发给谁，标题要跟着改
 }
 
 function desktopState() {
@@ -1883,21 +1898,68 @@ function ballLayout() {
   };
   return out;
 }
-/** 球现在该跟谁打交道：主窗口收起来且开着别人的主机 → 跟对方；否则回本机 */
+/**
+ * 球现在该跟谁打交道。
+ *
+ * 「本机服务在跑」和「连着别人的主机」可以同时成立，所以必须有个明确规则，
+ * 否则球会悄悄改投：按一下 Cmd+1 看一眼本机界面，球就以为你要发给本机了。
+ * 规则按优先级来：
+ *   1. 手动选过（面板顶部点一下就切）→ 听手动那个，记在设置里，重启还在
+ *   2. 否则跟随「最近用过的那个窗口」—— 你在用哪个窗口，球就跟着谁
+ *   3. 目标没了（那台断开了 / 本机服务停了）→ 看另一个还有没有，都没有就当没目标
+ */
 function ballTarget() {
-  const opened = [...links.values()].pop();
-  const hostHidden = !hostWin || hostWin.isDestroyed() || !hostWin.isVisible();
-  if (opened && hostHidden) {
-    return { base: opened.url.replace(/\/+$/, ''), kind: 'link', label: '连到 ' + opened.host, port: '' };
-  }
-  // 主窗口自己就在连别人（页面报上来的 origin 不是本机）—— 球跟着它走
-  if (hostHidden && ballBase && !/^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(ballBase)) {
-    const label = ballBase.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
-    return { base: ballBase.replace(/\/+$/, ''), kind: 'link', label: '连到 ' + label, port: '' };
-  }
   const inf = server.serverInfo();
-  if (inf.running) return { base: 'http://127.0.0.1:' + inf.port, kind: 'host', label: '本机主机', port: inf.port };
-  return null;
+  const host = inf.running
+    ? { base: 'http://127.0.0.1:' + inf.port, kind: 'host', label: '本机主机', port: inf.port, id: '' }
+    : null;
+
+  const byId = (id) => {
+    const l = id && links.get(id);
+    if (!l) return null;
+    return { base: l.url.replace(/\/+$/, ''), kind: 'link', label: '连到 ' + l.host, port: '', id: l.id };
+  };
+  const byUrl = (url) => {
+    const u = String(url || '').replace(/\/+$/, '');
+    for (const [, l] of links) if (l.url.replace(/\/+$/, '') === u) return byId(l.id);
+    return null;
+  };
+
+  const pin = ballPinRead();
+  if (pin) {
+    const t = pin.kind === 'host' ? host : byUrl(pin.url);
+    if (t) return t;
+    // 手动指定的那台不在了：清掉这个记忆，免得一直卡在无效目标上
+    ballPinWrite(null);
+  }
+
+  if (ballLastFocus && ballLastFocus.kind === 'link') {
+    const t = byId(ballLastFocus.id);
+    if (t) return t;
+  }
+  // 最近用的是主窗口（或从没用过）→ 只能是本机；本机没开服务就只能空着
+  return host;
+}
+
+/** 手动选定的目标：{ kind:'host' } 或 { kind:'link', url } */
+function ballPinRead() {
+  if (ballPinCache !== undefined) return ballPinCache;
+  const p = readSettings().ballPin;
+  if (p && p.kind === 'host') ballPinCache = { kind: 'host' };
+  else if (p && p.kind === 'link' && /^https?:\/\//i.test(String(p.url || ''))) {
+    ballPinCache = { kind: 'link', url: String(p.url) };
+  } else ballPinCache = null;
+  return ballPinCache;
+}
+
+function ballPinWrite(p) {
+  ballPinCache = p;
+  updateSettings({ ballPin: p || null });
+}
+
+/** 记住「最近用的是哪个窗口」，球跟着它 */
+function noteBallFocus(kind, id) {
+  ballLastFocus = { kind, id: id || '' };
 }
 
 /**
@@ -1998,11 +2060,24 @@ function ballItemView(t, it) {
 /** 定位要用哪个窗口：连别人的内容就在那个连接窗口里找，自己的内容在主窗口里找 */
 function ballWindowFor(t) {
   if (t && t.kind === 'link') {
-    for (const [, l] of links) if (l.url.replace(/\/+$/, '') === t.base) return l.win;
+    const l = (t.id && links.get(t.id)) || [...links.values()].find((x) => x.url.replace(/\/+$/, '') === t.base);
+    if (l) return l.win;
     const last = [...links.values()].pop();
     if (last) return last.win;
   }
   return hostWin && !hostWin.isDestroyed() ? hostWin : null;
+}
+
+/** 目标变了就告诉球一声，别等下一次轮询才更新标题 */
+function refreshBallTarget() {
+  if (!ballWin || ballWin.isDestroyed()) return;
+  try { ballWin.webContents.send('ball:target-changed'); } catch { /* 页面还没就绪 */ }
+}
+
+/** 手动选目标：写进设置，并让面板立刻改口 */
+function setBallPin(pin) {
+  ballPinWrite(pin);
+  refreshBallTarget();
 }
 
 /** 把某条内容滚到中间并闪一下（页面里暴露了 window.__xmLocate） */
@@ -2096,6 +2171,47 @@ function registerBallIpc() {
       ballAnchor = { x, y };
     }
     updateSettings({ ballPos: { x: ballAnchor.x, y: ballAnchor.y } });
+  });
+
+  /**
+   * 面板顶部点一下：手动指定球发给谁。
+   * 本机服务和连别人的窗口可以同时存在，靠「最近用过的窗口」自动跟随就够用了，
+   * 但要给人一个能明确按下去的地方 —— 否则永远搞不清这个文件到底发去了哪。
+   */
+  ipcMain.handle('ball:pick-target', () => {
+    if (!ballWin || ballWin.isDestroyed()) return { ok: false };
+    const inf = server.serverInfo();
+    const cur = ballTarget();
+    const items = [
+      {
+        label: '本机主机' + (inf.running ? '' : '（接收服务没开）'),
+        type: 'radio',
+        checked: !!cur && cur.kind === 'host',
+        enabled: inf.running,
+        click: () => setBallPin({ kind: 'host' }),
+      },
+      { type: 'separator' },
+    ];
+    if (!links.size) {
+      items.push({ label: '（还没有连其他主机）', enabled: false });
+    } else {
+      for (const [, l] of links) {
+        items.push({
+          label: '连到 ' + l.host,
+          type: 'radio',
+          checked: !!cur && cur.kind === 'link' && cur.id === l.id,
+          click: () => setBallPin({ kind: 'link', url: l.url }),
+        });
+      }
+    }
+    items.push({ type: 'separator' });
+    items.push({
+      label: '改回自动跟随（最近用的窗口）',
+      enabled: !!ballPinRead(),
+      click: () => setBallPin(null),
+    });
+    Menu.buildFromTemplate(items).popup({ window: ballWin });
+    return { ok: true };
   });
 
   /** 滚轮换大小：球上滚一下比翻菜单快 */
@@ -2197,7 +2313,7 @@ function registerBallIpc() {
       return { ok: false, error: '发送失败' };
     }
     refreshTray();
-    return { ok: true, sent: parts.length, failed: failed.length, text: !!body };
+    return { ok: true, sent: parts.length, failed: failed.length, text: !!body, target: t.label };
   });
 }
 

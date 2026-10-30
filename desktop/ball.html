@@ -91,6 +91,10 @@
   .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ink3); flex: none; }
   .dot.on { background: var(--ok); box-shadow: 0 0 0 3px rgba(18, 184, 134, .16); }
   .p-title { font-size: 12.5px; font-weight: 600; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* 小三角 = 「这里能点」：点它换发送目标 */
+  .p-caret { width: 13px; height: 13px; flex: none; color: var(--ink3); margin-left: -3px; }
+  .p-head:hover .p-caret { color: var(--accent); }
+  .p-head:hover .p-title { color: var(--accent); }
   .p-sub { margin-left: auto; font-size: 11.5px; color: var(--ink3); white-space: nowrap; flex: none; }
 
   .p-list { flex: 1; overflow-y: auto; padding: 6px; }
@@ -206,9 +210,10 @@
   </div>
 
   <div id="panel" hidden>
-    <div class="p-head" id="pHead" title="按住这里可以拖动">
+    <div class="p-head" id="pHead" title="按住可以拖动；点一下切换发给谁">
       <span class="dot" id="dot"></span>
       <span class="p-title" id="pTitle">XiaoMao 互传</span>
+      <svg class="p-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
       <span class="p-sub" id="pSub"></span>
     </div>
     <div class="p-list" id="pList"></div>
@@ -337,7 +342,8 @@
   }
 
   makeDraggable(ball, function () { setOpen(!open); });
-  makeDraggable($('pHead'), null);
+  // 标题栏也能拖；「点一下」= 换发送目标（本机 / 连到哪台）
+  makeDraggable($('pHead'), function () { if (api.pickTarget) api.pickTarget(); });
 
   /* 球上 ⌘/Ctrl + 滚轮换大小：比翻菜单快。
      必须带修饰键 —— 球的窗口永远置顶，光标扫过它时随手一滑就改尺寸太容易误触。 */
@@ -363,7 +369,10 @@
     var host = state.target && state.target.kind === 'host';
     $('dot').className = 'dot' + (state.online ? ' on' : '');
     $('pTitle').textContent = host ? '本机主机' : (state.target && state.target.label) || 'XiaoMao 互传';
-    $('pSub').textContent = state.online ? ('可被连接 · ' + (state.port || '')) : (state.note || '未连接');
+    // 本机是「可被连接」，连别人是「发到对方」——两种身份的说法不一样
+    $('pSub').textContent = state.online
+      ? (host ? ('可被连接 · ' + (state.port || '')) : '内容会发到对方')
+      : (state.note || '未连接');
 
     var items = state.items || [];
     var n = state.unread || 0;
@@ -459,6 +468,9 @@
     pollTimer = setInterval(poll, open ? 3000 : 5000);
     poll();
   }
+
+  /* 发送目标变了（手动切换 / 连上或断开别人）→ 立刻重画标题，不等下一轮轮询 */
+  if (api.onTargetChanged) api.onTargetChanged(function () { poll(); });
 
   /* ---------------- 拖文件 ---------------- */
   var dragDepth = 0;

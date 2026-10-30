@@ -36,6 +36,8 @@ contextBridge.exposeInMainWorld('xmBall', {
   send: (payload) => ipcRenderer.invoke('ball:send', payload),
   /** 打开主界面 */
   openHost: () => ipcRenderer.invoke('ball:open-host'),
+  /** 手动选「发给谁」：弹一个原生单选菜单（本机 / 连到 A / 连到 B） */
+  pickTarget: () => ipcRenderer.invoke('ball:pick-target'),
   /** 打开主界面并滚到某条内容（滚过去 + 闪一下） */
   locate: (id) => ipcRenderer.invoke('ball:locate', id),
   /** 在文件管理器里显示这份文件（只在本机有实物时可用） */
@@ -58,5 +60,11 @@ contextBridge.exposeInMainWorld('xmBall', {
   onGeometry: (fn) => {
     if (typeof fn !== 'function') return;
     ipcRenderer.on('ball:geometry', (_e, g) => { try { fn(g); } catch { /* 页面自己的错 */ } });
+  },
+
+  /** 发送目标变了（换了窗口 / 连上或断开了别人）—— 重新拉一次列表刷新标题 */
+  onTargetChanged: (fn) => {
+    if (typeof fn !== 'function') return;
+    ipcRenderer.on('ball:target-changed', () => { try { fn(); } catch { /* 同上 */ } });
   },
 });
