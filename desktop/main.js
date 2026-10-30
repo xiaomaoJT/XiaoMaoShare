@@ -1732,11 +1732,13 @@ const BALL_PAD = 20;                                     // 窗口比球体大�
 const BALL_GAP = 6;                                      // 球与面板之间（球本身还自带 10px 留白）
 const BALL_PANEL = { width: 360, height: 460 };
 
+let ballOn = false;       // 悬浮球是「每场会话」的开关：默认关，重启后想用要重新打开（不落盘，免得一次开启永久常驻）
+
 function readBallPref() {
   const s = readSettings();
   const p = s.ballPos;
   return {
-    enabled: s.ballEnabled === true,                     // 默认不起：桌面组件得用户自己同意才出现
+    enabled: ballOn,                                     // 默认关闭；菜单 / 托盘里开了才出现，且只管本次运行
     size: BALL_DISC[s.ballSize] ? s.ballSize : 'md',
     pos: p && Number.isFinite(p.x) && Number.isFinite(p.y) ? { x: p.x, y: p.y } : null,
   };
@@ -1749,7 +1751,7 @@ function syncBallMetrics() {
 }
 
 function setBallEnabled(on) {
-  updateSettings({ ballEnabled: !!on });
+  ballOn = !!on;   // 会话内开关，不写设置 —— 下次启动仍然是关着的
   if (on) createBallWindow();
   else destroyBallWindow();
   buildMenu();
@@ -1836,11 +1838,14 @@ function createBallWindow() {
     },
   });
 
-  // screen-saver 这一级才压得住全屏应用；普通 alwaysOnTop 一进全屏就被盖住
-  ballWin.setAlwaysOnTop(true, 'screen-saver');
+  // mac 上必须先 setVisibleOnAllWorkspaces 再 setAlwaysOnTop —— 顺序反过来
+  // 会把窗口层级重置掉，球就沉到普通窗口下面去了（拖文件永远拖不到它身上）。
+  // screen-saver 这一级才压得住全屏应用；普通 alwaysOnTop 一进全屏就被盖住。
   if (IS_MAC) {
     try { ballWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch { /* 老系统 */ }
   }
+  ballWin.setAlwaysOnTop(true, 'screen-saver');
+  ballWin.moveTop();
 
   ballWin.loadFile(BALL_PAGE);
   ballWin.once('ready-to-show', () => { if (ballWin && !ballWin.isDestroyed()) ballWin.showInactive(); });
@@ -2272,12 +2277,13 @@ function registerBallIpc() {
 
     const cid = ballIdentity();
     const parts = [];
-    const failed = [];
+    const failed = [];   // { name, reason } —— 界面要把失败原因念给人听，别只说「失败」
 
     for (const one of list) {
+      const name = path.basename(String(one));
       try {
         const st = fs.statSync(one);
-        if (!st.isFile()) { failed.push(one); continue; }
+        if (!st.isFile()) { failed.push({ name, reason: '不是文件' }); continue; }
         const q = '/api/upload?name=' + encodeURIComponent(path.basename(one)) +
           '&cid=' + encodeURIComponent(cid);
         const stream = Readable.toWeb(fs.createReadStream(one));
@@ -2287,14 +2293,20 @@ function registerBallIpc() {
           duplex: 'half',
           headers: { ...ballHeaders(), 'content-type': 'application/octet-stream' },
         });
-        if (!r.ok) { failed.push(one); continue; }
+        if (!r.ok) {
+          const j = await r.json().catch(() => ({}));
+          failed.push({ name, reason: j.error || ('对方返回 ' + r.status) });
+          continue;
+        }
         const d = await r.json();
-        if (d.part) parts.push(d.part); else failed.push(one);
-      } catch { failed.push(one); }
+        if (d.part) parts.push(d.part); else failed.push({ name, reason: '服务端没给回执' });
+      } catch (err) {
+        failed.push({ name, reason: err && err.code === 'ENOENT' ? '文件不存在' : '读不了这个文件' });
+      }
     }
 
     if (list.length && !parts.length) {
-      return { ok: false, error: failed.length ? '文件都没传上去' : '没有可发送的文件' };
+      return { ok: false, error: failed.map((f) => f.name + '：' + f.reason).join('；') || '没有可发送的文件' };
     }
 
     // 文字排在最前面：一条消息里先说事，再挂附件
@@ -2313,7 +2325,10 @@ function registerBallIpc() {
       return { ok: false, error: '发送失败' };
     }
     refreshTray();
-    return { ok: true, sent: parts.length, failed: failed.length, text: !!body, target: t.label };
+    return {
+      ok: true, sent: parts.length, failed: failed.length, text: !!body, target: t.label,
+      failedNames: failed.map((f) => f.name + '（' + f.reason + '）'),
+    };
   });
 }
 
@@ -2343,7 +2358,7 @@ if (!app.requestSingleInstanceLock()) {
     syncBallMetrics();    // 球的尺寸先算好，后面布局都靠它
     registerBallIpc();    // 悬浮球的请求通道先打通，窗口起来就能用
     createHostWindow();   // 窗口与启动页立刻出现 —— 双击就有反馈，不用干等任何东西
-    if (readBallPref().enabled) createBallWindow();
+    // 悬浮球默认不出场：它是用户临时叫出来的浮件，每次启动都从关着开始
 
     setupAutoUpdater();
 

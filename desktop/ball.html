@@ -183,9 +183,11 @@
   }
   .link:hover { color: var(--accent); }
 
-  /* 拖文件的遮罩：铺满整个窗口，落在球和面板上都算 */
+  /* 拖文件的遮罩：铺满整个窗口，落在球和面板上都算。
+     pointer-events:none —— 遮罩自己不参与拖拽事件流，不然它一出现就把光标底下的
+     事件目标换了一遍，Windows 上会打乱 dragenter/leave 的次序，drop 反而不来。 */
   #dropmask {
-    position: fixed; inset: 0; z-index: 20;
+    position: fixed; inset: 0; z-index: 20; pointer-events: none;
     display: none; align-items: center; justify-content: center;
     background: rgba(76, 110, 245, .08);
     border: 2px dashed var(--accent); border-radius: 18px;
@@ -224,7 +226,8 @@
       </div>
       <div class="hint">
         <span class="grow" id="hintText">把文件拖到球上松手即发</span>
-        <button class="link" id="btnHide" type="button">收起</button>
+        <button class="link" id="btnCollapse" type="button" title="面板收起，球还在">收起面板</button>
+        <button class="link" id="btnHide" type="button" title="球整个关掉；下次从菜单「悬浮球 → 显示悬浮球」再打开">关闭悬浮球</button>
         <button class="link" id="btnHost" type="button">打开主界面</button>
       </div>
     </div>
@@ -479,6 +482,8 @@
     dragDepth++;
     document.body.classList.add('dropping');
   });
+  // dragover 在 document 上也拦一道：这是 Electron 的老经验，少这道 Windows 上 drop 可能不触发
+  document.addEventListener('dragover', function (e) { e.preventDefault(); });
   window.addEventListener('dragover', function (e) { e.preventDefault(); });
   window.addEventListener('dragleave', function (e) {
     e.preventDefault();
@@ -488,13 +493,32 @@
     e.preventDefault();
     dragDepth = 0;
     document.body.classList.remove('dropping');
-    var files = e.dataTransfer && e.dataTransfer.files;
-    var paths = api.pathsOf ? api.pathsOf(files) : [];
-    if (!paths.length) return toast('只支持拖本机的文件');
-    toast('正在发送 ' + paths.length + ' 个文件…');
-    var r = await api.send({ paths: paths });
-    if (r && r.ok) { toast('已发送 ' + r.sent + ' 个'); poll(); }
-    else toast((r && r.error) || '发送失败');
+    try {
+      var files = e.dataTransfer && e.dataTransfer.files;
+      // FileList 这种宿主对象过不了 contextBridge（过去会变成空对象，for...of 直接炸），
+      // 单个 File 可以过——先在页面这边摊成数组再交给 preload 取路径
+      var paths = api.pathsOf ? api.pathsOf(Array.prototype.slice.call(files || [])) : [];
+      // 拿不到路径多半是从微信 / 浏览器这类地方拖的——那些「文件」本机并不存在
+      if (!paths.length) return toast(files && files.length ? '拿不到文件路径，请从「访达 / 资源管理器」或桌面拖入' : '只支持拖本机的文件');
+      toast('正在发送 ' + paths.length + ' 个文件…');
+      var r = await api.send({ paths: paths });
+      if (r && r.ok) {
+        // 部分失败要把原因念出来：文件不存在 / 对方拒收，别让人对着「发送失败」干瞪眼
+        toast(r.failed ? ('已发送 ' + r.sent + ' 个，失败：' + (r.failedNames || []).join('；')) : ('已发送 ' + r.sent + ' 个'));
+        poll();
+      } else toast((r && r.error) || '发送失败');
+    } catch (err) {
+      toast('拖放发送出错：' + ((err && err.message) || err));
+    }
+  });
+
+  /* 链路上任何一步悄悄挂掉都要出声——不然对着「没反应」排查是无底洞 */
+  window.addEventListener('unhandledrejection', function (e) {
+    var r = e.reason;
+    toast('出错：' + ((r && (r.message || r.error)) || r));
+  });
+  window.addEventListener('error', function (e) {
+    toast('出错：' + ((e && e.message) || '脚本错误'));
   });
 
   /* ---------------- 发文字 ---------------- */
@@ -537,6 +561,8 @@
 
   /* ---------------- 按钮 ---------------- */
   $('btnHost').addEventListener('click', function () { api.openHost(); });
+  // 「收起」只收面板，球留在原地；关球是另一回事，别混在一个词里
+  $('btnCollapse').addEventListener('click', function () { setOpen(false); });
   $('btnHide').addEventListener('click', function () { api.hide(); });
 
   if (api.onGeometry) api.onGeometry(applyGeo);
