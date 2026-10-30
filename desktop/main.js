@@ -12,7 +12,7 @@
  * 关掉界面不影响手机连进来。
  */
 
-const { app, BrowserWindow, ipcMain, Menu, shell, clipboard, dialog, nativeImage, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, Tray, shell, clipboard, dialog, nativeImage, screen, Notification } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const { once } = require('node:events');
@@ -74,6 +74,10 @@ let hostInfo = null;  // 启动后缓存的地址信息（端口、局域网地�
 const links = new Map(); // id -> { id, url, host, win }
 let linkSeq = 0;
 let quitting = false;
+
+let tray = null;          // 系统托盘 / 菜单栏图标；建不起来时为 null（Linux 缺 appindicator 之类）
+let closeAsking = false;  // 关闭确认框只允许存在一个，连点红叉不会叠出一串
+let trayHintShown = false; // 「已收进托盘」的气泡只在第一次提示，之后不再打扰
 
 /* ------------------------------------------------------------ 地址处理 */
 
@@ -199,7 +203,10 @@ function createHostWindow() {
   };
   hostWin.on('resize', () => saveBounds(false));
   hostWin.on('move', () => saveBounds(false));
-  hostWin.on('close', () => saveBounds(true));
+  hostWin.on('close', (e) => {
+    saveBounds(true);
+    handleHostClose(e);
+  });
 
   // 页面里想开新窗口（外链）一律交给系统浏览器，别在应用里长出一堆窗口
   hostWin.webContents.setWindowOpenHandler(({ url }) => {
@@ -473,6 +480,7 @@ function buildMenu() {
   const recent = readRecent();
   const opened = linkSnapshot();
   const startPref = readStartPref();
+  const closePref = readClosePref();
 
   const linkItems = opened.length
     ? opened.map((l) => ({
@@ -528,6 +536,15 @@ function buildMenu() {
             },
             { type: 'separator' },
             { label: '现在重新选一次…', accelerator: 'CmdOrCtrl+Shift+S', click: () => openStartChooser() },
+          ],
+        },
+        {
+          // 「收进托盘」也是记忆，同样要能改回来
+          label: '点关闭按钮时…',
+          submenu: [
+            { label: '每次问我', type: 'radio', checked: closePref === 'ask', click: () => setCloseAction('ask') },
+            { label: '收入托盘（服务继续）', type: 'radio', checked: closePref === 'tray', click: () => setCloseAction('tray') },
+            { label: '完全退出', type: 'radio', checked: closePref === 'quit', click: () => setCloseAction('quit') },
           ],
         },
         { type: 'separator' },
@@ -605,7 +622,7 @@ function buildMenu() {
           },
         },
         { type: 'separator' },
-        { role: IS_MAC ? 'close' : 'quit', label: IS_MAC ? '关闭窗口（服务继续）' : '退出' },
+        { role: IS_MAC ? 'close' : 'quit', label: IS_MAC ? '关闭窗口' : '退出' },
       ],
     },
     {
@@ -645,6 +662,7 @@ function buildMenu() {
   ];
 
   Menu.setApplicationMenu(Menu.buildFromTemplate(tmpl));
+  refreshTray(); // 托盘菜单和这里共用一份状态，别让两边说的不是一回事
 }
 
 /* ------------------------------------------------------- 端口偏好 */
@@ -1228,6 +1246,29 @@ function setStartMode(mode) {
   const m = ['ask', 'host', 'link'].includes(mode) ? mode : 'ask';
   updateSettings({ startMode: m });
   buildMenu(); // 单选勾选状态要立刻跟上
+  refreshTray();
+  return { ok: true, mode: m };
+}
+
+/**
+ * 点窗口关闭按钮时怎么办（settings.json.closeAction）：
+ *   ask  —— 每次都问；没设置过就是它，所以第一次关闭必然弹窗
+ *   tray —— 直接收进托盘，本机服务继续跑（手机照样能传）
+ *   quit —— 直接退出
+ *
+ * 和启动方式一样，这个记忆必须有反悔入口：菜单「我的主机 → 关闭时…」、
+ * 关闭弹窗里的「记住」勾选、以及托盘菜单，三处改的是同一个键。
+ */
+function readClosePref() {
+  const m = readSettings().closeAction;
+  return ['ask', 'tray', 'quit'].includes(m) ? m : 'ask';
+}
+
+function setCloseAction(v) {
+  const m = ['ask', 'tray', 'quit'].includes(v) ? v : 'ask';
+  updateSettings({ closeAction: m });
+  buildMenu();
+  refreshTray();
   return { ok: true, mode: m };
 }
 
@@ -1398,14 +1439,193 @@ async function openStartChooser() {
 }
 
 /**
- * 没有可见窗口了就该退出（Windows / Linux）。
+ * 没有可见窗口了要不要退出（Windows / Linux）。
  * 连接模式下主窗口是 hide() 着的，它不算可见窗口 —— 所以不能让
  * window-all-closed 来判断，否则关掉对方的窗口后进程会赖在后台。
+ *
+ * 托盘在的时候不退出：托盘图标就是那个「看得见的落脚点」，
+ * 用户随时能点回来。只有记过「关闭即完全退出」才放行。
  */
 function quitIfNoVisibleWindow() {
   if (IS_MAC) return; // mac 惯例外：关窗不退，Dock 点回来
   const anyVisible = BrowserWindow.getAllWindows().some((w) => !w.isDestroyed() && w.isVisible());
-  if (!anyVisible) app.quit();
+  if (anyVisible) return;
+  if (tray && readClosePref() !== 'quit') return;
+  app.quit();
+}
+
+/* ------------------------------------------------------------ 托盘 */
+
+/**
+ * 托盘图标：Windows 用 ico（系统按 DPI 自己挑 16/24/32/48），
+ * mac / Linux 用 png。都在 desktop/ 里 —— 构建的 files 只收 server.js、
+ * public/、desktop/，放别处（比如 build/）打包后就读不到了。
+ * 图是从应用图标重采样的圆角透明版：16~32px 的托盘格子里，
+ * 白底方图会变成一块死白，圆角挖空才像个图标。
+ */
+const TRAY_ICON = path.join(__dirname, process.platform === 'win32' ? 'tray.ico' : 'tray.png');
+
+function buildTray() {
+  if (tray) {
+    try { tray.destroy(); } catch { /* 已经不在了 */ }
+    tray = null;
+  }
+
+  let img = nativeImage.createFromPath(TRAY_ICON);
+  if (img.isEmpty()) return; // 图标缺失就干脆不建，别在任务栏留一个空白格子
+  if (IS_MAC) img = img.resize({ width: 18, height: 18 });
+
+  try {
+    tray = new Tray(img);
+  } catch {
+    tray = null; // Linux 缺 libappindicator 等：当作「不支持托盘」，退回原来的关闭即退出
+    return;
+  }
+
+  tray.setToolTip('XiaoMao 互传');
+  // Windows / Linux：左键单击直接叫回界面，右键才是菜单。
+  // macOS 的菜单栏图标点了就弹菜单，所以那边靠菜单第一项回来。
+  tray.on('click', () => showFromTray());
+  tray.on('double-click', () => showFromTray());
+  refreshTray();
+}
+
+/** 托盘菜单跟着服务状态走：端口、能不能复制地址、关闭策略的单选，都要是当下的事实 */
+function refreshTray() {
+  if (!tray) return;
+  const inf = server.serverInfo();
+  tray.setToolTip(inf.running ? `XiaoMao 互传 · 端口 ${inf.port}` : 'XiaoMao 互传 · 本机未开接收服务');
+  tray.setContextMenu(Menu.buildFromTemplate(trayTemplate(inf)));
+}
+
+function trayTemplate(inf) {
+  const closePref = readClosePref();
+  const lanUrl = (hostInfo && hostInfo.lan[0] && hostInfo.lan[0].url) || '';
+  return [
+    { label: '打开 XiaoMao 互传', click: () => showFromTray() },
+    { type: 'separator' },
+    inf.running
+      ? { label: `本机可被连接 · 端口 ${inf.port}`, enabled: false }
+      : {
+        label: '本机未开接收服务（点击开启）',
+        click: () => ensureHostServer().then(() => { buildMenu(); refreshTray(); }),
+      },
+    {
+      label: '复制局域网地址',
+      enabled: !!(inf.running && lanUrl),
+      click: () => { if (lanUrl) clipboard.writeText(lanUrl); },
+    },
+    { type: 'separator' },
+    { label: '连接其他主机…', click: () => openConnectPanel() },
+    { type: 'separator' },
+    {
+      label: '点关闭按钮时…',
+      submenu: [
+        { label: '每次问我', type: 'radio', checked: closePref === 'ask', click: () => setCloseAction('ask') },
+        { label: '收入托盘（服务继续）', type: 'radio', checked: closePref === 'tray', click: () => setCloseAction('tray') },
+        { label: '完全退出', type: 'radio', checked: closePref === 'quit', click: () => setCloseAction('quit') },
+      ],
+    },
+    { type: 'separator' },
+    { label: '退出', click: () => app.quit() },
+  ];
+}
+
+function showFromTray() {
+  if (hostWin && !hostWin.isDestroyed() && hostWin.isVisible()) {
+    if (hostWin.isMinimized()) hostWin.restore();
+    hostWin.focus();
+    return;
+  }
+  ensureHostWindow();
+}
+
+/**
+ * 主窗口的关闭按钮走这里。三种结局由 closeAction 决定，
+ * 但无论哪种，都是「窗口关不关」的问题 —— 服务是否停，只看是不是真退出。
+ */
+function handleHostClose(e) {
+  if (quitting) return; // 已经在退出流程里，放行
+  if (!tray) return;    // 没有托盘可收，保持老行为：真关，窗口全关后退出
+
+  const policy = readClosePref();
+  if (policy === 'quit') {
+    // 记过「完全退出」就真的退。mac 上不能只是放行关窗 —— 那边关窗默认不退，
+    // 用户会以为点了个寂寞，得显式走一遍退出流程。
+    e.preventDefault();
+    // 推迟一拍再退：直接在 close 事件里调 app.quit()，quit 流程又会来关这个窗口，
+    // 有平台会因为「正在关闭中」把这个请求吃掉
+    setImmediate(() => app.quit());
+    return;
+  }
+
+  e.preventDefault();            // 兜住这次关闭，改由我们决定去哪
+  if (policy === 'tray') { hideToTray(); return; }
+  askCloseChoice();
+}
+
+function hideToTray() {
+  if (!hostWin || hostWin.isDestroyed()) return;
+  hostWin.hide();
+  refreshTray();
+
+  // 第一次收起时说一声 —— 否则 Windows 用户会以为程序没退干净
+  if (trayHintShown) return;
+  trayHintShown = true;
+  try {
+    if (process.platform === 'win32' && tray) {
+      tray.displayBalloon({
+        title: 'XiaoMao 互传还在运行',
+        content: '点托盘图标随时打开；右键菜单里可以完全退出。',
+      });
+    } else if (!IS_MAC) {
+      new Notification({
+        title: 'XiaoMao 互传还在运行',
+        body: '点托盘图标随时打开；右键菜单里可以完全退出。',
+      }).show();
+    }
+  } catch { /* 系统通知不可用就算了，别为一句提示把关闭流程弄崩 */ }
+}
+
+/**
+ * 关闭确认。之所以默认是「收入托盘」而不是「退出」：
+ * 这个程序在后台是有用的（手机还在传），误关的代价比误留高得多。
+ */
+async function askCloseChoice() {
+  if (closeAsking) return;
+  closeAsking = true;
+
+  const inf = server.serverInfo();
+  const port = inf.running ? inf.port : (readPortPref() || DEFAULT_PORT);
+  let r;
+  try {
+    r = await dialog.showMessageBox(hostWin && !hostWin.isDestroyed() ? hostWin : undefined, {
+      type: 'question',
+      title: '关闭窗口',
+      message: '关掉窗口后，XiaoMao 互传还要继续接收吗？',
+      detail: inf.running
+        ? `收入托盘：界面收起，本机继续在端口 ${port} 上守着，手机和别的电脑照样能传给你。\n完全退出：服务和端口一起停掉，别人就传不进来了。`
+        : '收入托盘：界面收起，进程留在托盘里，随时点回来。\n完全退出：结束进程，托盘图标一起消失。',
+      buttons: ['收入托盘', '完全退出', '取消'],
+      defaultId: 0,
+      cancelId: 2,
+      checkboxLabel: '记住我的选择，以后不再问',
+      checkboxChecked: false,
+      noLink: true,
+    });
+  } finally {
+    closeAsking = false;
+  }
+
+  if (r.response === 0) {
+    // 只记「确定」的那两项；勾了记住又点取消，不该产生任何记忆
+    if (r.checkboxChecked) setCloseAction('tray');
+    hideToTray();
+  } else if (r.response === 1) {
+    if (r.checkboxChecked) setCloseAction('quit');
+    app.quit();
+  }
+  // 2 = 取消：什么都不做，窗口原样留着
 }
 
 /* ------------------------------------------------------------ 生命周期 */
@@ -1417,6 +1637,7 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(async () => {
     buildMenu();          // 菜单先挂上，别让窗口出来时顶栏是空的
+    buildTray();          // 托盘尽早建：关闭按钮的三种结局都依赖它在不在
     createHostWindow();   // 窗口与启动页立刻出现 —— 双击就有反馈，不用干等任何东西
 
     setupAutoUpdater();
@@ -1437,6 +1658,7 @@ if (!app.requestSingleInstanceLock()) {
 
   // macOS：关掉窗口不退程序，主机继续在后台跑（手机上还能传）
   // Windows / Linux：关掉就退，免得用户以为没退出
+  // （「收进托盘」那条路在主窗口的 close 事件里就拦下了，走不到这里）
   app.on('window-all-closed', () => {
     if (!IS_MAC) app.quit();
   });
@@ -1446,6 +1668,11 @@ if (!app.requestSingleInstanceLock()) {
     if (quitting) return;
     e.preventDefault();
     quitting = true;
+    // 托盘先撤掉：mac 上偶尔会出现「进程退了、菜单栏图标还挂着」的残影
+    if (tray) {
+      try { tray.destroy(); } catch { /* 已经没了 */ }
+      tray = null;
+    }
     server.stopServer().finally(() => app.quit());
   });
 }
