@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>悬浮球菜单</title>
+<style>
+  :root {
+    --card: #ffffff;
+    --ink2: #5a6473;
+    --ink3: #8a94a6;
+    --accent: #4c6ef5;
+    --ok: #12b886;
+    --ring: rgba(20, 23, 28, .08);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; width: 100%; height: 100%;
+    background: transparent;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                 "Microsoft YaHei", "Hiragino Sans GB", sans-serif;
+    user-select: none; overflow: hidden;
+    color: var(--ink2);
+    cursor: default;
+  }
+
+  /* 三个入口竖着一列，全部居中对齐 —— 横坐标只有一条轴，
+     对齐不是「算」出来的，是布局保证的：任何一项都不可能偏到旁边去。 */
+  #stack {
+    width: 100%; height: 100%;
+    display: flex; flex-direction: column;
+    align-items: center;          /* ← 唯一的中轴线 */
+    justify-content: flex-start;
+    gap: 10px;
+    padding: 10px;                /* 也给投影留出画的空间 */
+  }
+
+  /* 连接信息：胶囊。宽度随文字，最宽 = 内容区（188），超了省略号 */
+  #info {
+    flex: 0 0 auto;
+    max-width: 100%;
+    height: 30px;
+    display: flex; align-items: center; gap: 7px;
+    padding: 0 13px;
+    border: 0; border-radius: 15px;
+    background: var(--card);
+    box-shadow: 0 3px 12px -3px rgba(16, 24, 40, .45), 0 0 0 1px var(--ring);
+    font: inherit; font-size: 12px; font-weight: 650; letter-spacing: .2px;
+    color: var(--ink2);
+  }
+  #info:hover { color: var(--accent); box-shadow: 0 5px 16px -4px rgba(76, 110, 245, .5), 0 0 0 1.5px var(--accent); }
+  #dot {
+    flex: 0 0 auto;
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--ink3);
+  }
+  #info.on #dot { background: var(--ok); box-shadow: 0 0 0 3px rgba(18, 184, 134, .16); }
+  #text {
+    min-width: 0;                 /* 收窄到可用宽，省略号才生效 */
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+
+  /* 图标球：48 圆 */
+  .ball {
+    flex: 0 0 auto;
+    width: 48px; height: 48px; padding: 0;
+    display: grid; place-items: center;
+    border: 0; border-radius: 50%;
+    background: var(--card);
+    color: var(--ink2);
+    box-shadow: 0 3px 12px -3px rgba(16, 24, 40, .45), 0 0 0 1px var(--ring);
+    cursor: default;
+  }
+  .ball:hover { color: var(--accent); box-shadow: 0 5px 16px -4px rgba(76, 110, 245, .55), 0 0 0 1.5px var(--accent); }
+  .ball:active { transform: scale(.94); }
+  .ball svg { width: 21px; height: 21px; display: block; }
+
+  /* 入场：整列一起淡入 + 轻微上浮，不做逐项延迟 —— 逐项会让人以为没对齐 */
+  #stack { animation: in .13s ease-out both; }
+  @keyframes in {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: none; }
+  }
+  @media (prefers-reduced-motion: reduce) { #stack { animation: none; } }
+</style>
+</head>
+<body>
+  <div id="stack">
+    <button id="info" type="button" title="点一下换发送目标">
+      <span id="dot"></span><span id="text">未连接</span>
+    </button>
+    <button class="ball" id="btnHost" type="button" title="打开主界面">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="12.5" rx="2"/><line x1="8.5" y1="20.5" x2="15.5" y2="20.5"/></svg>
+    </button>
+    <button class="ball" id="btnOff" type="button" title="关闭悬浮球">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="7" y1="7" x2="17" y2="17"/><line x1="17" y1="7" x2="7" y2="17"/></svg>
+    </button>
+  </div>
+
+<script>
+  var api = window.xmBallMenu || {};
+  var $ = function (id) { return document.getElementById(id); };
+
+  function paint(st) {
+    st = st || {};
+    $('text').textContent = st.text || '未连接';
+    $('info').classList.toggle('on', !!st.online);
+    $('info').title = st.full ? (st.full + ' · 点一下换发送目标') : '点一下换发送目标';
+  }
+  function refresh() { if (api.state) api.state().then(paint).catch(function () {}); }
+
+  // 每次弹出都重新取一次（目标可能刚换过）
+  if (api.onShow) api.onShow(refresh);
+  refresh();
+
+  /** 点完就先收起菜单，再执行动作 —— 动作里可能要激活别的窗口，
+   *  菜单窗还挂着 key 会跟它抢焦点（菜单栏切换失败的根源之一）。 */
+  function act(fn) {
+    if (api.close) api.close();
+    if (fn) fn();
+  }
+
+  // 换目标是原生菜单：它得挂在「当前还是 key 的窗口」上才不会一闪就没 ——
+  // 所以这一项不先收菜单，交给主进程在原生菜单关掉之后再收。
+  $('info').addEventListener('click', function () { if (api.pickTarget) api.pickTarget(); });
+  $('btnHost').addEventListener('click', function () { act(api.openHost); });
+  $('btnOff').addEventListener('click', function () { act(api.hideBall); });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && api.close) api.close();
+  });
+  // 右键落在菜单上时别弹系统菜单
+  window.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+</script>
+</body>
+</html>

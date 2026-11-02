@@ -70,50 +70,6 @@
     font-size: 12px; font-weight: 700;
   }
 
-  /* ---------------- 右键迷你球 ----------------
-     右键球，主进程把窗口以球心为圆心撑大一圈，这里把三个入口摆成纵向扇形：
-     右键菜单是**纵向扇形**：三个入口全部居中在球心竖轴上，从球往外依次是
-     连接信息胶囊 / 打开主界面 / 关闭悬浮球，各占一条水平带互不重叠。
-     点外面、Esc、执行完动作都会收回 —— 撑大的透明区域会挡住下面的窗口，
-     所以「点哪儿都收」不只是礼貌，是必须。 */
-  #orbit {
-    position: absolute; left: 0; top: 0; z-index: 15;
-    pointer-events: none;      /* 容器铺满整个撑大的窗口，不吃事件：空白处要能落到 body 上（点空白收菜单） */
-  }
-  #orbit[hidden] { display: none; }
-  #orbit .mini {
-    position: absolute; width: 48px; height: 48px; border-radius: 50%;
-    pointer-events: auto;      /* 只有迷你球自己可点 */
-    border: 0; padding: 0; background: #fff; color: var(--ink2);
-    box-shadow: 0 3px 12px -3px rgba(16, 24, 40, .5), 0 0 0 1px rgba(20, 23, 28, .08);
-    display: grid; place-items: center;
-    animation: pop .14s ease-out;
-    cursor: default;
-  }
-  #orbit .mini:hover {
-    color: var(--accent);
-    box-shadow: 0 5px 16px -4px rgba(76, 110, 245, .55), 0 0 0 1.5px var(--accent);
-  }
-  #orbit .mini svg { width: 21px; height: 21px; display: block; }
-  /* 连接信息不走图标球，直接是颗胶囊：现在连的是谁的 IP / 本机服务，一眼看到 */
-  #orbit .mini.pill {
-    width: auto; min-width: 72px; max-width: 190px; height: 30px;
-    border-radius: 15px; padding: 0 13px;
-    font-size: 12px; font-weight: 650; letter-spacing: .2px;
-    display: flex; align-items: center;            /* 盖掉 .mini 的 grid：grid 会把绿点和文字拆成上下两行 */
-    transform: translateX(-50%);                    /* left 是扇形圆心的横坐标，自己往回挪半截居中 */
-    animation: popFade .14s ease-out;               /* 别复用 pop：它的 scale 会和位移打架 */
-  }
-  #orbit .mini.pill #pillText {
-    flex: 1; min-width: 0;                          /* 收窄到可用宽，文字才有资格出省略号 */
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  }
-  @keyframes popFade { from { opacity: 0; } to { opacity: 1; } }
-  #orbit .mini.pill .dot2 {
-    display: inline-block; width: 7px; height: 7px; border-radius: 50%;
-    margin-right: 6px; background: var(--ink3); vertical-align: 1px;
-  }
-  #orbit .mini.pill.on .dot2 { background: var(--ok); box-shadow: 0 0 0 3px rgba(18, 184, 134, .16); }
 
   /* ---------------- 面板 ---------------- */
   #panel {
@@ -257,15 +213,6 @@
   <div id="ball" title="点一下展开；拖文件进来直接发送；右键弹快捷菜单（⌘/Ctrl + 滚轮调大小）">
     <div class="disc"><img id="logo" alt=""></div>
     <span id="badge" hidden>0</span>
-    <div id="orbit" hidden>
-      <button class="mini pill" id="btnBallInfo" type="button" title="点一下可换发送目标"><span class="dot2"></span><span id="pillText">未连接</span></button>
-      <button class="mini" id="btnBallHost" type="button" title="打开当前连接的界面">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="12.5" rx="2"/><line x1="8.5" y1="20.5" x2="15.5" y2="20.5"/></svg>
-      </button>
-      <button class="mini" id="btnBallOff" type="button" title="关闭悬浮球">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="7" y1="7" x2="17" y2="17"/><line x1="17" y1="7" x2="7" y2="17"/></svg>
-      </button>
-    </div>
   </div>
 
   <div id="panel" hidden>
@@ -353,12 +300,8 @@
       open = true;
     } else {
       panel.hidden = true;
-      // 右键菜单也会把面板收掉（主进程直接改窗口），这里跟着同步展开标志
+      // 右键弹菜单时主进程会把面板收掉（applyBallGeometry 带 panel:null），这里跟着同步展开标志
       open = false;
-    }
-    if (r.menu) {
-      if (r.menu.on) showOrbit(r);
-      else hideOrbit();
     }
   }
 
@@ -409,83 +352,19 @@
   }
 
   makeDraggable(ball, function () {
-    // 右键菜单开着时点球 = 收菜单，别把面板又拉出来
-    if (menuOpen) { closeMenu(); return; }
     setOpen(!open);
   });
   // 标题栏也能拖；「点一下」= 换发送目标（本机 / 连到哪台）
   makeDraggable($('pHead'), function () { if (api.pickTarget) api.pickTarget(); });
 
-  /* ---------------- 右键迷你球菜单 ----------------
-     窗口被主进程撑大后，迷你球挂在这圈轨道上：连接信息 / 打开主界面 / 关闭悬浮球。
-     点外面、Esc、执行完动作都会收回 —— 撑大的透明区域会挡住下面的窗口，
-     所以「点哪儿都收」不只是礼貌，是必须。 */
-  var orbit = $('orbit');
-  var menuOpen = false;
-
-  function showOrbit(r) {
-    var box = r.box || 84;
-    var b = r.ball || { left: 0, top: 0 };
-    var m = r.menu || {};
-    var W = m.w || (b.left * 2 + box);
-    var H = m.h || W;
-    // #orbit 挂在 #ball 里，坐标是球内局部坐标 —— 把它铺满整个窗口，元素用窗口坐标摆
-    orbit.style.left = Math.round(-b.left) + 'px';
-    orbit.style.top = Math.round(-b.top) + 'px';
-    orbit.style.width = W + 'px';
-    orbit.style.height = H + 'px';
-    updatePill();
-    // 纵向扇形：条目坐标全部由主进程算好下发（menu.items），这里只做摆位。
-    // 三条水平带互不重叠 —— 胶囊再宽也碰不到图标球。
-    if (m.items) {
-      var pill = $('btnBallInfo');
-      // pill.x 是胶囊中心横坐标（胶囊自带 translateX(-50%) 居中），host/off.x 是左上角；
-      // #orbit 整体偏移了 (-b.left,-b.top)，窗口坐标要减回去才是球内局部坐标
-      pill.style.left = Math.round(m.items.pill.x - b.left) + 'px';
-      pill.style.top = Math.round(m.items.pill.y - b.top) + 'px';
-      var minis = orbit.querySelectorAll('.mini:not(.pill)');  // DOM 顺序：打开主界面、关闭悬浮球
-      minis[0].style.left = Math.round(m.items.host.x - b.left) + 'px';
-      minis[0].style.top = Math.round(m.items.host.y - b.top) + 'px';
-      minis[1].style.left = Math.round(m.items.off.x - b.left) + 'px';
-      minis[1].style.top = Math.round(m.items.off.y - b.top) + 'px';
-    }
-    orbit.hidden = false;
-    menuOpen = true;
-  }
-
-  function hideOrbit() { orbit.hidden = true; menuOpen = false; }
-
-  function closeMenu() {
-    if (!menuOpen) return;
-    hideOrbit();
-    if (api.menu) api.menu(false);
-  }
-
+  /* ---------------- 右键菜单 ----------------
+     菜单是**独立的窗口**（见 ball-menu.html），球窗永远只有球那么大 ——
+     这里只负责在被右击时把它叫出来。以前把那三个入口塞进球窗撑大的区域里，
+     球的屏幕位置一挤边，条目就跟胶囊对不上、还会被窗口边缘裁掉。 */
   ball.addEventListener('contextmenu', function (e) {
     e.preventDefault();
-    // 右击一律「展开 / 重新摆位」，不做 toggle：以前页面和主进程的开关状态一旦
-    // 不同步（比如收了菜单但没收到回包），右击就变成「关一个不存在的菜单」，
-    // 表现就是「右键菜单出不来」，得再点一次 —— 收起交给点空白 / Esc / 失焦。
-    if (api.menu) api.menu(true).then(function (r) { applyGeo(r || {}); });
+    if (api.menu) api.menu(true);
   });
-
-  // 点迷你球和球本身以外任何地方都收菜单（透明区域拦下的那一击就当「关闭」）。
-  // #orbit 自己 pointer-events:none，空白处的点击落到 body 上才算「点空白」——
-  // 以前用 closest('#ball') 排除，#orbit 又是 #ball 的子节点，结果整个窗口的空白都收不掉。
-  document.addEventListener('pointerdown', function (e) {
-    if (!menuOpen) return;
-    if (e.button !== 0) return;   // 只认左键：右键留给「重新展开」，不然会先关再开闪一下
-    var t = e.target;
-    if (t.closest && t.closest('.mini')) return;   // 点迷你球 = 执行动作
-    if (t === ball || ball.contains(t)) return;    // 点球体本身：交给球的拖拽/点击逻辑
-    closeMenu();
-  }, true);
-
-  $('btnBallInfo').addEventListener('click', function () { closeMenu(); if (api.pickTarget) api.pickTarget(); });
-  // 「打开主界面」只藏视觉、不急着收菜单：收菜单的缩窗会跟窗口激活抢焦点，
-  // 把菜单栏搅回别的应用名下 —— 几何收回由主进程在激活落定后做（openAndActivate 里）。
-  $('btnBallHost').addEventListener('click', function () { hideOrbit(); menuOpen = false; api.openHost(); });
-  $('btnBallOff').addEventListener('click', function () { api.hide(); });
 
   /* 球上 ⌘/Ctrl + 滚轮换大小：比翻菜单快。
      必须带修饰键 —— 球的窗口永远置顶，光标扫过它时随手一滑就改尺寸太容易误触。 */
@@ -502,23 +381,11 @@
   }, { passive: false });
 
   document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape' && menuOpen) { closeMenu(); return; }
     if (e.key === 'Escape' && open) setOpen(false);
   });
 
   /* ---------------- 列表 ---------------- */
-  var lastBallState = null;   // 最近一次轮询到的目标状态，右键胶囊直接展示，不用再问主进程
-  function updatePill() {
-    var pill = $('btnBallInfo');
-    var st = lastBallState || {};
-    var t = st.target;
-    var text;
-    if (t && t.kind === 'host') text = '本机服务 ' + (st.port ? ':' + st.port : '');
-    else if (t) text = t.label || '已连接';
-    else text = '未连接';
-    $('pillText').textContent = text;
-    pill.className = 'mini pill' + (st.online ? ' on' : '');
-  }
+  var lastBallState = null;   // 最近一次轮询到的目标状态
 
   function paint(state) {
     if (!state) return;

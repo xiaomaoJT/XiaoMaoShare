@@ -92,11 +92,9 @@ let ballLastFocus = null; // 最近用的是哪个窗口：{ kind:'host' } / { k
 let ballPinCache;         // 手动选定的目标（undefined = 还没从设置里读过）
 let ballDiscPx = 64;      // 当前球体直径（跟着设置走）
 let ballBoxPx = 84;       // 当前球窗口边长 = 球体 + 一圈给阴影留的空白
-let ballMenuOpen = false; // 右键菜单是否开着（开着时窗口朝菜单那一侧撑大）
-let ballMenuOff = null;   // 菜单开着时球在窗口内的偏移（球不再贴 0,0）
-let ballMenuArcUp = true; // 扇形朝上还是朝下（默认往下，下方放不下才翻上）
-let ballMenuItems = null; // 菜单条目坐标（主进程算好下发，页面只摆位）
+let ballMenuWin = null;   // 右键菜单是**独立窗口**（球窗永远只有球那么大）
 let ballMenuSeq = 0;      // 菜单展开序号：延时收回时用来判断「这期间有没有人重新展开过」
+let ballOnline = false;   // 最近一次拉列表的连接状态，菜单胶囊拿来点绿灯
 let ballActivating = false; // 「打开界面」激活流程进行中（这期间失焦不收菜单）
 
 /* ------------------------------------------------------------ 地址处理 */
@@ -189,10 +187,37 @@ function activateApp() {
   try { app.focus({ steal: true }); } catch { /* 老版本不收参数 */ }
 }
 
+/**
+ * 窗口真可见之前一直补激活。
+ *
+ * 为什么需要：`show()` 只对「已经能画出画面」的窗口才立刻生效 —— 新开的窗口要等
+ * 导航完成、`ready-to-show` 才真的上屏。那句 `app.focus({steal:true})` 如果在这一刻
+ * 之前就调完，系统激活的是「还没上屏的窗口」，等窗口姗姗来迟地出现时没人再激活它，
+ * 菜单栏就还挂在别的应用名下（关掉悬浮球就好，因为那时又走了另一条焦点路径）。
+ * 所以这里在窗口可见之前以 120ms 为一拍持续确认，最多 ms 毫秒。
+ */
+function ensureFront(win, ms = 1400) {
+  if (!IS_MAC) return;
+  const t0 = Date.now();
+  const tick = () => {
+    if (quitting) return;
+    if (!win || win.isDestroyed()) return;
+    if (win.isVisible()) {
+      try { app.focus({ steal: true }); } catch { /* 无所谓 */ }
+      try { if (ballWin && !ballWin.isDestroyed() && ballWin.isFocused()) ballWin.blur(); } catch { /* 同上 */ }
+    }
+    if (Date.now() - t0 < ms) setTimeout(tick, 120);
+  };
+  setTimeout(tick, 40);
+}
+
 function stealAppFocusOn(win) {
   if (!IS_MAC) return;
   // focus 事件里同步调会被吞，推迟到下一轮
   win.on('focus', () => { if (!quitting) setImmediate(activateApp); });
+  // 「先创建、稍后才上屏」的窗口可能压根不发 focus —— show 也补一脚。
+  // 否则菜单栏会一直挂在别的应用名下，直到用户再点一次窗口。
+  win.on('show', () => { if (!quitting) setImmediate(activateApp); });
 }
 
 function createHostWindow() {
@@ -1996,6 +2021,7 @@ async function askCloseChoice(onTray) {
  * origin 和凭据都只有主进程知道。
  */
 const BALL_PAGE = path.join(__dirname, 'ball.html');
+const BALL_MENU_PAGE = path.join(__dirname, 'ball-menu.html');
 // 三档大小：菜单 / 托盘 / 在球上滚滚轮都能换，记在设置里
 const BALL_DISC = { sm: 52, md: 64, lg: 80 };
 const BALL_PAD = 20;                                     // 窗口比球体大一圈，给自绘阴影留位（透明窗口会裁掉超出部分）
@@ -2069,15 +2095,9 @@ function setBallSize(key) {
 /** 把当前几何推给页面（换尺寸 / 展开收起都走这里，页面只负责摆） */
 function applyBallGeometry() {
   if (!ballWin || ballWin.isDestroyed()) return;
-  let payload;
-  if (ballOpen && ballGeo) {
-    payload = ballGeo.panelAndBall();
-  } else if (ballMenuOpen && ballMenuOff) {
-    const b = ballWin.getBounds();
-    payload = { size: ballDiscPx, box: ballBoxPx, ball: ballMenuOff, panel: null, menu: { on: true, arcUp: ballMenuArcUp, w: b.width, h: b.height, items: ballMenuItems } };
-  } else {
-    payload = { size: ballDiscPx, box: ballBoxPx, ball: { left: 0, top: 0 }, panel: null, menu: { on: false } };
-  }
+  const payload = (ballOpen && ballGeo)
+    ? ballGeo.panelAndBall()
+    : { size: ballDiscPx, box: ballBoxPx, ball: { left: 0, top: 0 }, panel: null, menu: { on: false } };
   try { ballWin.webContents.send('ball:geometry', payload); } catch { /* 页面还没就绪 */ }
 }
 
@@ -2099,10 +2119,7 @@ function createBallWindow() {
   ballAnchor = pos;
   ballOpen = false;
   ballGeo = null;
-  ballMenuOpen = false;
-  ballMenuOff = null;
-  ballMenuArcUp = true;
-  ballMenuItems = null;
+  closeBallMenu();
 
   ballWin = new BrowserWindow({
     x: pos.x, y: pos.y, width: ballBoxPx, height: ballBoxPx,
@@ -2137,15 +2154,9 @@ function createBallWindow() {
   ballWin.loadFile(BALL_PAGE);
   ballWin.once('ready-to-show', () => { if (ballWin && !ballWin.isDestroyed()) ballWin.showInactive(); });
   ballWin.webContents.on('did-finish-load', () => applyBallGeometry());
-  ballWin.on('closed', () => { ballWin = null; ballOpen = false; ballGeo = null; });
-  // 点窗口外的空白处 / 切到别的应用：球窗失焦 = 菜单该收了。
-  // 撑大的透明窗会盖住下面的窗口，不能赖在那儿等 Esc。
-  // 「打开界面」的激活流程里会主动让球窗失焦 —— 那一小段跳过，别把刚弹的菜单收掉。
-  ballWin.on('blur', () => {
-    if (!ballMenuOpen || ballActivating) return;
-    setImmediate(() => { if (ballMenuOpen && !ballActivating) closeBallMenu(); });
-  });
-  ballWin.on('hide', () => { if (ballMenuOpen) closeBallMenu(); });
+  ballWin.on('closed', () => { ballWin = null; ballOpen = false; ballGeo = null; closeBallMenu(); });
+  // 球被藏起来（收进托盘 / 关球）时菜单不能留在屏幕上
+  ballWin.on('hide', () => closeBallMenu());
   ballWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   return ballWin;
 }
@@ -2161,10 +2172,7 @@ function destroyBallWindow() {
   ballWin = null;
   ballOpen = false;
   ballGeo = null;
-  ballMenuOpen = false;
-  ballMenuOff = null;
-  ballMenuArcUp = true;
-  ballMenuItems = null;
+  closeBallMenu();
 }
 
 /** mac 上 setBounds / show 之后窗口层级偶尔会被系统重置（这仓库吃过亏），重要操作后补一遍 */
@@ -2176,61 +2184,117 @@ function hardenBallLevel() {
 }
 
 /**
- * 右键菜单布局：三个入口摆成**纵向扇形** —— 全部居中在球心的竖轴上，
- * 从球往外依次是：连接信息胶囊（30 高）→ 打开主界面（48）→ 关闭悬浮球（48）。
- * 每个条目各占一条水平带，纵向展开，横向零重叠：胶囊再宽也碰不到图标球。
- * 球心不动，收回时才不会跳；球贴近屏幕顶时整条扇形往下翻。
- * 条目坐标由主进程统一算好下发给页面（menu.items），页面只摆位不计算。
+ * 右键菜单 = **独立窗口**，不是把球窗临时撑大。
+ *
+ * 之前的做法是「球窗撑大一圈、三个入口在窗口坐标里各算各的横坐标」：只要球贴近屏幕
+ * 左右边，窗口被钳在屏幕内 → 球在窗口里偏心 → 胶囊再被单独钳一次 → 胶囊和图标球
+ * 落到两条不同的竖轴上，胶囊还会顶到窗口边缘被截断。两套坐标系互相打架，几何算得
+ * 再细也架不住（这已经反复出问题三次）。
+ *
+ * 现在菜单自己是一个窗口：宽高由内容定死，页面用 flex 竖着排，三个入口共用一条
+ * 中轴线 —— 对齐由布局保证，不靠坐标；窗口整体贴在球下方（放不下就翻上方）、
+ * 左右钳进屏幕，所以条目之间永远不齐不了、也永远裁不到。
  */
-const BALL_MENU_W = 240;   // 菜单窗口宽：装下 190 的胶囊 + 两侧余量
-function ballMenuLayout() {
+const BALL_MENU_W = 208;   // 10 边距 + 188 内容（胶囊最宽 188）+ 10 边距
+const BALL_MENU_H = 166;   // 10 + 30(胶囊) + 10 + 48 + 10 + 48 + 10
+const BALL_MENU_GAP = 8;   // 菜单与球之间的缝
+
+/** 菜单窗摆哪：以球心为轴贴着球；下方放不下就翻到球上方；左右钳进屏幕 */
+function ballMenuBounds() {
   const anchor = ballAnchor || clampBallPos(readBallPref().pos);
   const center = { x: Math.round(anchor.x + ballBoxPx / 2), y: Math.round(anchor.y + ballBoxPx / 2) };
   const area = screen.getDisplayNearestPoint(center).workArea;
-  const W = Math.max(BALL_MENU_W, ballBoxPx);
-  // 纵向扇形总高：顶边距8 + 关球48 + 间距10 + 打开界面48 + 间距10 + 胶囊30 + 球边距12
-  const stackH = 8 + 48 + 10 + 48 + 10 + 30 + 12;
-  const H = stackH + ballBoxPx;
-  const roomUp = center.y - area.y - ballBoxPx / 2;
-  const roomDown = area.y + area.height - center.y - ballBoxPx / 2;
-  const need = H - ballBoxPx;
-  const arcUp = roomDown >= need ? false : (roomUp >= need ? true : roomUp >= roomDown);
-  const x = Math.round(Math.min(Math.max(center.x - W / 2, area.x), area.x + area.width - W));
-  const y = Math.round(arcUp ? center.y - ballBoxPx / 2 - stackH : center.y - ballBoxPx / 2);
-  const off = { left: Math.round(center.x - ballBoxPx / 2) - x, top: Math.round(center.y - ballBoxPx / 2) - y };
-  // 条目坐标（窗口坐标系）。pill.x 是胶囊**中心**横坐标（页面用 translateX(-50%) 居中）；
-  // host/off.x 是 48 图标球的左上角横坐标。纵向从球往外：胶囊 → 打开界面 → 关球。
-  const cx = off.left + ballBoxPx / 2;
-  const pcx = Math.round(Math.min(Math.max(cx, 95), W - 95));
-  const mx = Math.round(cx - 24);
-  const items = arcUp
-    ? {
-        pill: { x: pcx, y: off.top - 42 },
-        host: { x: mx, y: off.top - 100 },
-        off: { x: mx, y: off.top - 158 },
-      }
-    : {
-        pill: { x: pcx, y: off.top + ballBoxPx + 12 },
-        host: { x: mx, y: off.top + ballBoxPx + 52 },
-        off: { x: mx, y: off.top + ballBoxPx + 110 },
-      };
-  return { bounds: { x, y, width: W, height: H }, off, arcUp, w: W, h: H, items };
+  const down = anchor.y + ballBoxPx + BALL_MENU_GAP;
+  const up = anchor.y - BALL_MENU_GAP - BALL_MENU_H;
+  const fitsDown = down + BALL_MENU_H <= area.y + area.height;
+  const fitsUp = up >= area.y;
+  const y = Math.round((fitsDown || !fitsUp) ? Math.min(down, area.y + area.height - BALL_MENU_H) : up);
+  const x = Math.round(Math.min(Math.max(center.x - BALL_MENU_W / 2, area.x), area.x + area.width - BALL_MENU_W));
+  return { x, y, width: BALL_MENU_W, height: BALL_MENU_H };
 }
 
-/** 收回右键菜单：窗口缩回球大小，锚点按「当前窗口位置 + 球在窗口内的偏移」反推，球不跳 */
-function closeBallMenu() {
-  if (!ballMenuOpen) return;
-  ballMenuOpen = false;
-  const off = ballMenuOff || { left: 0, top: 0 };
-  ballMenuOff = null;
-  ballMenuArcUp = true;
-  ballMenuItems = null;
-  if (ballWin && !ballWin.isDestroyed()) {
-    const [x, y] = ballWin.getPosition();
-    ballAnchor = clampBallPos({ x: x + off.left, y: y + off.top });
-    ballWin.setBounds({ x: ballAnchor.x, y: ballAnchor.y, width: ballBoxPx, height: ballBoxPx });
-    applyBallGeometry();
+/** 菜单窗的层级补丁（跟球窗一样：先 setVisibleOnAllWorkspaces 再 setAlwaysOnTop） */
+function hardenMenuLevel() {
+  if (!IS_MAC || !ballMenuWin || ballMenuWin.isDestroyed()) return;
+  try { ballMenuWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch { /* 老系统 */ }
+  try { ballMenuWin.setAlwaysOnTop(true, 'floating'); } catch { /* 同上 */ }
+  ballMenuWin.moveTop();
+}
+
+function ensureBallMenuWindow() {
+  if (ballMenuWin && !ballMenuWin.isDestroyed()) return ballMenuWin;
+  ballMenuWin = new BrowserWindow({
+    width: BALL_MENU_W, height: BALL_MENU_H,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    resizable: false, movable: false, maximizable: false, minimizable: false, fullscreenable: false,
+    skipTaskbar: true, alwaysOnTop: true,
+    hasShadow: false,          // 系统阴影按矩形画，透明窗上会露方框
+    show: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'ball-menu-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+  if (IS_MAC) {
+    try { ballMenuWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch { /* 老系统 */ }
   }
+  ballMenuWin.setAlwaysOnTop(true, 'floating');
+  ballMenuWin.loadFile(BALL_MENU_PAGE);
+  ballMenuWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  // 点到别处（别的应用 / 别的窗口）= 收菜单。
+  // 刚弹出那一两百毫秒里系统焦点交接会误报一次失焦，用 __shownAt 挡掉；
+  // 「打开界面」的激活流程本来就该失焦，也跳过。
+  ballMenuWin.on('blur', () => {
+    if (Date.now() - (ballMenuWin.__shownAt || 0) < 320) return;
+    if (ballActivating) return;
+    setImmediate(() => { if (!ballActivating) closeBallMenu(); });
+  });
+  ballMenuWin.on('closed', () => { ballMenuWin = null; });
+  return ballMenuWin;
+}
+
+function openBallMenu() {
+  if (!ballWin || ballWin.isDestroyed()) return false;
+  if (ballOpen) { ballOpen = false; ballGeo = null; applyBallGeometry(); }   // 面板让位给菜单
+  const win = ensureBallMenuWindow();
+  ballMenuSeq++;
+  win.__shownAt = Date.now();
+  win.setBounds(ballMenuBounds());
+  hardenMenuLevel();
+  win.show();
+  win.focus();
+  // 点了我们的球，菜单栏就应该是我们的 —— 弹出菜单这一步顺手把 app 激活
+  activateApp();
+  ensureFront(win, 900);      // 页面可能还没就绪就先 show 了，真可见之前一直补
+  try { win.webContents.send('ball:menu-show'); } catch { /* 还没加载完 */ }
+  return true;
+}
+
+function closeBallMenu() {
+  if (!ballMenuWin || ballMenuWin.isDestroyed()) return;
+  if (ballMenuWin.isVisible()) ballMenuWin.hide();
+}
+
+/** 菜单开着吗（收菜单的判断都用它，不再维护一份镜像状态） */
+function ballMenuIsOpen() {
+  return !!(ballMenuWin && !ballMenuWin.isDestroyed() && ballMenuWin.isVisible());
+}
+
+/**
+ * 弹原生单选菜单（换发送目标）。
+ * 必须挂在「当前还是 key 的那扇我们的窗口」上 —— 挂在没有焦点的窗口上会一闪就没；
+ * 关掉之后再收右键菜单，菜单不会跟原生菜单叠在一起。
+ */
+function popupNearBall(menu) {
+  const host = ballMenuIsOpen() ? ballMenuWin : ballWin;
+  if (!host || host.isDestroyed()) return;
+  try {
+    menu.popup({ window: host, callback: () => closeBallMenu() });
+  } catch { /* 窗口刚被销毁 */ }
 }
 
 /**
@@ -2513,6 +2577,7 @@ function registerBallIpc() {
       const r = await fetch(ballUrl(t, '/api/list'), { headers: { 'x-xm-cid': ballCidFor(t) } });
       if (!r.ok) {
         const j = await r.json().catch(() => ({}));
+        ballOnline = false;
         return { ok: false, online: false, target: t, error: j.error || ('对方返回 ' + r.status) };
       }
       const d = await r.json();
@@ -2520,12 +2585,14 @@ function registerBallIpc() {
       // 之前裁 10 条被用户吐槽「历史记录不全」——面板本身能滚，放宽到 40
       const items = (d.items || []).slice(0, 40).map((it) => ballItemView(t, it));
       const lastSeen = Number(readSettings().ballSeen || 0);
+      ballOnline = true;   // 菜单胶囊的绿灯跟着这里走
       return {
         ok: true, online: true, target: t, port: t.port,
         items,
         unread: items.filter((it) => (it.time || 0) > lastSeen).length,
       };
     } catch {
+      ballOnline = false;
       return { ok: false, online: false, target: t, error: '连不上' };
     }
   });
@@ -2572,10 +2639,9 @@ function registerBallIpc() {
     ny = Math.min(Math.max(ny, area.y), area.y + area.height - b.height);
     if (nx === b.x && ny === b.y) return;
     ballWin.setPosition(nx, ny);
-    // 展开时挪的是「球在 ballGeo 里的位置」；菜单开着挪的是菜单态的球位
-    const off = (ballOpen && ballGeo) ? ballGeo.ball
-      : (ballMenuOpen && ballMenuOff) ? ballMenuOff
-      : { left: 0, top: 0 };
+    closeBallMenu();   // 球一挪，菜单就跟着失效了，别留在原地
+    // 展开时挪的是「球在 ballGeo 里的位置」；平时球就贴着窗口原点
+    const off = (ballOpen && ballGeo) ? ballGeo.ball : { left: 0, top: 0 };
     ballAnchor = { x: nx + off.left, y: ny + off.top };
   });
 
@@ -2625,32 +2691,36 @@ function registerBallIpc() {
       enabled: !!ballPinRead(),
       click: () => setBallPin(null),
     });
-    Menu.buildFromTemplate(items).popup({ window: ballWin });
+    popupNearBall(Menu.buildFromTemplate(items));
     return { ok: true };
   });
 
   /**
-   * 右键迷你球菜单：窗口朝球心竖轴方向撑出一条纵向扇形，三个入口从球往外依次排开
-   * （连接信息胶囊 / 打开主界面 / 关闭悬浮球）。条目坐标由主进程算好（menu.items）。
-   * 点外面 / Esc / 执行完动作由页面调 on=false 收回。
+   * 右键菜单开关：on=true 弹出**独立的菜单窗**（球窗不再被撑大），on=false 收起。
+   * 条目对齐由菜单页的 flex 布局保证，主进程只负责窗口位置。
    */
   ipcMain.handle('ball:menu', (_e, on) => {
-    const collapsed = { size: ballDiscPx, box: ballBoxPx, ball: { left: 0, top: 0 }, panel: null, menu: { on: false } };
-    if (!ballWin || ballWin.isDestroyed()) return collapsed;
-    if (!on) { closeBallMenu(); return collapsed; }
-    if (ballOpen) { ballOpen = false; ballGeo = null; }   // 面板先收，窗口让位给菜单
-    const lay = ballMenuLayout();
-    ballMenuOpen = true;
-    ballMenuSeq++;
-    ballMenuOff = lay.off;
-    ballMenuArcUp = lay.arcUp;
-    ballMenuItems = lay.items;
-    ballWin.setBounds(lay.bounds);
-    hardenBallLevel();
-    // 让球窗拿到 key：菜单才收得到「点外面」的失焦信号（右击本来也会激活它，这里补一脚保险）
-    try { ballWin.focus(); } catch { /* 无所谓 */ }
-    applyBallGeometry();
-    return { size: ballDiscPx, box: ballBoxPx, ball: lay.off, panel: null, menu: { on: true, arcUp: lay.arcUp, w: lay.bounds.width, h: lay.bounds.height, items: lay.items } };
+    if (!ballWin || ballWin.isDestroyed()) return { ok: false, on: false };
+    if (!on) { closeBallMenu(); return { ok: true, on: false }; }
+    return { ok: openBallMenu(), on: true };
+  });
+
+  /** 菜单胶囊的内容：当前发给谁 + 连着没有。
+   *  只放地址本身（不带「连到」前缀）—— 胶囊宽度有限，带前缀就会出省略号，
+   *  而「连到」这层意思由胶囊旁边的电脑图标和菜单语境已经够了。 */
+  ipcMain.handle('ball:menu-state', () => {
+    const cur = ballTarget();
+    if (!cur) return { text: '未连接', full: '还没定发送目标', online: false };
+    if (cur.kind === 'host') {
+      const inf = server.serverInfo();
+      return {
+        text: '本机服务' + (inf.port ? ' :' + inf.port : ''),
+        full: '本机接收服务' + (inf.port ? ' · 端口 ' + inf.port : ''),
+        online: !!inf.running,
+      };
+    }
+    const short = String(cur.base || '').replace(/^https?:\/\//, '');
+    return { text: short || cur.label || '已连接', full: cur.label || '', online: ballOnline };
   });
 
   /** 迷你球「连接信息」：原生菜单念清楚当前发给谁、服务状态，顺手能换目标 */
@@ -2696,7 +2766,7 @@ function registerBallIpc() {
       enabled: !!ballPinRead(),
       click: () => setBallPin(null),
     });
-    Menu.buildFromTemplate(items).popup({ window: ballWin });
+    popupNearBall(Menu.buildFromTemplate(items));
     return { ok: true };
   });
 
@@ -2727,12 +2797,26 @@ function registerBallIpc() {
    *  收菜单的 setBounds 必须等激活落定之后才做（closeBallMenu 放在 220ms 那一脚里）：
    *  菜单路径下缩窗发生在球窗还攥着焦点的时候，会把刚激活的状态搅回去，
    *  菜单栏就停在别的应用名下，得关了球才恢复 —— 页面只藏视觉，几何由这里收回。 */
-  const openAndActivate = async (focusFn) => {
+  /**
+   * 点球上的入口 → 把对应窗口叫起来。
+   *
+   * 要处理三件事，缺一样菜单栏就会停在别的应用名下：
+   *  ① 菜单 / 球本身就是我们的窗口：它们还攥着 key，激活会被它们「吸住」→ 先收
+   *  ② 目标窗口可能是刚创建、还没上屏的（openLink 重连）：show 只对能画画的窗口生效，
+   *     所以激活不能只调一次，要等窗口真可见（ensureFront 持续确认）
+   *  ③ 收菜单的时机必须在激活之后（页面点完按钮就先 close 了，这里不再抢）
+   */
+  const openAndActivate = async (focusFn, pickWin) => {
     const seqAt = ballMenuSeq;              // 记下这次点击时菜单的序号
     ballActivating = true;                  // 这一段主动失焦是正常的，失焦收菜单先让路
+    closeBallMenu();
     try { if (ballWin && !ballWin.isDestroyed()) ballWin.blur(); } catch { /* 无所谓 */ }
     await focusFn();
     activateApp();
+    if (IS_MAC) {
+      const target = typeof pickWin === 'function' ? pickWin() : null;
+      if (target) ensureFront(target, 1600);
+    }
     const reconfirm = () => {
       if (quitting) return;
       activateApp();
@@ -2744,7 +2828,7 @@ function registerBallIpc() {
       // 这一脚不能把刚展开的新菜单收掉（否则就是「右键菜单出不来」）
       if (ballMenuSeq === seqAt) closeBallMenu();
     }, 220);
-    setTimeout(() => { ballActivating = false; reconfirm(); }, 600);   // 导航慢的窗口（openLink 重连）再补一脚
+    setTimeout(() => { ballActivating = false; reconfirm(); }, 900);   // 覆盖导航慢的窗口
   };
 
   ipcMain.handle('ball:open-host', () => {
@@ -2757,16 +2841,23 @@ function registerBallIpc() {
           if (l.win.isMinimized()) l.win.restore();
           l.win.show();
           l.win.focus();
-        });
+        }, () => (l.win && !l.win.isDestroyed() ? l.win : null));
         return { ok: true, opened: 'link' };
       }
       // 窗口真没了（重启过 / 被彻底关掉）：按球的记忆重新连那台 ——
       // 落到 openMyHost 会给人一张选择页或本机界面，跟球上显示的「连到 x.x.x」对不上
       const r = openLink(t.base);
-      if (r && r.ok) { openAndActivate(async () => {}); return { ok: true, opened: 'link' }; }
+      if (r && r.ok) {
+        openAndActivate(async () => {}, () => {
+          const w = (r.id && links.get(r.id) && links.get(r.id).win)
+            || [...links.values()].map((x) => x.win).find((w2) => w2 && !w2.isDestroyed());
+          return w && !w.isDestroyed() ? w : null;
+        });
+        return { ok: true, opened: 'link' };
+      }
       // 地址连不上（对方下线/写坏了）才退回本机
     }
-    openAndActivate(() => openMyHost());
+    openAndActivate(() => openMyHost(), () => (hostWin && !hostWin.isDestroyed() ? hostWin : null));
     return { ok: true, opened: 'host' };
   });
   ipcMain.handle('ball:copy', (_e, text) => { clipboard.writeText(String(text || '')); return { ok: true }; });

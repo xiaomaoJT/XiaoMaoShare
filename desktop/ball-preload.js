@@ -56,7 +56,7 @@ contextBridge.exposeInMainWorld('xmBall', {
   /** 收进托盘（球自己的关闭方式） */
   hide: () => ipcRenderer.invoke('ball:hide'),
 
-  /** 右键迷你球菜单：on=true 主进程把窗口撑大一圈，on=false 缩回来 */
+  /** 右键菜单：弹出 / 收起独立的菜单窗（on=true 弹） */
   menu: (on) => ipcRenderer.invoke('ball:menu', !!on),
   /** 连接信息（原生菜单：当前目标 + 状态，顺手能换发送目标） */
   info: () => ipcRenderer.invoke('ball:info'),
