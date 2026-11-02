@@ -15,6 +15,7 @@
 const { app, BrowserWindow, ipcMain, Menu, Tray, shell, clipboard, dialog, nativeImage, screen, session, Notification } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
+const crypto = require('node:crypto');
 const { Readable } = require('node:stream');
 const { once } = require('node:events');
 
@@ -2358,6 +2359,24 @@ function applyBallGeometry() {
   try { ballWin.webContents.send('ball:geometry', payload); } catch { /* 页面还没就绪 */ }
 }
 
+/**
+ * 把面板收起来：窗口缩回球那么大、球回到 ballAnchor，页面也同步成收起布局。
+ *
+ * 任何「收面板」都必须走这里。只把 ballOpen 置 false 的话，窗口还停在展开时的
+ * 大尺寸，页面却按 ball:{0,0} 摆球 —— 球在屏幕上的实际位置变成了展开窗的左上角，
+ * 与 ballAnchor 分家，菜单再按 anchor 贴过去就整块错位（右键球时被弹飞的正是这条）。
+ */
+function collapseBall() {
+  if (!ballWin || ballWin.isDestroyed()) return false;
+  const a = clampBallPos(ballAnchor || readBallPref().pos);
+  ballAnchor = a;
+  ballOpen = false;
+  ballGeo = null;
+  ballWin.setBounds({ x: a.x, y: a.y, width: ballBoxPx, height: ballBoxPx });
+  applyBallGeometry();
+  return true;
+}
+
 /** 位置兜底：默认贴右上角；记下来的位置要落回某块屏幕里（拔了外接屏也不会跑到看不见的地方） */
 function clampBallPos(pos) {
   const area = screen.getDisplayNearestPoint(pos || { x: 200, y: 200 }).workArea;
@@ -2421,10 +2440,15 @@ function createBallWindow() {
 
 function destroyBallWindow() {
   if (!ballWin || ballWin.isDestroyed()) { ballWin = null; return; }
-  // 关窗前把位置记下来，下次还在原地起来
+  // 关窗前把位置记下来，下次还在原地起来。
+  // 优先用 ballAnchor：面板展开时窗口比球大一圈，窗口坐标不再是球的位置，记错了下次球会跳。
   try {
-    const [x, y] = ballWin.getPosition();
-    updateSettings({ ballPos: { x, y } });
+    let pos = ballAnchor;
+    if (!pos) {
+      const [x, y] = ballWin.getPosition();
+      pos = { x, y };
+    }
+    updateSettings({ ballPos: { x: pos.x, y: pos.y } });
   } catch { /* 拿不到就算了 */ }
   ballWin.destroy();
   ballWin = null;
@@ -2521,7 +2545,7 @@ function ensureBallMenuWindow() {
 
 function openBallMenu() {
   if (!ballWin || ballWin.isDestroyed()) return false;
-  if (ballOpen) { ballOpen = false; ballGeo = null; applyBallGeometry(); }   // 面板让位给菜单
+  if (ballOpen) collapseBall();   // 面板让位给菜单：先把窗口收回球那么大，菜单才贴得准
   const win = ensureBallMenuWindow();
   ballMenuSeq++;
   win.__shownAt = Date.now();
@@ -2705,6 +2729,27 @@ function ballUrl(t, p) {
   return t.base + p + (p.includes('?') ? '&' : '?') + 'host=' + encodeURIComponent(server.hostToken);
 }
 
+/** 球发文件时的分片大小：与网页端（public/index.html 的 UPLOAD_CHUNK）保持一致 */
+const BALL_UPLOAD_CHUNK = 8 * 1024 * 1024;
+
+/**
+ * 问一下主机支持哪些能力（目前只用 caps.chunked）。
+ * 老主机没有这个字段，调用方据此回退整包 —— 不能盲分片：
+ * 老服务端会忽略 uid，每片都当成一次独立上传从头写，最后只剩最后一片。
+ */
+async function ballCapsOf(t, cid) {
+  try {
+    const r = await fetch(ballUrl(t, '/api/list?cid=' + encodeURIComponent(cid)), {
+      headers: { 'x-xm-cid': cid },
+    });
+    if (!r.ok) return {};
+    const d = await r.json();
+    return (d && d.caps) || {};
+  } catch {
+    return {};
+  }
+}
+
 /**
  * 这次请求该用哪个设备身份。
  * 连别人时必须用「对方主机授权过的那台设备」的 cid（从连接窗口的 localStorage 取的）；
@@ -2873,14 +2918,11 @@ function registerBallIpc() {
   ipcMain.handle('ball:expand', (_e, on) => {
     if (!ballWin || ballWin.isDestroyed()) return { size: ballDiscPx, box: ballBoxPx, ball: { left: 0, top: 0 } };
     closeBallMenu();
-    ballOpen = !!on;
     if (!on) {
-      const a = clampBallPos(ballAnchor || readBallPref().pos);
-      ballAnchor = a;
-      ballGeo = null;
-      ballWin.setBounds({ x: a.x, y: a.y, width: ballBoxPx, height: ballBoxPx });
+      collapseBall();   // 收面板 = 窗口也要缩回去，不能只改标志（否则球位与 anchor 分家）
       return { size: ballDiscPx, box: ballBoxPx, ball: { left: 0, top: 0 }, panel: null };
     }
+    ballOpen = true;
     ballGeo = ballLayout();
     ballWin.setBounds(ballGeo.bounds);
     return ballGeo.panelAndBall();
@@ -3157,6 +3199,79 @@ function registerBallIpc() {
    * 发东西：一段文字 / 一组文件 / 两者一起。
    * 文字和文件可以同属一条消息 —— 先说一句「这是原图」，附件跟在后面。
    */
+  /**
+   * 把一个文件流进主机（球的发送用）。
+   *
+   * 大文件 + 主机支持分片 → 8MB 一片、同一个 uid 逐片发，断一片只补这一片；
+   * 否则整包（老主机 / 小文件）。
+   *
+   * 两条路都**必须带 content-length**：少了它服务端只知道「已收 xx 字节」，
+   * 接收端那条进度条就没有分母，退化成来回摆的不确定动画 ——
+   * 球发大文件「进度条反复」就是这么来的（网页端有 Content-Length，所以只有球会犯）。
+   */
+  async function ballUploadOne(t, cid, file) {
+    const name = path.basename(file);
+    const total = fs.statSync(file).size;
+    const base = '/api/upload?name=' + encodeURIComponent(name) + '&cid=' + encodeURIComponent(cid);
+    const headers = (len) => ({
+      'x-xm-cid': cid,
+      'content-type': 'application/octet-stream',
+      'content-length': String(len),
+    });
+    const post = (q, start, end) => fetch(ballUrl(t, q), {
+      method: 'POST',
+      body: Readable.toWeb(fs.createReadStream(file, start == null ? undefined : { start, end: end - 1 })),
+      duplex: 'half',
+      headers: headers(end - (start || 0)),
+    });
+
+    // 分片要主机认这个协议；老主机不认 uid，逐片发会把文件覆盖成最后一片——
+    // 所以先问一次能力位，没有就整包（行为与 2.4.0 之前完全一致）
+    const caps = total > BALL_UPLOAD_CHUNK ? await ballCapsOf(t, cid) : {};
+    if (!caps.chunked) {
+      let lastErr = null;
+      for (let left = 1; left >= 0; left--) {   // 整包失败再试一次：从头来，只用于小文件/老主机
+        try {
+          const r = await post(base, null, total);
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(d.error || ('对方返回 ' + r.status));
+          if (!d.part) throw new Error('服务端没给回执');
+          return d.part;
+        } catch (e) {
+          lastErr = e;
+          if (left > 0) await new Promise((r2) => setTimeout(r2, 400));
+        }
+      }
+      throw lastErr || new Error('上传失败');
+    }
+
+    const uid = 'b' + Date.now().toString(36) + crypto.randomBytes(3).toString('hex');
+    let part = null;
+    for (let off = 0; off < total; off += BALL_UPLOAD_CHUNK) {
+      const end = Math.min(off + BALL_UPLOAD_CHUNK, total);
+      const isLast = end >= total;
+      const q = base + '&uid=' + uid + '&offset=' + off + '&total=' + total + (isLast ? '&final=1' : '');
+      let lastErr = null;
+      for (let left = 3; left >= 0; left--) {
+        try {
+          const r = await post(q, off, end);
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(d.error || ('对方返回 ' + r.status));
+          if (d.part) part = d.part;
+          lastErr = null;
+          break;
+        } catch (e) {
+          lastErr = e;
+          // 同一片重发：已落盘的字节不丢，接收端进度停在 offset，不会归零
+          if (left > 0) await new Promise((r2) => setTimeout(r2, 350 * (4 - left)));
+        }
+      }
+      if (lastErr) throw lastErr;
+    }
+    if (!part) throw new Error('服务端没给回执');
+    return part;
+  }
+
   ipcMain.handle('ball:send', async (_e, payload) => {
     const t = ballTarget();
     if (!t) return { ok: false, error: '本机服务没开' };
@@ -3175,24 +3290,13 @@ function registerBallIpc() {
       try {
         const st = fs.statSync(one);
         if (!st.isFile()) { failed.push({ name, reason: '不是文件' }); continue; }
-        const q = '/api/upload?name=' + encodeURIComponent(path.basename(one)) +
-          '&cid=' + encodeURIComponent(cid);
-        const stream = Readable.toWeb(fs.createReadStream(one));
-        const r = await fetch(ballUrl(t, q), {
-          method: 'POST',
-          body: stream,
-          duplex: 'half',
-          headers: { 'x-xm-cid': cid, 'content-type': 'application/octet-stream' },
-        });
-        if (!r.ok) {
-          const j = await r.json().catch(() => ({}));
-          failed.push({ name, reason: j.error || ('对方返回 ' + r.status) });
-          continue;
-        }
-        const d = await r.json();
-        if (d.part) parts.push(d.part); else failed.push({ name, reason: '服务端没给回执' });
+        parts.push(await ballUploadOne(t, cid, String(one)));
       } catch (err) {
-        failed.push({ name, reason: err && err.code === 'ENOENT' ? '文件不存在' : '读不了这个文件' });
+        // 服务端的原因（设备未授权 / 文件过大 / 断点失效）要原样念给人听，别一律说「失败」
+        const raw = String((err && err.message) || '');
+        const reason = err && err.code === 'ENOENT' ? '文件不存在'
+          : (/fetch failed|ECONN|socket hang up|aborted|timeout/i.test(raw) ? '网络中断' : (raw || '读不了这个文件'));
+        failed.push({ name, reason });
       }
     }
 

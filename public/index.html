@@ -6144,13 +6144,19 @@
       }
       row.querySelector('.rt1').textContent = u.name || '文件';
       var bar = row.querySelector('.rbar i');
+      var barWrap = row.querySelector('.rbar');
       if (u.size) {
         var pct = Math.min(100, Math.round((u.got / u.size) * 100));
+        if (barWrap) barWrap.style.display = '';
         bar.className = ''; bar.style.width = pct + '%';
         row.querySelector('.rpct').textContent = pct + '%';
         row.querySelector('.rt2').textContent = fmtBytes(u.got) + ' / ' + fmtBytes(u.size);
       } else {
-        bar.className = 'indet'; bar.style.width = '';
+        // 没有分母（发送方没带 Content-Length，比如老版本客户端 / 悬浮球旧路径）：
+        // 不画那条 0→42% 来回摆的不确定动画 —— 那看着就是「进度走一半又归零，反复」。
+        // 只说实话：已收多少字节；条藏起来，等有分母时再出现。
+        if (barWrap) barWrap.style.display = 'none';
+        bar.className = ''; bar.style.width = '0';
         row.querySelector('.rpct').textContent = '';
         row.querySelector('.rt2').textContent = '已接收 ' + fmtBytes(u.got);
       }

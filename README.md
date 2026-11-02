@@ -2,7 +2,7 @@
 
 ![XM 互传 · 系统介绍](docs/xm-intro.png)
 
-> 当前版本：**v2.4.1** · [更新日志](CHANGELOG.md) · [MIT 许可](LICENSE)
+> 当前版本：**v2.4.2** · [更新日志](CHANGELOG.md) · [MIT 许可](LICENSE)
 
 <p align="center">
   <a href="https://hub.xerj.org/contributors/xiaomaoJT">
@@ -999,7 +999,7 @@ XiaoMaoShare/
 
 个人自用的小工具。账户 + 密码是「分清谁是谁」，安全性仍然依赖「局域网本身是可信的」这个前提 —— 没有 TLS、没有限流、没有审计日志。请勿直接暴露到公网。
 
-版本号与每次发布的变更见 [CHANGELOG.md](CHANGELOG.md)；当前版本：**v2.4.1**。
+版本号与每次发布的变更见 [CHANGELOG.md](CHANGELOG.md)；当前版本：**v2.4.2**。
 
 ## 许可
 
