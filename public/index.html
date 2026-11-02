@@ -5983,7 +5983,7 @@
      桌面里优先交给主进程弹（Electron 的 Notification 会正常走 macOS 授权、点击能
      把窗口拉回来）；页面内的 HTML5 Notification 只在浏览器/老桌面壳里当兜底 ——
      那条路在 mac 上会被权限处理器短路，构造不报错但系统静默丢弃。
-     只提醒「别人发来的、且当前不在前台」的新消息。 */
+     只提醒「别人发来的」新消息 —— 在不在托盘、有没有焦点都提醒（刻意不做前台抑制）。 */
   var seenItemIds = null;   // null = 还没跑过第一轮：第一轮只登记不弹，免得一进来刷屏
   var pendingNotice = null; // 浏览器里权限还没批下来的那条，批下来再补
   /** 桌面壳的通知通道：连接窗口给 xmNotice（只管通知），主窗口在 xmDesktop 上 */
@@ -6003,14 +6003,16 @@
       if (!isFirst) fresh.push(it);
     });
     if (!fresh.length) return;
-    // 自己发的不打扰；窗口正看着的也不打扰
+    // 自己发的不打扰；窗口在前台也照推（用户明确要「所有通知都推送」）
     var fromOthers = fresh.filter(function (it) { return it.owner && it.owner !== state.cid; });
     if (!fromOthers.length) return;
-    if (!document.hidden && document.hasFocus()) return;
     showIncomingNotice(fromOthers);
   }
   function showIncomingNotice(items) {
     try {
+      // 桌面壳里通知由主进程统一发：它自己盯着 /api/list，不看页面版本，也不受
+      // 「窗口藏进托盘、页面定时器被节流」的影响。这里再弹一次就成双份了。
+      if (noticeBridge()) return;
       var first = items[0];
       var title = 'XiaoMao 互传 · ' + (first.from || '有人');
       var body;
@@ -6022,10 +6024,6 @@
         var ps = first.parts || [];
         var nm = ps[0] && ps[0].name;
         body = ps.length > 1 ? '发来 ' + ps.length + ' 个文件' : ('发来文件' + (nm ? '：' + nm : ''));
-      }
-      var bridge = noticeBridge();
-      if (bridge) {
-        try { bridge.notifyIncoming({ title: title, body: body }); return; } catch (e) { /* 退回下面 */ }
       }
       if (!window.Notification) return;
       if (Notification.permission === 'default') { pendingNotice = { title: title, body: body }; return; }

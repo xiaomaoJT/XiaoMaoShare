@@ -274,6 +274,7 @@ function createHostWindow() {
   if (hostInfo) hostWin.loadURL(hostInfo.hostUrl); // 窗口重建时服务已在跑，直接进真实页，不必闪一下启动页
   else hostWin.loadFile(START_PAGE);
   hostWin.show();
+  startNoticeWatch(hostWin);   // 收消息提醒由主进程统一负责（页面只负责展示）
 
   // 记住窗口大小与位置：拖动/缩放中只更新内存里的还原态，防抖 400ms 落盘；
   // 最大化、全屏、最小化时的瞬时几何不记录，还原态始终是上一次「正常」的样子
@@ -498,6 +499,7 @@ function openLink(rawUrl) {
   });
 
   win.loadURL(n.url);
+  startNoticeWatch(win);   // 收消息的口头提醒由主进程负责，不看对方页面版本
 
   // 连接窗口不挂 preload（对方页面不该拿到桌面 API），但悬浮球要替这台主机
   // 发东西，就必须用对方授权过的设备 cid —— 页面把它存在 localStorage('xm.cid')，
@@ -2101,6 +2103,106 @@ function notifyIncoming(payload, source) {
   });
 }
 
+/* ---------------------------------------------- 收消息的提醒，统一由主进程管
+
+   为什么不交给页面自己弹：
+   ① 连接窗口里的页面是**对方主机下发**的。那台主机如果还跑 2.4.0 之前
+      的版本，页面里根本没有通知这回事；② 窗口藏进托盘后，页面里的定时器
+      会被 Chromium 节流，可能几分钟才醒一次。所以「能不能提醒」不能押在
+      对方页面的版本和浏览器调度上 —— 主进程自己盯着 /api/list 最稳。
+
+   页面侧只在**没有桌面壳**（普通浏览器直接打开网址）时才用 HTML5
+   Notification 兜底；有壳时不弹，免得一条消息响两遍。 */
+
+const noticeWatches = new Map();   // win.id -> { timer, seen, primed, cid, base }
+
+function stopNoticeWatch(winId) {
+  const w = noticeWatches.get(winId);
+  if (w && w.timer) clearInterval(w.timer);
+  noticeWatches.delete(winId);
+}
+
+/** 这个窗口所在站点的设备 cid —— 页面存在 localStorage('xm.cid')，只读，不外传 */
+async function readWinCid(win) {
+  try {
+    const cid = await win.webContents.executeJavaScript("localStorage.getItem('xm.cid')||''", true);
+    return String(cid || '');
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * 给一个窗口挂上「收消息提醒」。本机页面和别人主机的页面走同一套逻辑，
+ * 页面版本不再影响通知能不能弹。
+ */
+function startNoticeWatch(win) {
+  if (!win || win.isDestroyed()) return;
+  const wid = win.id;
+  if (noticeWatches.has(wid)) return;
+
+  const st = { timer: null, seen: new Set(), primed: false, cid: '', base: '' };
+  noticeWatches.set(wid, st);
+
+  const tick = async () => {
+    if (win.isDestroyed()) { stopNoticeWatch(wid); return; }
+
+    // 只认 http(s)：启动页是 file://、断线页是 data:，那些没有可轮询的站点
+    let base = '';
+    try {
+      const cur = new URL(win.webContents.getURL());
+      if (cur.protocol === 'http:' || cur.protocol === 'https:') base = cur.origin;
+    } catch { /* about:blank 之类，跳过这一拍 */ }
+    if (!base) return;
+
+    // 换了站点（连了另一台主机 / 主窗口切回本机）：cid 和消息基线全部作废
+    if (st.base !== base) {
+      st.base = base;
+      st.cid = '';
+      st.seen.clear();
+      st.primed = false;
+    }
+
+    if (!st.cid) st.cid = await readWinCid(win);
+    if (!st.cid) return;              // 页面还没把 cid 写进来，下一拍再看
+
+    let data = null;
+    try {
+      const r = await fetch(base + '/api/list?cid=' + encodeURIComponent(st.cid), {
+        headers: { 'x-xm-cid': st.cid },
+      });
+      if (!r.ok) return;
+      data = await r.json();
+    } catch { return; }               // 对方离线 / 刚重启，下一拍再试，不打扰人
+
+    const items = Array.isArray(data && data.items) ? data.items : [];
+    const fresh = [];
+    for (const it of items) {
+      if (!it || !it.id || st.seen.has(it.id)) continue;
+      st.seen.add(it.id);
+      // 第一次只建基线：一进来不该把历史消息全弹一遍
+      if (st.primed && it.owner && it.owner !== st.cid) fresh.push(it);
+    }
+    st.primed = true;
+    if (!fresh.length) return;
+
+    const first = fresh[0];
+    let body;
+    if (fresh.length > 1) body = fresh.length + ' 条新消息';
+    else if (first.kind === 'text') body = String(first.text || '').slice(0, 120) || '发来一条消息';
+    else {
+      const ps = first.parts || [];
+      const nm = ps[0] && ps[0].name;
+      body = ps.length > 1 ? '发来 ' + ps.length + ' 个文件' : ('发来文件' + (nm ? '：' + nm : ''));
+    }
+    notifyIncoming({ title: 'XiaoMao 互传 · ' + (first.from || '有人'), body }, win);
+  };
+
+  st.timer = setInterval(tick, 3500);
+  tick();                             // 立刻跑一次，先把现在已有的登记成基线
+  win.on('closed', () => stopNoticeWatch(wid));
+}
+
 /**
  * 关闭确认。之所以默认是「收入托盘」而不是「退出」：
  * 这个程序在后台是有用的（手机还在传），误关的代价比误留高得多。
@@ -3117,6 +3219,14 @@ function reportBallIdentity(base, cid) {
 
 /* ------------------------------------------------------------ 生命周期 */
 
+/* Windows 的 toast 靠 AppUserModelID 认领「这条通知是哪个应用的」：
+   不注册的话通知不会显示、也不会进操作中心 —— 而且不报错，只是静默消失。
+   macOS 根本不看这个，所以同样的代码在 mac 上通、在 Windows 上全静默。
+   这里必须与 package.json 的 build.appId 完全一致：安装包给快捷方式写的就是
+   那个值，两边对不上 AUMID 照样匹配不到应用。 */
+const WIN_APP_ID = 'cc.xiaomao.share';
+if (process.platform === 'win32') app.setAppUserModelId(WIN_APP_ID);
+
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
@@ -3132,12 +3242,14 @@ if (!app.requestSingleInstanceLock()) {
     // accessory（无菜单栏），一旦被打进去，后面 show 多少窗口菜单栏都不会跟随
     ensureRegularApp();
 
-    // 「收到消息」要弹系统通知：页面用的是 HTML5 Notification，
-    // 这里只放行 notifications，其余一律收紧（连接窗口加载的是别人的内容）
+    // 「收到消息」的提醒统一由主进程发（startNoticeWatch）。桌面壳里的 HTML5
+    // Notification 一律关掉：留着只会让一条消息响两遍 —— 尤其是对方主机下发的
+    // 旧页面，它压根不知道有主进程这条通道，会自己去 new Notification。
+    // 普通浏览器直接打开网址时不受这个限制，仍然走浏览器自己的授权。
     try {
       const ses = session.defaultSession;
-      ses.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === 'notifications'));
-      ses.setPermissionCheckHandler((_wc, permission) => permission === 'notifications');
+      ses.setPermissionRequestHandler((_wc, _permission, cb) => cb(false));
+      ses.setPermissionCheckHandler(() => false);
     } catch { /* 老版本 Electron 没这两个 API 就算了，页面里也有兜底 */ }
 
     buildMenu();          // 菜单先挂上，别让窗口出来时顶栏是空的
