@@ -650,10 +650,23 @@ ipcMain.handle('notice:incoming', (e, payload) => {
   return notifyIncoming(payload, win);
 });
 // 自检入口（菜单 / 托盘里点一下）：通不通一眼就知道，不用等别人真发一条
-ipcMain.handle('notice:test', () => notifyIncoming({
-  title: 'XiaoMao 互传 · 通知自检',
-  body: '看到这条就说明系统通知是通的；别人发来内容时会这样提醒你。',
-}, hostWin));
+ipcMain.handle('notice:test', () => {
+  // Windows 没快捷方式就压根弹不出来，先把这层原因说清楚，别让人对着「没反应」猜
+  if (process.platform === 'win32') {
+    try {
+      if (!fs.existsSync(winShortcutPath())) {
+        return {
+          error: '系统里没有「XiaoMao 互传」的开始菜单快捷方式，Windows 不会投递通知。\n'
+            + '用安装包（NSIS 那个 .exe）装一次就好；便携版需要能写开始菜单。',
+        };
+      }
+    } catch { /* 查不到就不拦，照常发 */ }
+  }
+  return notifyIncoming({
+    title: 'XiaoMao 互传 · 通知自检',
+    body: '看到这条就说明系统通知是通的；别人发来内容时会这样提醒你。',
+  }, hostWin);
+});
 
 /**
  * 诊断用：系统通知中心里现在到底有没有我们投递出去的东西。
@@ -3227,6 +3240,40 @@ function reportBallIdentity(base, cid) {
 const WIN_APP_ID = 'cc.xiaomao.share';
 if (process.platform === 'win32') app.setAppUserModelId(WIN_APP_ID);
 
+/**
+ * Windows 投 toast 还有一个硬前提：**开始菜单里必须有一条带 AppUserModelID
+ * 的快捷方式**。安装版由 NSIS 装好；但直接跑 win-unpacked 里的 exe、或者用
+ * 便携版，系统找不到这条身份，通知会被直接丢掉 —— 不报错、不弹、也不进
+ * 通知中心，表现就是「连测试通知都没反应」。
+ *
+ * 所以这里自己补一条（已有且 AUMID 正确就跳过）。只在打包后写，免得开发机
+ * 上往开始菜单塞一个指向 electron.exe 的快捷方式。
+ */
+function winShortcutPath() {
+  return path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'XiaoMao 互传.lnk');
+}
+
+function ensureWinShortcut() {
+  if (process.platform !== 'win32' || !app.isPackaged) return;
+  try {
+    const lnk = winShortcutPath();
+    if (fs.existsSync(lnk)) {
+      try {
+        const cur = shell.readShortcutLink(lnk);
+        if (cur && cur.appUserModelId === WIN_APP_ID) return;  // 安装版装好的，别动它
+      } catch { /* 读不出来就按下面重建 */ }
+    }
+    fs.mkdirSync(path.dirname(lnk), { recursive: true });
+    shell.writeShortcutLink(lnk, fs.existsSync(lnk) ? 'update' : 'create', {
+      target: process.execPath,
+      appUserModelId: WIN_APP_ID,
+      description: 'XiaoMao 互传',
+      icon: process.execPath,
+      iconIndex: 0,
+    });
+  } catch { /* 没权限就算了：安装版不靠这条兜底 */ }
+}
+
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
@@ -3241,6 +3288,7 @@ if (!app.requestSingleInstanceLock()) {
     // 起来第一件事就是确认自己是「常规应用」：悬浮球的窗口层级调用会把 App 打成
     // accessory（无菜单栏），一旦被打进去，后面 show 多少窗口菜单栏都不会跟随
     ensureRegularApp();
+    ensureWinShortcut();   // Windows：没有带 AUMID 的开始菜单快捷方式，toast 就弹不出来
 
     // 「收到消息」的提醒统一由主进程发（startNoticeWatch）。桌面壳里的 HTML5
     // Notification 一律关掉：留着只会让一条消息响两遍 —— 尤其是对方主机下发的
