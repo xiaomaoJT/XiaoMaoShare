@@ -2,7 +2,19 @@
 
 ![XM 互传 · 系统介绍](docs/xm-intro.png)
 
-> 当前版本：**v2.3.0** · [更新日志](CHANGELOG.md) · [MIT 许可](LICENSE)
+> 当前版本：**v2.4.1** · [更新日志](CHANGELOG.md) · [MIT 许可](LICENSE)
+
+<p align="center">
+  <a href="https://hub.xerj.org/contributors/xiaomaoJT">
+    <img src="https://img.shields.io/badge/XERJ_Corpus_Hub-INDEXED-c9a227?style=flat-square&labelColor=2f3338" alt="Indexed by XERJ Corpus Hub">
+  </a>
+  <br>
+  <sub>Selected for the public code index · 2026-11</sub>
+</p>
+
+> [XERJ Corpus Hub](https://hub.xerj.org/contributors/xiaomaoJT) 是 [XERJ](https://github.com/xerj-org/xerj) 维护的公开代码解法索引，供编码 agent 在动手之前先检索已跑通的实现。本项目 [`fix(desktop): 数据目录改为界面内引导选择 + Windows 图标修复`](https://hub.xerj.org/contributors/xiaomaoJT) 被选入其中（涉及桌面端与 Android，3 个文件、约 280 行）。此后有开发者撞上同类问题，他的 agent 会带着「小帽互传」的署名，把这份改动当作参考实现。
+>
+> 收录只做索引，不改授权：代码仍是 [MIT](LICENSE)，名称与图标不随代码授权。
 
 ## 目录
 
@@ -987,7 +999,7 @@ XiaoMaoShare/
 
 个人自用的小工具。账户 + 密码是「分清谁是谁」，安全性仍然依赖「局域网本身是可信的」这个前提 —— 没有 TLS、没有限流、没有审计日志。请勿直接暴露到公网。
 
-版本号与每次发布的变更见 [CHANGELOG.md](CHANGELOG.md)；当前版本：**v2.3.0**。
+版本号与每次发布的变更见 [CHANGELOG.md](CHANGELOG.md)；当前版本：**v2.4.1**。
 
 ## 许可
 
