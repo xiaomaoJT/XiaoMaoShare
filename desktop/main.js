@@ -180,10 +180,31 @@ function validWindowBounds(b) {
 
 /** mac 上点窗口，顶部菜单栏要切成自己的 —— 窗口在后台被 show 出来、或无框窗的场景，
  *  系统不一定顺带激活 app，菜单栏就还挂在别的应用名下。focus 时补一脚。 */
+/**
+ * 保证本进程一直是「常规应用」（有菜单栏、有 Dock 图标）。
+ *
+ * 这是个真坑，实测出来的（macOS 27 + Electron 45）：
+ * `setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })` 会把整个 App 的
+ * activationPolicy 偷偷改成 **accessory** —— 一旦变成 accessory，应用**根本没有菜单栏**，
+ * 点任何窗口（自己 show 出来也好、用户手动点也好）菜单栏都不会跟随，因为「跟随」的对象
+ * 压根不存在。而且这状态会一直挂着，直到某处调 `app.dock.show()` 把它拉回 regular
+ * （关悬浮球正好会走 ensureDockIcon → dock.show，于是出现「关掉球才恢复」的怪象）。
+ *
+ * 对照实验（同机实测）：只开球窗=regular；+floating=regular；+全空间(无选项)=regular；
+ * +visibleOnFullScreen=**accessory**；再 setActivationPolicy('regular') 立刻回到 regular，
+ * 且球的 isVisibleOnAllWorkspaces 仍为 true（全屏可见没丢）。所以每次动完球的层级都补一刀。
+ */
+function ensureRegularApp() {
+  if (!IS_MAC || quitting) return;
+  try { app.setActivationPolicy('regular'); } catch { /* 老版本没有这个 API */ }
+  try { if (app.dock && !app.dock.isVisible()) app.dock.show(); } catch { /* 没 Dock 的环境 */ }
+}
+
 /** mac：窗口是程序里 show 出来的（悬浮球按钮 / 托盘 / 菜单），系统经常不顺带激活 app ——
  *  菜单栏不切、窗口沉在别的应用下面。所有「把窗口叫起来」的地方都补一脚。 */
 function activateApp() {
   if (!IS_MAC || quitting) return;
+  ensureRegularApp();   // accessory 状态下激活是白搭：先确保自己是常规应用
   try { app.focus({ steal: true }); } catch { /* 老版本不收参数 */ }
 }
 
@@ -202,6 +223,7 @@ function ensureFront(win, ms = 1400) {
   const tick = () => {
     if (quitting) return;
     if (!win || win.isDestroyed()) return;
+    ensureRegularApp();   // 期间若有代码把 policy 打成 accessory（球的层级调用），这里补回来
     if (win.isVisible()) {
       try { app.focus({ steal: true }); } catch { /* 无所谓 */ }
       try { if (ballWin && !ballWin.isDestroyed() && ballWin.isFocused()) ballWin.blur(); } catch { /* 同上 */ }
@@ -1889,6 +1911,7 @@ function showFromTray() {
   if (hostWin && !hostWin.isDestroyed() && hostWin.isVisible()) {
     if (hostWin.isMinimized()) hostWin.restore();
     hostWin.focus();
+    activateApp();   // 托盘叫回来的窗口也要把菜单栏带回来（accessory 状态下 focus 是白搭）
     return;
   }
   ensureHostWindow();
@@ -2149,6 +2172,7 @@ function createBallWindow() {
   }
   ballWin.setAlwaysOnTop(true, 'floating');
   ballWin.moveTop();
+  ensureRegularApp();   // ← visibleOnFullScreen 会把 App 变成 accessory（无菜单栏），立刻拉回 regular
   try { fs.appendFileSync('/tmp/xm-ball-drag.log', new Date().toISOString() + ' ball-created level=floating\n'); } catch { /* 日志而已 */ }
 
   ballWin.loadFile(BALL_PAGE);
@@ -2178,9 +2202,12 @@ function destroyBallWindow() {
 /** mac 上 setBounds / show 之后窗口层级偶尔会被系统重置（这仓库吃过亏），重要操作后补一遍 */
 function hardenBallLevel() {
   if (!IS_MAC || !ballWin || ballWin.isDestroyed()) return;
-  try { ballWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch { /* 老系统 */ }
+  // 「全空间可见」只在真的丢了时才重设：这个调用会把 App 打成 accessory（见 ensureRegularApp 注释），
+  // 而 hardenBallLevel 在拖动/改尺寸时会反复调 —— 每次都重设的话 Dock 图标会跟着反复跳。
+  try { if (!ballWin.isVisibleOnAllWorkspaces()) ballWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch { /* 老系统 */ }
   try { ballWin.setAlwaysOnTop(true, 'floating'); } catch { /* 同上 */ }
   ballWin.moveTop();
+  ensureRegularApp();   // 万一上面那句刚把 App 打成 accessory（无菜单栏），立刻拉回 regular
 }
 
 /**
@@ -2216,9 +2243,10 @@ function ballMenuBounds() {
 /** 菜单窗的层级补丁（跟球窗一样：先 setVisibleOnAllWorkspaces 再 setAlwaysOnTop） */
 function hardenMenuLevel() {
   if (!IS_MAC || !ballMenuWin || ballMenuWin.isDestroyed()) return;
-  try { ballMenuWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch { /* 老系统 */ }
+  try { if (!ballMenuWin.isVisibleOnAllWorkspaces()) ballMenuWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch { /* 老系统 */ }
   try { ballMenuWin.setAlwaysOnTop(true, 'floating'); } catch { /* 同上 */ }
   ballMenuWin.moveTop();
+  ensureRegularApp();   // 同球窗：visibleOnFullScreen 会把 App 打成 accessory，菜单栏就没了
 }
 
 function ensureBallMenuWindow() {
@@ -2981,6 +3009,9 @@ if (!app.requestSingleInstanceLock()) {
     if (IS_MAC && app.dock) {
       try { app.dock.setIcon(APP_ICON); } catch { /* 无 Dock 的环境就算了 */ }
     }
+    // 起来第一件事就是确认自己是「常规应用」：悬浮球的窗口层级调用会把 App 打成
+    // accessory（无菜单栏），一旦被打进去，后面 show 多少窗口菜单栏都不会跟随
+    ensureRegularApp();
 
     buildMenu();          // 菜单先挂上，别让窗口出来时顶栏是空的
     buildTray();          // 托盘尽早建：关闭按钮的三种结局都依赖它在不在
