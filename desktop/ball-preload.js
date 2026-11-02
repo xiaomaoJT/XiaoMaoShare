@@ -56,6 +56,13 @@ contextBridge.exposeInMainWorld('xmBall', {
   /** 收进托盘（球自己的关闭方式） */
   hide: () => ipcRenderer.invoke('ball:hide'),
 
+  /** 右键迷你球菜单：on=true 主进程把窗口撑大一圈，on=false 缩回来 */
+  menu: (on) => ipcRenderer.invoke('ball:menu', !!on),
+  /** 连接信息（原生菜单：当前目标 + 状态，顺手能换发送目标） */
+  info: () => ipcRenderer.invoke('ball:info'),
+  /** 拖拽诊断日志：mac 上拖拽失效时靠它分层定位 */
+  dragLog: (msg) => ipcRenderer.send('ball:drag-log', String(msg == null ? '' : msg)),
+
   /** 换尺寸 / 展开收起后主进程会推一份新几何过来 */
   onGeometry: (fn) => {
     if (typeof fn !== 'function') return;

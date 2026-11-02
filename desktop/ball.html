@@ -70,6 +70,25 @@
     font-size: 12px; font-weight: 700;
   }
 
+  /* ---------------- 右键迷你球 ----------------
+     右键球，主进程把窗口以球心为圆心撑大一圈，这里在球周围的轨道上摆三颗迷你球：
+     连接信息 / 打开主界面 / 关闭悬浮球。位置由 applyGeo 按 geometry 算。 */
+  #orbit { position: absolute; left: 0; top: 0; z-index: 15; }
+  #orbit[hidden] { display: none; }
+  #orbit .mini {
+    position: absolute; width: 48px; height: 48px; border-radius: 50%;
+    border: 0; padding: 0; background: #fff; color: var(--ink2);
+    box-shadow: 0 3px 12px -3px rgba(16, 24, 40, .5), 0 0 0 1px rgba(20, 23, 28, .08);
+    display: grid; place-items: center;
+    animation: pop .14s ease-out;
+    cursor: default;
+  }
+  #orbit .mini:hover {
+    color: var(--accent);
+    box-shadow: 0 5px 16px -4px rgba(76, 110, 245, .55), 0 0 0 1.5px var(--accent);
+  }
+  #orbit .mini svg { width: 21px; height: 21px; display: block; }
+
   /* ---------------- 面板 ---------------- */
   #panel {
     position: absolute;
@@ -209,9 +228,20 @@
 </style>
 </head>
 <body>
-  <div id="ball" title="点一下展开；拖文件进来直接发送（⌘/Ctrl + 滚轮调大小）">
+  <div id="ball" title="点一下展开；拖文件进来直接发送；右键弹快捷菜单（⌘/Ctrl + 滚轮调大小）">
     <div class="disc"><img id="logo" alt=""></div>
     <span id="badge" hidden>0</span>
+    <div id="orbit" hidden>
+      <button class="mini" id="btnBallInfo" type="button" title="当前连接信息 · 换发送目标">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9.2"/><line x1="12" y1="11" x2="12" y2="16.6"/><circle cx="12" cy="7.5" r="1.2" fill="currentColor" stroke="none"/></svg>
+      </button>
+      <button class="mini" id="btnBallHost" type="button" title="打开主界面">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="12.5" rx="2"/><line x1="8.5" y1="20.5" x2="15.5" y2="20.5"/></svg>
+      </button>
+      <button class="mini" id="btnBallOff" type="button" title="关闭悬浮球">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="7" y1="7" x2="17" y2="17"/><line x1="17" y1="7" x2="7" y2="17"/></svg>
+      </button>
+    </div>
   </div>
 
   <div id="panel" hidden>
@@ -296,8 +326,15 @@
       panel.style.top = r.panel.top + 'px';
       panel.style.width = r.panel.width + 'px';
       panel.style.height = r.panel.height + 'px';
+      open = true;
     } else {
       panel.hidden = true;
+      // 右键菜单也会把面板收掉（主进程直接改窗口），这里跟着同步展开标志
+      open = false;
+    }
+    if (r.menu) {
+      if (r.menu.on) showOrbit(r);
+      else hideOrbit();
     }
   }
 
@@ -347,9 +384,63 @@
     });
   }
 
-  makeDraggable(ball, function () { setOpen(!open); });
+  makeDraggable(ball, function () {
+    // 右键菜单开着时点球 = 收菜单，别把面板又拉出来
+    if (menuOpen) { closeMenu(); return; }
+    setOpen(!open);
+  });
   // 标题栏也能拖；「点一下」= 换发送目标（本机 / 连到哪台）
   makeDraggable($('pHead'), function () { if (api.pickTarget) api.pickTarget(); });
+
+  /* ---------------- 右键迷你球菜单 ----------------
+     窗口被主进程撑大后，迷你球挂在这圈轨道上：连接信息 / 打开主界面 / 关闭悬浮球。
+     点外面、Esc、执行完动作都会收回 —— 撑大的透明区域会挡住下面的窗口，
+     所以「点哪儿都收」不只是礼貌，是必须。 */
+  var orbit = $('orbit');
+  var menuOpen = false;
+
+  function showOrbit(r) {
+    var box = r.box || 84;
+    var disc = r.size || 64;
+    var cx = box / 2, cy = box / 2;
+    var R = disc / 2 + 52;                       // 轨道半径：球边再留一手的距离
+    var up = !(r.menu && r.menu.arcUp === false); // 主进程说球贴着屏幕顶就往下挂
+    var spots = up
+      ? [[-0.72, -0.72], [0, -1], [0.72, -0.72]]  // 左上 / 正上 / 右上
+      : [[-0.72, 0.72], [0, 1], [0.72, 0.72]];    // 左下 / 正下 / 右下
+    var minis = orbit.querySelectorAll('.mini');
+    for (var i = 0; i < minis.length; i++) {
+      minis[i].style.left = Math.round(cx + spots[i][0] * R - 24) + 'px';
+      minis[i].style.top = Math.round(cy + spots[i][1] * R - 24) + 'px';
+    }
+    orbit.hidden = false;
+    menuOpen = true;
+  }
+
+  function hideOrbit() { orbit.hidden = true; menuOpen = false; }
+
+  function closeMenu() {
+    if (!menuOpen) return;
+    hideOrbit();
+    if (api.menu) api.menu(false);
+  }
+
+  ball.addEventListener('contextmenu', function (e) {
+    e.preventDefault();
+    if (menuOpen) { closeMenu(); return; }
+    if (api.menu) api.menu(true).then(function (r) { applyGeo(r || {}); });
+  });
+
+  // 点球和迷你球以外任何地方都收菜单（透明区域拦下的那一击就当「关闭」）
+  document.addEventListener('pointerdown', function (e) {
+    if (!menuOpen) return;
+    if (e.target.closest && (e.target.closest('.mini') || e.target.closest('#ball'))) return;
+    closeMenu();
+  }, true);
+
+  $('btnBallInfo').addEventListener('click', function () { closeMenu(); if (api.info) api.info(); });
+  $('btnBallHost').addEventListener('click', function () { closeMenu(); api.openHost(); });
+  $('btnBallOff').addEventListener('click', function () { api.hide(); });
 
   /* 球上 ⌘/Ctrl + 滚轮换大小：比翻菜单快。
      必须带修饰键 —— 球的窗口永远置顶，光标扫过它时随手一滑就改尺寸太容易误触。 */
@@ -366,6 +457,7 @@
   }, { passive: false });
 
   document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && menuOpen) { closeMenu(); return; }
     if (e.key === 'Escape' && open) setOpen(false);
   });
 
@@ -480,17 +572,37 @@
 
   /* ---------------- 拖文件 ---------------- */
   var dragDepth = 0;
+  /* 拖拽诊断：mac 上「拖不进球」可能卡在任何一层 —— 原生事件没进窗口 /
+     drop 没回来 / 路径拿不到。每一步落盘 /tmp/xm-ball-drag.log，一次拖拽就能定位。 */
+  function dlog(m) { if (api.dragLog) { try { api.dragLog(m); } catch (e) { /* 日志而已 */ } } }
+  dlog('page-loaded');
+
   window.addEventListener('dragenter', function (e) {
     e.preventDefault();
     dragDepth++;
     document.body.classList.add('dropping');
+    dlog('enter depth=' + dragDepth + ' types=' + ((e.dataTransfer && e.dataTransfer.types) || []).join('|'));
   });
-  // dragover 在 document 上也拦一道：这是 Electron 的老经验，少这道 Windows 上 drop 可能不触发
-  document.addEventListener('dragover', function (e) { e.preventDefault(); });
-  window.addEventListener('dragover', function (e) { e.preventDefault(); });
+  // dragover 必须 preventDefault + 给 dropEffect：mac 的 Chromium 比 Windows 挑 ——
+  // 不把 dropEffect 明确设成 copy，drop 有时直接被系统取消（Windows 上同样的代码没事）。
+  var overN = 0, overLogAt = 0;
+  document.addEventListener('dragover', function (e) {
+    e.preventDefault();
+    try { e.dataTransfer.dropEffect = 'copy'; } catch (err) { /* 老内核 */ }
+    overN++;
+    var now = Date.now();
+    if (now - overLogAt > 800) { dlog('over n=' + overN + ' dropEffect=copy'); overLogAt = now; }
+  });
+  window.addEventListener('dragover', function (e) {
+    e.preventDefault();
+    try { e.dataTransfer.dropEffect = 'copy'; } catch (err) { /* 同上 */ }
+  });
+  // document 上再拦一道 drop：防止漏网的事件把窗口导航走
+  document.addEventListener('drop', function (e) { e.preventDefault(); });
   window.addEventListener('dragleave', function (e) {
     e.preventDefault();
     if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove('dropping'); }
+    dlog('leave depth=' + dragDepth);
   });
   window.addEventListener('drop', async function (e) {
     e.preventDefault();
@@ -498,19 +610,23 @@
     document.body.classList.remove('dropping');
     try {
       var files = e.dataTransfer && e.dataTransfer.files;
+      dlog('drop files=' + (files ? files.length : -1));
       // FileList 这种宿主对象过不了 contextBridge（过去会变成空对象，for...of 直接炸），
       // 单个 File 可以过——先在页面这边摊成数组再交给 preload 取路径
       var paths = api.pathsOf ? api.pathsOf(Array.prototype.slice.call(files || [])) : [];
+      dlog('paths=' + (paths.length ? paths.join(' , ') : '(none)'));
       // 拿不到路径多半是从微信 / 浏览器这类地方拖的——那些「文件」本机并不存在
       if (!paths.length) return toast(files && files.length ? '拿不到文件路径，请从「访达 / 资源管理器」或桌面拖入' : '只支持拖本机的文件');
       toast('正在发送 ' + paths.length + ' 个文件…');
       var r = await api.send({ paths: paths });
+      dlog('send ok=' + (!!(r && r.ok)) + (r && r.ok ? ' sent=' + r.sent : ' err=' + (r && r.error)));
       if (r && r.ok) {
         // 部分失败要把原因念出来：文件不存在 / 对方拒收，别让人对着「发送失败」干瞪眼
         toast(r.failed ? ('已发送 ' + r.sent + ' 个，失败：' + (r.failedNames || []).join('；')) : ('已发送 ' + r.sent + ' 个'));
         poll();
       } else toast((r && r.error) || '发送失败');
     } catch (err) {
+      dlog('drop-error ' + ((err && err.message) || err));
       toast('拖放发送出错：' + ((err && err.message) || err));
     }
   });

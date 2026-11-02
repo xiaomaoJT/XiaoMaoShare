@@ -92,6 +92,9 @@ let ballLastFocus = null; // 最近用的是哪个窗口：{ kind:'host' } / { k
 let ballPinCache;         // 手动选定的目标（undefined = 还没从设置里读过）
 let ballDiscPx = 64;      // 当前球体直径（跟着设置走）
 let ballBoxPx = 84;       // 当前球窗口边长 = 球体 + 一圈给阴影留的空白
+let ballMenuOpen = false; // 右键迷你球菜单是否开着（开着时窗口被撑大）
+let ballMenuOff = null;   // 菜单开着时球在窗口内的偏移（窗口以球心为圆心撑大，球不再贴 0,0）
+let ballMenuArcUp = true; // 迷你球挂球上方还是下方（球贴近屏幕顶时往下弹）
 
 /* ------------------------------------------------------------ 地址处理 */
 
@@ -1933,6 +1936,7 @@ const BALL_DISC = { sm: 52, md: 64, lg: 80 };
 const BALL_PAD = 20;                                     // 窗口比球体大一圈，给自绘阴影留位（透明窗口会裁掉超出部分）
 const BALL_GAP = 6;                                      // 球与面板之间（球本身还自带 10px 留白）
 const BALL_PANEL = { width: 360, height: 460 };
+const BALL_MENU_R = 84;   // 右键菜单：迷你球轨道外扩半径（窗口边长 = 球窗 + 半径×2），给轨道和阴影留位
 
 let ballOn = false;       // 悬浮球是「每场会话」的开关：默认关，重启后想用要重新打开（不落盘，免得一次开启永久常驻）
 
@@ -1964,6 +1968,7 @@ function setBallEnabled(on) {
 /** 换大小：窗口跟着变，球心位置尽量不动 —— 换完球不该跳到屏幕另一头 */
 function setBallSize(key) {
   if (!BALL_DISC[key]) return { ok: false, error: '没有这个尺寸' };
+  closeBallMenu();
   const before = ballAnchor || clampBallPos(readBallPref().pos);
   const center = { x: before.x + ballBoxPx / 2, y: before.y + ballBoxPx / 2 };
 
@@ -1997,9 +2002,14 @@ function setBallSize(key) {
 /** 把当前几何推给页面（换尺寸 / 展开收起都走这里，页面只负责摆） */
 function applyBallGeometry() {
   if (!ballWin || ballWin.isDestroyed()) return;
-  const payload = (ballOpen && ballGeo)
-    ? ballGeo.panelAndBall()
-    : { size: ballDiscPx, box: ballBoxPx, ball: { left: 0, top: 0 }, panel: null };
+  let payload;
+  if (ballOpen && ballGeo) {
+    payload = ballGeo.panelAndBall();
+  } else if (ballMenuOpen && ballMenuOff) {
+    payload = { size: ballDiscPx, box: ballBoxPx, ball: ballMenuOff, panel: null, menu: { on: true, arcUp: ballMenuArcUp } };
+  } else {
+    payload = { size: ballDiscPx, box: ballBoxPx, ball: { left: 0, top: 0 }, panel: null, menu: { on: false } };
+  }
   try { ballWin.webContents.send('ball:geometry', payload); } catch { /* 页面还没就绪 */ }
 }
 
@@ -2021,6 +2031,8 @@ function createBallWindow() {
   ballAnchor = pos;
   ballOpen = false;
   ballGeo = null;
+  ballMenuOpen = false;
+  ballMenuOff = null;
 
   ballWin = new BrowserWindow({
     x: pos.x, y: pos.y, width: ballBoxPx, height: ballBoxPx,
@@ -2068,6 +2080,48 @@ function destroyBallWindow() {
   ballWin = null;
   ballOpen = false;
   ballGeo = null;
+  ballMenuOpen = false;
+  ballMenuOff = null;
+}
+
+/** mac 上 setBounds / show 之后窗口层级偶尔会被系统重置（这仓库吃过亏），重要操作后补一遍 */
+function hardenBallLevel() {
+  if (!IS_MAC || !ballWin || ballWin.isDestroyed()) return;
+  try { ballWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch { /* 老系统 */ }
+  try { ballWin.setAlwaysOnTop(true, 'screen-saver'); } catch { /* 同上 */ }
+  ballWin.moveTop();
+}
+
+/**
+ * 右键菜单布局：窗口以球心为圆心撑大一圈（side = 球窗 + 半径×2），
+ * 球心尽量不动 —— 收回时才不会跳。迷你球挂在球周围的轨道上（页面按 off 和 arcUp 摆）。
+ */
+function ballMenuLayout() {
+  const anchor = ballAnchor || clampBallPos(readBallPref().pos);
+  const center = { x: Math.round(anchor.x + ballBoxPx / 2), y: Math.round(anchor.y + ballBoxPx / 2) };
+  const side = ballBoxPx + BALL_MENU_R * 2;
+  const area = screen.getDisplayNearestPoint(center).workArea;
+  const x = Math.round(Math.min(Math.max(center.x - side / 2, area.x), area.x + area.width - side));
+  const y = Math.round(Math.min(Math.max(center.y - side / 2, area.y), area.y + area.height - side));
+  return {
+    bounds: { x, y, width: side, height: side },
+    off: { left: Math.round(center.x - ballBoxPx / 2) - x, top: Math.round(center.y - ballBoxPx / 2) - y },
+    arcUp: (center.y - area.y) >= 130,   // 球贴近屏幕顶就往下弹，避开菜单栏
+  };
+}
+
+/** 收回右键菜单：窗口缩回球大小，锚点按「当前窗口位置 + 球在窗口内的偏移」反推，球不跳 */
+function closeBallMenu() {
+  if (!ballMenuOpen) return;
+  ballMenuOpen = false;
+  const off = ballMenuOff || { left: 0, top: 0 };
+  ballMenuOff = null;
+  if (ballWin && !ballWin.isDestroyed()) {
+    const [x, y] = ballWin.getPosition();
+    ballAnchor = clampBallPos({ x: x + off.left, y: y + off.top });
+    ballWin.setBounds({ x: ballAnchor.x, y: ballAnchor.y, width: ballBoxPx, height: ballBoxPx });
+    applyBallGeometry();
+  }
 }
 
 /**
@@ -2380,6 +2434,7 @@ function registerBallIpc() {
 
   ipcMain.handle('ball:expand', (_e, on) => {
     if (!ballWin || ballWin.isDestroyed()) return { size: ballDiscPx, box: ballBoxPx, ball: { left: 0, top: 0 } };
+    closeBallMenu();
     ballOpen = !!on;
     if (!on) {
       const a = clampBallPos(ballAnchor || readBallPref().pos);
@@ -2408,7 +2463,10 @@ function registerBallIpc() {
     ny = Math.min(Math.max(ny, area.y), area.y + area.height - b.height);
     if (nx === b.x && ny === b.y) return;
     ballWin.setPosition(nx, ny);
-    const off = (ballOpen && ballGeo) ? ballGeo.ball : { left: 0, top: 0 };
+    // 展开时挪的是「球在 ballGeo 里的位置」；菜单开着挪的是菜单态的球位
+    const off = (ballOpen && ballGeo) ? ballGeo.ball
+      : (ballMenuOpen && ballMenuOff) ? ballMenuOff
+      : { left: 0, top: 0 };
     ballAnchor = { x: nx + off.left, y: ny + off.top };
   });
 
@@ -2460,6 +2518,80 @@ function registerBallIpc() {
     });
     Menu.buildFromTemplate(items).popup({ window: ballWin });
     return { ok: true };
+  });
+
+  /**
+   * 右键迷你球菜单：窗口以球心为圆心撑大一圈，页面在球周围摆三颗迷你球
+   * （连接信息 / 打开主界面 / 关闭悬浮球）。点外面 / Esc / 执行完动作由页面调 on=false 收回。
+   */
+  ipcMain.handle('ball:menu', (_e, on) => {
+    const collapsed = { size: ballDiscPx, box: ballBoxPx, ball: { left: 0, top: 0 }, panel: null, menu: { on: false } };
+    if (!ballWin || ballWin.isDestroyed()) return collapsed;
+    if (!on) { closeBallMenu(); return collapsed; }
+    if (ballOpen) { ballOpen = false; ballGeo = null; }   // 面板先收，窗口让位给菜单
+    const lay = ballMenuLayout();
+    ballMenuOpen = true;
+    ballMenuOff = lay.off;
+    ballMenuArcUp = lay.arcUp;
+    ballWin.setBounds(lay.bounds);
+    hardenBallLevel();
+    applyBallGeometry();
+    return { size: ballDiscPx, box: ballBoxPx, ball: lay.off, panel: null, menu: { on: true, arcUp: lay.arcUp } };
+  });
+
+  /** 迷你球「连接信息」：原生菜单念清楚当前发给谁、服务状态，顺手能换目标 */
+  ipcMain.handle('ball:info', () => {
+    if (!ballWin || ballWin.isDestroyed()) return { ok: false };
+    const inf = server.serverInfo();
+    const cur = ballTarget();
+    const n = links.size;
+    const items = [
+      { label: '发送到：' + (cur ? (cur.kind === 'host' ? '本机主机' : cur.label) : '（还没定发送目标）'), enabled: false },
+      {
+        label: cur && cur.kind === 'link'
+          ? ('对方地址 ' + cur.base.replace(/^https?:\/\//, ''))
+          : (inf.running
+            ? ('本机接收服务已开启 · 端口 ' + inf.port + (n ? ' · ' + n + ' 台设备连着' : ''))
+            : '本机接收服务未开启'),
+        enabled: false,
+      },
+      { type: 'separator' },
+      {
+        label: '本机主机' + (inf.running ? '' : '（接收服务没开）'),
+        type: 'radio',
+        checked: !!cur && cur.kind === 'host',
+        enabled: inf.running,
+        click: () => setBallPin({ kind: 'host' }),
+      },
+    ];
+    if (!links.size) {
+      items.push({ label: '（还没有连其他主机）', enabled: false });
+    } else {
+      for (const [, l] of links) {
+        items.push({
+          label: '连到 ' + l.host,
+          type: 'radio',
+          checked: !!cur && cur.kind === 'link' && cur.id === l.id,
+          click: () => setBallPin({ kind: 'link', url: l.url }),
+        });
+      }
+    }
+    items.push({ type: 'separator' });
+    items.push({
+      label: '改回自动跟随（最近用的窗口）',
+      enabled: !!ballPinRead(),
+      click: () => setBallPin(null),
+    });
+    Menu.buildFromTemplate(items).popup({ window: ballWin });
+    return { ok: true };
+  });
+
+  /** 拖拽诊断：mac 上拖文件进球失效的分层排查日志（进没进窗口 / drop 来没来 / 路径拿到没） */
+  ipcMain.on('ball:drag-log', (_e, msg) => {
+    try {
+      fs.appendFileSync('/tmp/xm-ball-drag.log',
+        new Date().toISOString() + ' ' + String(msg || '').slice(0, 500) + '\n');
+    } catch { /* 写不进就算了 */ }
   });
 
   /** 滚轮换大小：球上滚一下比翻菜单快 */
