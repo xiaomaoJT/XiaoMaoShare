@@ -71,17 +71,23 @@
   }
 
   /* ---------------- 右键迷你球 ----------------
-     右键球，主进程把窗口以球心为圆心撑大一圈，这里在球周围的轨道上摆三颗迷你球：
-     连接信息 / 打开主界面 / 关闭悬浮球。位置由 applyGeo 按 geometry 算。 */
-  #orbit { position: absolute; left: 0; top: 0; z-index: 15; }
+     右键球，主进程把窗口朝左或朝右撑出去，这里在球旁边纵着一列摆三颗迷你球：
+     连接信息 / 打开主界面 / 关闭悬浮球。列的位置由主进程算好（ball:geometry / ball:menu
+     里的 menu.col），这里只负责把容器放上去 —— 项与项的间距交给 flex。 */
+  #orbit {
+    position: absolute; z-index: 15;
+    display: flex; flex-direction: column; justify-content: center; align-items: center;
+    gap: 10px;
+  }
   #orbit[hidden] { display: none; }
   #orbit .mini {
-    position: absolute; width: 48px; height: 48px; border-radius: 50%;
+    width: 48px; height: 48px; border-radius: 50%;
     border: 0; padding: 0; background: #fff; color: var(--ink2);
     box-shadow: 0 3px 12px -3px rgba(16, 24, 40, .5), 0 0 0 1px rgba(20, 23, 28, .08);
     display: grid; place-items: center;
     animation: pop .14s ease-out;
     cursor: default;
+    flex: none;
   }
   #orbit .mini:hover {
     color: var(--accent);
@@ -94,7 +100,6 @@
     border-radius: 15px; padding: 0 13px;
     font-size: 12px; font-weight: 650; letter-spacing: .2px;
     display: flex; align-items: center;            /* 盖掉 .mini 的 grid：grid 会把绿点和文字拆成上下两行 */
-    transform: translateX(-50%);                    /* left 是球心，自己往回挪半截居中 */
     animation: popFade .14s ease-out;               /* 别复用 pop：它的 scale 会和位移打架 */
   }
   #orbit .mini.pill #pillText {
@@ -417,32 +422,16 @@
   var menuOpen = false;
 
   function showOrbit(r) {
-    var box = r.box || 84;
-    var disc = r.size || 64;
+    var col = r.menu && r.menu.col;
+    if (!col) { hideOrbit(); return; }
+    // col 是窗口坐标，#orbit 挂在 #ball 里 —— 减去球的偏移换算成球内局部坐标；
+    // 项与项的纵向间距、胶囊居中都是 flex 的事，页面不再逐颗算坐标
     var b = r.ball || { left: 0, top: 0 };
-    // #orbit 挂在 #ball 里，坐标都是「球内局部坐标」，圆心 = 球心（box/2）。
-    // 但球贴屏幕边时窗口被钳住、球偏到窗口一侧，胶囊/迷你球会伸出窗外 ——
-    // 下面一律换算成窗口坐标钳一遍再换回来。
-    var cx = box / 2, cy = box / 2;
-    var R = disc / 2 + 52;                       // 轨道半径：球边再留一手的距离
-    var up = !(r.menu && r.menu.arcUp === false); // 主进程说球贴着屏幕顶就往下挂
-    var W = (r.menu && r.menu.w) || (b.left * 2 + box); // 菜单态窗口宽，兜底按球居中反推
+    orbit.style.left = Math.round(col.left - b.left) + 'px';
+    orbit.style.top = Math.round(col.top - b.top) + 'px';
+    orbit.style.width = col.width + 'px';
+    orbit.style.height = col.height + 'px';
     updatePill();
-    var pill = $('btnBallInfo');
-    // 胶囊挂球正上/正下；胶囊中心在窗口里至少留出半颗胶囊的位置（max-width 190 → 半宽 95 + 余量）
-    var halfPill = 97;
-    var pillCx = Math.min(Math.max(cx + b.left, halfPill), Math.max(halfPill, W - halfPill)) - b.left;
-    pill.style.left = Math.round(pillCx) + 'px';
-    pill.style.top = Math.round(up ? cy - R - 15 : cy + R - 15) + 'px';
-    var dy = up ? -0.72 : 0.72;
-    var minis = orbit.querySelectorAll('.mini:not(.pill)');
-    for (var i = 0; i < minis.length; i++) {
-      var sx = (i === 0) ? -0.72 : 0.72;          // 两颗图标球挂在左右斜角，正中让给胶囊
-      var mx = cx + sx * R - 24;                  // 图标球 48 宽，left 即左上角
-      mx = Math.min(Math.max(mx + b.left, 2), Math.max(2, W - 50)) - b.left;
-      minis[i].style.left = Math.round(mx) + 'px';
-      minis[i].style.top = Math.round(cy + dy * R - 24) + 'px';
-    }
     orbit.hidden = false;
     menuOpen = true;
   }
