@@ -177,6 +177,16 @@ function validWindowBounds(b) {
   } catch { return null; }
 }
 
+/** mac 上点窗口，顶部菜单栏要切成自己的 —— 窗口在后台被 show 出来、或无框窗的场景，
+ *  系统不一定顺带激活 app，菜单栏就还挂在别的应用名下。focus 时补一脚。 */
+function stealAppFocusOn(win) {
+  if (!IS_MAC) return;
+  win.on('focus', () => {
+    if (quitting) return;
+    try { app.focus({ steal: true }); } catch { /* 老版本不收参数 */ }
+  });
+}
+
 function createHostWindow() {
   // 恢复上次的大小与位置；最大化状态单独记，还原态的几何始终保留一份
   const saved = validWindowBounds(readSettings().windowBounds);
@@ -203,6 +213,7 @@ function createHostWindow() {
   });
 
   if (saved && saved.isMaximized) hostWin.maximize();
+  stealAppFocusOn(hostWin);   // mac：点到窗口，菜单栏就得是自己的
 
   // 先显示启动页（不依赖本地服务器，双击后立即有反馈），服务就绪后再换真实页
   if (hostInfo) hostWin.loadURL(hostInfo.hostUrl); // 窗口重建时服务已在跑，直接进真实页，不必闪一下启动页
@@ -351,6 +362,7 @@ function openLink(rawUrl) {
     e.preventDefault();
     win.setTitle(`连到 ${n.host} — XiaoMao 互传`);
   });
+  stealAppFocusOn(win);   // mac：连接窗口被点到 / 叫回来时，菜单栏同步切过来
 
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:/i.test(url)) shell.openExternal(url);
@@ -1953,7 +1965,8 @@ const BALL_GAP = 6;                                      // 球与面板之间�
 const BALL_PANEL = { width: 360, height: 460 };
 const BALL_MENU_R = 84;   // 右键菜单：迷你球轨道外扩半径（窗口边长 = 球窗 + 半径×2），给轨道和阴影留位
 
-let ballOn = false;       // 悬浮球是「每场会话」的开关：默认关，重启后想用要重新打开（不落盘，免得一次开启永久常驻）
+let ballOn = false;       // 悬浮球的运行时开关；落盘在 settings.ballEnabled ——
+                          // 用户手动开过就记住，下次启动自动跟着开，手动关了才不再出现
 
 function readBallPref() {
   const s = readSettings();
@@ -1972,7 +1985,8 @@ function syncBallMetrics() {
 }
 
 function setBallEnabled(on) {
-  ballOn = !!on;   // 会话内开关，不写设置 —— 下次启动仍然是关着的
+  ballOn = !!on;   // 记忆也落盘：手动开过，重启后自动开；手动关了，下次就安分
+  updateSettings({ ballEnabled: ballOn });
   if (on) createBallWindow();
   else destroyBallWindow();
   buildMenu();
@@ -2021,7 +2035,8 @@ function applyBallGeometry() {
   if (ballOpen && ballGeo) {
     payload = ballGeo.panelAndBall();
   } else if (ballMenuOpen && ballMenuOff) {
-    payload = { size: ballDiscPx, box: ballBoxPx, ball: ballMenuOff, panel: null, menu: { on: true, arcUp: ballMenuArcUp } };
+    const mw = ballWin && !ballWin.isDestroyed() ? ballWin.getBounds().width : ballBoxPx + BALL_MENU_R * 2;
+    payload = { size: ballDiscPx, box: ballBoxPx, ball: ballMenuOff, panel: null, menu: { on: true, arcUp: ballMenuArcUp, w: mw } };
   } else {
     payload = { size: ballDiscPx, box: ballBoxPx, ball: { left: 0, top: 0 }, panel: null, menu: { on: false } };
   }
@@ -2554,7 +2569,7 @@ function registerBallIpc() {
     ballWin.setBounds(lay.bounds);
     hardenBallLevel();
     applyBallGeometry();
-    return { size: ballDiscPx, box: ballBoxPx, ball: lay.off, panel: null, menu: { on: true, arcUp: lay.arcUp } };
+    return { size: ballDiscPx, box: ballBoxPx, ball: lay.off, panel: null, menu: { on: true, arcUp: lay.arcUp, w: lay.bounds.width } };
   });
 
   /** 迷你球「连接信息」：原生菜单念清楚当前发给谁、服务状态，顺手能换目标 */
@@ -2628,13 +2643,19 @@ function registerBallIpc() {
   ipcMain.handle('ball:open-host', () => {
     const t = ballTarget();
     if (t && t.kind === 'link') {
-      const w = ballWindowFor(t);
-      if (w && !w.isDestroyed()) {
-        if (w.isMinimized()) w.restore();
-        w.show();
-        w.focus();
+      const l = (t.id && links.get(t.id))
+        || [...links.values()].find((x) => x.url.replace(/\/+$/, '') === t.base);
+      if (l && l.win && !l.win.isDestroyed()) {
+        if (l.win.isMinimized()) l.win.restore();
+        l.win.show();
+        l.win.focus();
         return { ok: true, opened: 'link' };
       }
+      // 窗口真没了（重启过 / 被彻底关掉）：按球的记忆重新连那台 ——
+      // 落到 openMyHost 会给人一张选择页或本机界面，跟球上显示的「连到 x.x.x」对不上
+      const r = openLink(t.base);
+      if (r && r.ok) return { ok: true, opened: 'link' };
+      // 地址连不上（对方下线/写坏了）才退回本机
     }
     openMyHost();
     return { ok: true, opened: 'host' };
@@ -2766,7 +2787,8 @@ if (!app.requestSingleInstanceLock()) {
     syncBallMetrics();    // 球的尺寸先算好，后面布局都靠它
     registerBallIpc();    // 悬浮球的请求通道先打通，窗口起来就能用
     createHostWindow();   // 窗口与启动页立刻出现 —— 双击就有反馈，不用干等任何东西
-    // 悬浮球默认不出场：它是用户临时叫出来的浮件，每次启动都从关着开始
+    // 上次是开着球退出的：这次自动把球带上（手动关过才会是 false）
+    if (readSettings().ballEnabled) setBallEnabled(true);
 
     setupAutoUpdater();
 
