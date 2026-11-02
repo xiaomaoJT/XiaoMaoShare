@@ -94,8 +94,10 @@ let ballDiscPx = 64;      // 当前球体直径（跟着设置走）
 let ballBoxPx = 84;       // 当前球窗口边长 = 球体 + 一圈给阴影留的空白
 let ballMenuOpen = false; // 右键菜单是否开着（开着时窗口朝菜单那一侧撑大）
 let ballMenuOff = null;   // 菜单开着时球在窗口内的偏移（球不再贴 0,0）
-let ballMenuArcUp = true; // 扇形朝上还是朝下（球贴近屏幕顶时往下翻）
+let ballMenuArcUp = true; // 扇形朝上还是朝下（默认往下，下方放不下才翻上）
 let ballMenuItems = null; // 菜单条目坐标（主进程算好下发，页面只摆位）
+let ballMenuSeq = 0;      // 菜单展开序号：延时收回时用来判断「这期间有没有人重新展开过」
+let ballActivating = false; // 「打开界面」激活流程进行中（这期间失焦不收菜单）
 
 /* ------------------------------------------------------------ 地址处理 */
 
@@ -2136,6 +2138,14 @@ function createBallWindow() {
   ballWin.once('ready-to-show', () => { if (ballWin && !ballWin.isDestroyed()) ballWin.showInactive(); });
   ballWin.webContents.on('did-finish-load', () => applyBallGeometry());
   ballWin.on('closed', () => { ballWin = null; ballOpen = false; ballGeo = null; });
+  // 点窗口外的空白处 / 切到别的应用：球窗失焦 = 菜单该收了。
+  // 撑大的透明窗会盖住下面的窗口，不能赖在那儿等 Esc。
+  // 「打开界面」的激活流程里会主动让球窗失焦 —— 那一小段跳过，别把刚弹的菜单收掉。
+  ballWin.on('blur', () => {
+    if (!ballMenuOpen || ballActivating) return;
+    setImmediate(() => { if (ballMenuOpen && !ballActivating) closeBallMenu(); });
+  });
+  ballWin.on('hide', () => { if (ballMenuOpen) closeBallMenu(); });
   ballWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   return ballWin;
 }
@@ -2184,7 +2194,7 @@ function ballMenuLayout() {
   const roomUp = center.y - area.y - ballBoxPx / 2;
   const roomDown = area.y + area.height - center.y - ballBoxPx / 2;
   const need = H - ballBoxPx;
-  const arcUp = roomUp >= need ? true : (roomDown >= need ? false : roomUp >= roomDown);
+  const arcUp = roomDown >= need ? false : (roomUp >= need ? true : roomUp >= roomDown);
   const x = Math.round(Math.min(Math.max(center.x - W / 2, area.x), area.x + area.width - W));
   const y = Math.round(arcUp ? center.y - ballBoxPx / 2 - stackH : center.y - ballBoxPx / 2);
   const off = { left: Math.round(center.x - ballBoxPx / 2) - x, top: Math.round(center.y - ballBoxPx / 2) - y };
@@ -2631,11 +2641,14 @@ function registerBallIpc() {
     if (ballOpen) { ballOpen = false; ballGeo = null; }   // 面板先收，窗口让位给菜单
     const lay = ballMenuLayout();
     ballMenuOpen = true;
+    ballMenuSeq++;
     ballMenuOff = lay.off;
     ballMenuArcUp = lay.arcUp;
     ballMenuItems = lay.items;
     ballWin.setBounds(lay.bounds);
     hardenBallLevel();
+    // 让球窗拿到 key：菜单才收得到「点外面」的失焦信号（右击本来也会激活它，这里补一脚保险）
+    try { ballWin.focus(); } catch { /* 无所谓 */ }
     applyBallGeometry();
     return { size: ballDiscPx, box: ballBoxPx, ball: lay.off, panel: null, menu: { on: true, arcUp: lay.arcUp, w: lay.bounds.width, h: lay.bounds.height, items: lay.items } };
   });
@@ -2715,6 +2728,8 @@ function registerBallIpc() {
    *  菜单路径下缩窗发生在球窗还攥着焦点的时候，会把刚激活的状态搅回去，
    *  菜单栏就停在别的应用名下，得关了球才恢复 —— 页面只藏视觉，几何由这里收回。 */
   const openAndActivate = async (focusFn) => {
+    const seqAt = ballMenuSeq;              // 记下这次点击时菜单的序号
+    ballActivating = true;                  // 这一段主动失焦是正常的，失焦收菜单先让路
     try { if (ballWin && !ballWin.isDestroyed()) ballWin.blur(); } catch { /* 无所谓 */ }
     await focusFn();
     activateApp();
@@ -2723,8 +2738,13 @@ function registerBallIpc() {
       activateApp();
       try { if (ballWin && !ballWin.isDestroyed() && ballWin.isFocused()) ballWin.blur(); } catch { /* 同上 */ }
     };
-    setTimeout(() => { reconfirm(); closeBallMenu(); }, 220);
-    setTimeout(reconfirm, 600);   // 导航慢的窗口（openLink 重连）show 得晚，再补一脚
+    setTimeout(() => {
+      reconfirm();
+      // 只收「这次点击时还开着」的那份菜单：用户手快又右击一次的话，序号已变，
+      // 这一脚不能把刚展开的新菜单收掉（否则就是「右键菜单出不来」）
+      if (ballMenuSeq === seqAt) closeBallMenu();
+    }, 220);
+    setTimeout(() => { ballActivating = false; reconfirm(); }, 600);   // 导航慢的窗口（openLink 重连）再补一脚
   };
 
   ipcMain.handle('ball:open-host', () => {

@@ -78,10 +78,12 @@
      所以「点哪儿都收」不只是礼貌，是必须。 */
   #orbit {
     position: absolute; left: 0; top: 0; z-index: 15;
+    pointer-events: none;      /* 容器铺满整个撑大的窗口，不吃事件：空白处要能落到 body 上（点空白收菜单） */
   }
   #orbit[hidden] { display: none; }
   #orbit .mini {
     position: absolute; width: 48px; height: 48px; border-radius: 50%;
+    pointer-events: auto;      /* 只有迷你球自己可点 */
     border: 0; padding: 0; background: #fff; color: var(--ink2);
     box-shadow: 0 3px 12px -3px rgba(16, 24, 40, .5), 0 0 0 1px rgba(20, 23, 28, .08);
     display: grid; place-items: center;
@@ -461,14 +463,21 @@
 
   ball.addEventListener('contextmenu', function (e) {
     e.preventDefault();
-    if (menuOpen) { closeMenu(); return; }
+    // 右击一律「展开 / 重新摆位」，不做 toggle：以前页面和主进程的开关状态一旦
+    // 不同步（比如收了菜单但没收到回包），右击就变成「关一个不存在的菜单」，
+    // 表现就是「右键菜单出不来」，得再点一次 —— 收起交给点空白 / Esc / 失焦。
     if (api.menu) api.menu(true).then(function (r) { applyGeo(r || {}); });
   });
 
-  // 点球和迷你球以外任何地方都收菜单（透明区域拦下的那一击就当「关闭」）
+  // 点迷你球和球本身以外任何地方都收菜单（透明区域拦下的那一击就当「关闭」）。
+  // #orbit 自己 pointer-events:none，空白处的点击落到 body 上才算「点空白」——
+  // 以前用 closest('#ball') 排除，#orbit 又是 #ball 的子节点，结果整个窗口的空白都收不掉。
   document.addEventListener('pointerdown', function (e) {
     if (!menuOpen) return;
-    if (e.target.closest && (e.target.closest('.mini') || e.target.closest('#ball'))) return;
+    if (e.button !== 0) return;   // 只认左键：右键留给「重新展开」，不然会先关再开闪一下
+    var t = e.target;
+    if (t.closest && t.closest('.mini')) return;   // 点迷你球 = 执行动作
+    if (t === ball || ball.contains(t)) return;    // 点球体本身：交给球的拖拽/点击逻辑
     closeMenu();
   }, true);
 
@@ -627,9 +636,23 @@
   function dlog(m) { if (api.dragLog) { try { api.dragLog(m); } catch (e) { /* 日志而已 */ } } }
   dlog('page-loaded');
 
+  /* 拖拽状态的心跳：mac 上把文件拖离窗口时 dragleave 经常不来（Chromium 老毛病），
+     body.dropping 就卡住 —— 「松开即发送」的遮罩一直罩着，其实什么都没发出去。
+     dragover 在悬停期间会连续来，一旦静默超过 450ms 就当拖拽已离开/被取消。 */
+  var lastOverAt = 0;
+  function markOver() { lastOverAt = Date.now(); }
+  setInterval(function () {
+    if (!document.body.classList.contains('dropping')) return;
+    if (Date.now() - lastOverAt < 450) return;
+    dragDepth = 0;
+    document.body.classList.remove('dropping');
+    dlog('watchdog-reset（已拖离/取消，dragleave 没来）');
+  }, 200);
+
   window.addEventListener('dragenter', function (e) {
     e.preventDefault();
     dragDepth++;
+    markOver();
     document.body.classList.add('dropping');
     dlog('enter depth=' + dragDepth + ' types=' + ((e.dataTransfer && e.dataTransfer.types) || []).join('|'));
   });
@@ -639,6 +662,7 @@
   document.addEventListener('dragover', function (e) {
     e.preventDefault();
     try { e.dataTransfer.dropEffect = 'copy'; } catch (err) { /* 老内核 */ }
+    markOver();
     overN++;
     var now = Date.now();
     if (now - overLogAt > 800) { dlog('over n=' + overN + ' dropEffect=copy'); overLogAt = now; }
@@ -646,6 +670,7 @@
   window.addEventListener('dragover', function (e) {
     e.preventDefault();
     try { e.dataTransfer.dropEffect = 'copy'; } catch (err) { /* 同上 */ }
+    markOver();
   });
   // document 上再拦一道 drop：防止漏网的事件把窗口导航走
   document.addEventListener('drop', function (e) { e.preventDefault(); });
