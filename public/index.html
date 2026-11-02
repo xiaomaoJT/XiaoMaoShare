@@ -6001,6 +6001,11 @@
       applyHello(d);
 
       markOnline();
+      // 接收进度：有人正往这台主机传文件就画进度条，并把轮询临时提速，条才动得顺
+      var ups = d.uploads || [];
+      var active = paintUploads(ups);
+      if (active && pollMs !== 800) { pollMs = 800; startPolling(); }
+      else if (!active && pollMs === 800) { pollMs = 1500; startPolling(); }
       allItems = d.items || [];
       var sig = allItems.map(function (x) { return x.id; }).join(',');
       if (!force && sig === lastSig) { detectEdits(); detectNotes(); tickTimes(); return; }
@@ -6016,6 +6021,74 @@
       if (e && e.message === 'unauthorized') return;
       markOffline();
     });
+  }
+
+  /* ============================================================ 接收进度条
+     别人正往这台主机推文件时（POST /api/upload 流进来），列表顶部出现
+     「收」字进度条：有 Content-Length 就报百分比，拿不到就报已收字节。
+     传完 / 取消服务端立刻摘掉，下一次轮询这里跟着清干净。 */
+  var recvBox = null;
+  var recvRows = new Map();   // upload id -> row
+  var recvStyleDone = false;
+  function fmtBytes(n) {
+    if (n >= 1073741824) return (n / 1073741824).toFixed(2) + ' GB';
+    if (n >= 1048576) return (n / 1048576).toFixed(1) + ' MB';
+    if (n >= 1024) return (n / 1024).toFixed(0) + ' KB';
+    return n + ' B';
+  }
+  function paintUploads(ups) {
+    ups = ups || [];
+    if (!recvStyleDone) {
+      recvStyleDone = true;
+      var st = document.createElement('style');
+      st.textContent =
+        '.recvbox{display:flex;flex-direction:column;gap:6px;margin:2px 0 10px}' +
+        '.recvbox .ritem{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--line,#e3e8f0);border-radius:12px;background:#fff;box-shadow:0 1px 3px rgba(16,24,40,.06)}' +
+        '.recvbox .rico{width:28px;height:28px;border-radius:8px;flex:none;background:#eef2ff;color:#4c6ef5;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800}' +
+        '.recvbox .rbody{flex:1;min-width:0}' +
+        '.recvbox .rt1{font-size:12.5px;font-weight:600;color:var(--ink,#14171c);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+        '.recvbox .rt2{font-size:11px;color:var(--ink3,#8a94a6);margin-top:2px}' +
+        '.recvbox .rbar{height:5px;border-radius:3px;background:#edf0f6;margin-top:5px;overflow:hidden}' +
+        '.recvbox .rbar i{display:block;height:100%;width:0;border-radius:3px;background:#4c6ef5;transition:width .25s}' +
+        '.recvbox .rbar i.indet{animation:recvIndet 1.1s ease-in-out infinite alternate;transition:none}' +
+        '@keyframes recvIndet{from{width:0}to{width:42%}}' +
+        '.recvbox .rpct{font-size:11.5px;font-weight:700;color:#4c6ef5;min-width:40px;text-align:right;flex:none}';
+      document.head.appendChild(st);
+      recvBox = document.createElement('div');
+      recvBox.className = 'recvbox';
+    }
+    var alive = new Set();
+    ups.forEach(function (u) {
+      alive.add(u.id);
+      var row = recvRows.get(u.id);
+      if (!row) {
+        row = document.createElement('div');
+        row.className = 'ritem';
+        row.innerHTML = '<div class="rico">收</div>' +
+          '<div class="rbody"><div class="rt1"></div><div class="rbar"><i></i></div><div class="rt2"></div></div>' +
+          '<div class="rpct"></div>';
+        recvRows.set(u.id, row);
+        recvBox.appendChild(row);
+      }
+      row.querySelector('.rt1').textContent = u.name || '文件';
+      var bar = row.querySelector('.rbar i');
+      if (u.size) {
+        var pct = Math.min(100, Math.round((u.got / u.size) * 100));
+        bar.className = ''; bar.style.width = pct + '%';
+        row.querySelector('.rpct').textContent = pct + '%';
+        row.querySelector('.rt2').textContent = fmtBytes(u.got) + ' / ' + fmtBytes(u.size);
+      } else {
+        bar.className = 'indet'; bar.style.width = '';
+        row.querySelector('.rpct').textContent = '';
+        row.querySelector('.rt2').textContent = '已接收 ' + fmtBytes(u.got);
+      }
+    });
+    recvRows.forEach(function (row, id) {
+      if (!alive.has(id)) { row.remove(); recvRows.delete(id); }
+    });
+    if (recvBox.childNodes.length && recvBox.parentNode !== feed) feed.insertBefore(recvBox, feed.firstChild);
+    if (!recvBox.childNodes.length && recvBox.parentNode) recvBox.remove();
+    return ups.length > 0;
   }
 
   function applyHello(d) {

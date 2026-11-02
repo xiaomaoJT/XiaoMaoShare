@@ -367,11 +367,14 @@ function openLink(rawUrl) {
       (w) => !w.isDestroyed() && w !== win && w !== ballWin && w.isVisible(),
     );
     if (!tray) return;   // 没托盘可收：照常关
-    // 球正指着这条连接：直接关掉球就瞬间没数据了（用户看到的是「一关窗口球就空了」）。
-    // 这种情况按关闭策略处理 —— 收托盘是藏起来，连接和球的数据源都留着
-    const bt = ballWin && !ballWin.isDestroyed() ? ballTarget() : null;
-    const ballNeeds = !!(bt && bt.kind === 'link' && bt.base === n.url.replace(/\/+$/, ''));
-    if (otherVisible && !ballNeeds) return;
+    // 还有别的界面开着：关这个窗口只收它自己（连接留着，托盘随时叫回来），
+    // 别牵连主窗口，也别问东问西 —— 多窗口各关各的
+    if (otherVisible) {
+      e.preventDefault();
+      win.hide();
+      refreshTray();
+      return;
+    }
     const policy = readClosePref();
     if (policy === 'quit') { e.preventDefault(); setImmediate(() => app.quit()); return; }
     e.preventDefault();
@@ -1823,6 +1826,18 @@ function handleHostClose(e) {
   if (quitting) return; // 已经在退出流程里，放行
   if (!tray) return;    // 没有托盘可收，保持老行为：真关，窗口全关后退出
 
+  // 还有别的界面开着（比如连别人的窗口）：关主窗口只收主窗口自己，
+  // 主机服务照跑，别把别人的窗口一起带走 —— 多窗口各关各的
+  const otherVisible = BrowserWindow.getAllWindows().some(
+    (w) => !w.isDestroyed() && w !== hostWin && w !== ballWin && w.isVisible(),
+  );
+  if (otherVisible) {
+    e.preventDefault();
+    hostWin.hide();
+    refreshTray();
+    return;
+  }
+
   const policy = readClosePref();
   if (policy === 'quit') {
     // 记过「完全退出」就真的退。mac 上不能只是放行关窗 —— 那边关窗默认不退，
@@ -2054,12 +2069,15 @@ function createBallWindow() {
 
   // mac 上必须先 setVisibleOnAllWorkspaces 再 setAlwaysOnTop —— 顺序反过来
   // 会把窗口层级重置掉，球就沉到普通窗口下面去了（拖文件永远拖不到它身上）。
-  // screen-saver 这一级才压得住全屏应用；普通 alwaysOnTop 一进全屏就被盖住。
+  // 层级用 floating 而不是 screen-saver：实测 screen-saver（1000）这一级 mac 的
+  // 拖拽会话不往窗口路由 —— 文件拖影子都画在球下面、dragenter 一个都不来；
+  // floating（3）仍压得住普通窗口，全屏可见交给上面的 visibleOnFullScreen。
   if (IS_MAC) {
     try { ballWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch { /* 老系统 */ }
   }
-  ballWin.setAlwaysOnTop(true, 'screen-saver');
+  ballWin.setAlwaysOnTop(true, 'floating');
   ballWin.moveTop();
+  try { fs.appendFileSync('/tmp/xm-ball-drag.log', new Date().toISOString() + ' ball-created level=floating\n'); } catch { /* 日志而已 */ }
 
   ballWin.loadFile(BALL_PAGE);
   ballWin.once('ready-to-show', () => { if (ballWin && !ballWin.isDestroyed()) ballWin.showInactive(); });
@@ -2088,7 +2106,7 @@ function destroyBallWindow() {
 function hardenBallLevel() {
   if (!IS_MAC || !ballWin || ballWin.isDestroyed()) return;
   try { ballWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch { /* 老系统 */ }
-  try { ballWin.setAlwaysOnTop(true, 'screen-saver'); } catch { /* 同上 */ }
+  try { ballWin.setAlwaysOnTop(true, 'floating'); } catch { /* 同上 */ }
   ballWin.moveTop();
 }
 
@@ -2605,7 +2623,22 @@ function registerBallIpc() {
     return { ok: true, size: next };
   });
 
-  ipcMain.handle('ball:open-host', () => { openMyHost(); return { ok: true }; });
+  /** 球上的「打开界面」：球现在指谁就开谁的窗口 —— 连着别人开连接窗口，
+      指本机才开主机界面。永远蹦主机界面会跟球的标题打架。 */
+  ipcMain.handle('ball:open-host', () => {
+    const t = ballTarget();
+    if (t && t.kind === 'link') {
+      const w = ballWindowFor(t);
+      if (w && !w.isDestroyed()) {
+        if (w.isMinimized()) w.restore();
+        w.show();
+        w.focus();
+        return { ok: true, opened: 'link' };
+      }
+    }
+    openMyHost();
+    return { ok: true, opened: 'host' };
+  });
   ipcMain.handle('ball:copy', (_e, text) => { clipboard.writeText(String(text || '')); return { ok: true }; });
 
   ipcMain.handle('ball:hide', () => setBallEnabled(false));

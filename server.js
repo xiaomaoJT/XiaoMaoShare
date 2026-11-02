@@ -197,6 +197,18 @@ function findDuplicate(hash, size) {
  */
 const staged = new Map(); // fid -> { kind, fid, name, size, mime, file, owner, at }
 
+/**
+ * 正在接收的文件（发送方正 POST /api/upload 流进本机）：
+ * /api/list 带出去给界面画接收进度条，传完/失败就摘掉。
+ */
+const uploads = new Map(); // id -> { id, name, size, got, at }
+
+function uploadsPayload() {
+  const now = Date.now();
+  for (const [id, u] of uploads) if (now - u.at > 10 * 60e3) uploads.delete(id); // 兜底：卡死的传输别常驻
+  return [...uploads.values()].map((u) => ({ id: u.id, name: u.name, size: u.size, got: u.got, at: u.at }));
+}
+
 setInterval(() => {
   const now = Date.now();
   for (const [fid, s] of staged) {
@@ -2631,6 +2643,7 @@ const server = http.createServer((req, res) => {
       profiles: publicProfiles(),
       limits: limitsPayload(),
       pending: manage ? pendingList().length : 0,
+      uploads: uploadsPayload(),
       now: Date.now(),
     });
     return;
@@ -2957,6 +2970,10 @@ const server = http.createServer((req, res) => {
     const stored = id + ext;
     const ws = fs.createWriteStream(path.join(FILES_DIR, stored));
 
+    // Content-Length 是发送方报的总量，有它才能算百分比；拿不到就只报已收字节
+    const total = Number(req.headers['content-length']) || 0;
+    uploads.set(id, { id, name, size: total, got: 0, at: Date.now() });
+
     let size = 0;
     let aborted = false;
     let done = false;
@@ -2967,6 +2984,7 @@ const server = http.createServer((req, res) => {
       if (done) return;
       done = true;
       aborted = true;
+      uploads.delete(id);
       try { ws.destroy(); } catch {}
       fs.unlink(path.join(FILES_DIR, stored), () => {});
       json(res, code, { error: msg });
@@ -2976,6 +2994,8 @@ const server = http.createServer((req, res) => {
       size += chunk.length;
       if (size > MAX_FILE) fail(413, '文件过大');
       hash.update(chunk);
+      const u = uploads.get(id);
+      if (u) { u.got = size; u.at = Date.now(); }
     });
 
     req.on('aborted', () => fail(499, '已取消'));
@@ -2984,6 +3004,7 @@ const server = http.createServer((req, res) => {
     ws.on('finish', () => {
       if (done) return;
       done = true;
+      uploads.delete(id);
       if (!size) return fail(400, '空文件');
 
       const digest = hash.digest('hex');
