@@ -94,7 +94,7 @@ let ballDiscPx = 64;      // 当前球体直径（跟着设置走）
 let ballBoxPx = 84;       // 当前球窗口边长 = 球体 + 一圈给阴影留的空白
 let ballMenuOpen = false; // 右键菜单是否开着（开着时窗口朝菜单那一侧撑大）
 let ballMenuOff = null;   // 菜单开着时球在窗口内的偏移（球不再贴 0,0）
-let ballMenuCol = null;   // 菜单开着时菜单列在窗口内的矩形（页面按它摆）
+let ballMenuArcUp = true; // 扇形朝上还是朝下（球贴近屏幕顶时往下翻）
 
 /* ------------------------------------------------------------ 地址处理 */
 
@@ -286,23 +286,41 @@ async function ensureHostWindow() {
     }
   }
   if (hostWin && !hostWin.isDestroyed()) {
+    const u = String(hostWin.webContents.getURL());
+    if (u.startsWith('file:')) {
+      const inf = server.serverInfo();
+      let nav = null;
+      if (inf.running) {
+        // 服务在跑：直接进真实界面，别让用户看到一张过期的启动页
+        hostInfo = inf;
+        nav = hostWin.loadURL(inf.hostUrl);
+      } else if (!u.includes('force=1')) {
+        // 服务没跑：记过启动方式就按记忆重新走一遍（连上次那台 / 起本机服务），
+        // 只有「每次问我」才亮选择页 —— 记了「直接连」还天天被问，等于没记
+        if (runStartPref()) {
+          // 按记忆走了：目的地多半不是这张启动页 —— 先藏好再换装，
+          // 不然就是「闪一下选择页、再跳进主界面」的毛躁体验。
+          // 走失败了 applyStartChoice / startPageError 会自己把窗口亮出来
+          if (hostWin.isVisible()) hostWin.hide();
+        } else {
+          hostWin.loadFile(START_PAGE, { query: { force: '1' } });
+        }
+      }
+      if (nav) {
+        if (hostWin.isVisible()) hostWin.hide();
+        nav.catch(() => {}).then(() => {
+          if (!hostWin || hostWin.isDestroyed()) return;
+          hostWin.show();
+          hostWin.focus();
+          activateApp();
+        });
+        return hostWin;
+      }
+    }
     if (hostWin.isMinimized()) hostWin.restore();
     hostWin.show();
     hostWin.focus();
     activateApp();
-    const u = String(hostWin.webContents.getURL());
-    if (u.startsWith('file:')) {
-      const inf = server.serverInfo();
-      if (inf.running) {
-        // 服务在跑：直接进真实界面，别让用户看到一张过期的启动页
-        hostInfo = inf;
-        hostWin.loadURL(inf.hostUrl);
-      } else if (!u.includes('force=1')) {
-        // 服务没跑：记过启动方式就按记忆重新走一遍（连上次那台 / 起本机服务），
-        // 只有「每次问我」才亮选择页 —— 记了「直接连」还天天被问，等于没记
-        if (!runStartPref()) hostWin.loadFile(START_PAGE, { query: { force: '1' } });
-      }
-    }
     return hostWin;
   }
   createHostWindow();
@@ -383,27 +401,21 @@ function openLink(rawUrl) {
   win.on('close', (e) => {
     if (quitting || linkForceClose || win.__xmNoAsk) return;
     // 悬浮球是浮件，不该算「还有别的窗口看着」—— 否则一开球，关闭就永远问不出口
-    const otherVisible = BrowserWindow.getAllWindows().some(
-      (w) => !w.isDestroyed() && w !== win && w !== ballWin && w.isVisible(),
-    );
     if (!tray) return;   // 没托盘可收：照常关
-    // 还有别的界面开着：关这个窗口只收它自己（连接留着，托盘随时叫回来），
-    // 别牵连主窗口，也别问东问西 —— 多窗口各关各的
-    if (otherVisible) {
-      e.preventDefault();
-      win.hide();
-      refreshTray();
-      return;
-    }
     const policy = readClosePref();
+    // 「收入托盘」是藏起来不是关掉：窗口一销毁，连接、这条记录、悬浮球的数据源全没 ——
+    // 球面板会瞬间变成空的，跟断了线一样。hide 保留现场，托盘/菜单随时叫回来。
+    // 关闭策略对每一次点击都生效（别的窗口开着也一样，分离 ≠ 免问）——
+    // 之前有别的窗口就静默藏起来不问，用户设了「每次询问」却时问时不问
+    const parkAndClose = () => { linkForceClose = true; win.hide(); refreshTray(); notifyTrayParked(); };
     if (policy === 'quit') { e.preventDefault(); setImmediate(() => app.quit()); return; }
     e.preventDefault();
-    // 「收入托盘」是藏起来不是关掉：窗口一销毁，连接、这条记录、悬浮球的数据源全没 ——
-    // 球面板会瞬间变成空的，跟断了线一样。hide 保留现场，托盘/菜单随时叫回来
-    const parkAndClose = () => { linkForceClose = true; win.hide(); notifyTrayParked(); };
     if (policy === 'tray') { parkAndClose(); return; }
     askCloseChoice(parkAndClose);
   });
+  // 藏进托盘后下次亮出来，就得重新按关闭策略走 —— 不复位的话第二回点关闭
+  // 会一声不吭把窗口真关掉（用户看到的就是「时问时不问」）
+  win.on('show', () => { linkForceClose = false; win.__xmNoAsk = false; });
 
   win.webContents.on('did-fail-load', (_e, code, desc, url, isMainFrame) => {
     if (!isMainFrame || code === -3) return; // -3 = 用户自己取消，不算失败
@@ -1665,6 +1677,11 @@ async function applyStartChoice(c) {
     }
     if (!hostWin || hostWin.isDestroyed()) createHostWindow();
     hostWin.loadURL(info.hostUrl);
+    // ensureHostWindow 会先把主窗藏起来换装（免得闪选择页），这里到位了再亮出来；
+    // 从选择页正常点进来的场景窗口本来就看得见，show 是幂等的
+    hostWin.show();
+    hostWin.focus();
+    activateApp();
     if (pending) noticeToHost(pending);
     maybeFirstRunGuide();
     return;
@@ -1862,12 +1879,11 @@ function handleHostClose(e) {
   const otherVisible = BrowserWindow.getAllWindows().some(
     (w) => !w.isDestroyed() && w !== hostWin && w !== ballWin && w.isVisible(),
   );
-  if (otherVisible) {
-    e.preventDefault();
-    hostWin.hide();
-    refreshTray();
-    return;
-  }
+  // 分离 ≠ 免问：关闭策略对**每一次**点击都生效，只是「收托盘」在有别的
+  // 界面时只收自己这一个窗口。之前有别的窗口就静默跳过询问，用户设了
+  // 「每次询问」却发现时问时不问，就是这个旁路在作怪
+  const parkSelf = () => { hostWin.hide(); refreshTray(); notifyTrayParked(); };
+  const park = otherVisible ? parkSelf : hideToTray;
 
   const policy = readClosePref();
   if (policy === 'quit') {
@@ -1881,8 +1897,8 @@ function handleHostClose(e) {
   }
 
   e.preventDefault();            // 兜住这次关闭，改由我们决定去哪
-  if (policy === 'tray') { hideToTray(); return; }
-  askCloseChoice();
+  if (policy === 'tray') { park(); return; }
+  askCloseChoice(park);
 }
 
 function hideToTray() {
@@ -2053,8 +2069,8 @@ function applyBallGeometry() {
   let payload;
   if (ballOpen && ballGeo) {
     payload = ballGeo.panelAndBall();
-  } else if (ballMenuOpen && ballMenuOff && ballMenuCol) {
-    payload = { size: ballDiscPx, box: ballBoxPx, ball: ballMenuOff, panel: null, menu: { on: true, col: ballMenuCol } };
+  } else if (ballMenuOpen && ballMenuOff) {
+    payload = { size: ballDiscPx, box: ballBoxPx, ball: ballMenuOff, panel: null, menu: { on: true, arcUp: ballMenuArcUp, w: ballWin.getBounds().width } };
   } else {
     payload = { size: ballDiscPx, box: ballBoxPx, ball: { left: 0, top: 0 }, panel: null, menu: { on: false } };
   }
@@ -2081,7 +2097,7 @@ function createBallWindow() {
   ballGeo = null;
   ballMenuOpen = false;
   ballMenuOff = null;
-  ballMenuCol = null;
+  ballMenuArcUp = true;
 
   ballWin = new BrowserWindow({
     x: pos.x, y: pos.y, width: ballBoxPx, height: ballBoxPx,
@@ -2134,7 +2150,7 @@ function destroyBallWindow() {
   ballGeo = null;
   ballMenuOpen = false;
   ballMenuOff = null;
-  ballMenuCol = null;
+  ballMenuArcUp = true;
 }
 
 /** mac 上 setBounds / show 之后窗口层级偶尔会被系统重置（这仓库吃过亏），重要操作后补一遍 */
@@ -2146,40 +2162,23 @@ function hardenBallLevel() {
 }
 
 /**
- * 右键菜单布局：菜单项在球的左边或右边**纵向排一列**（放得下就右、贴屏幕右缘自动换左），
- * 窗口朝那一侧撑出去，球心尽量不动 —— 收回时才不会跳。
+ * 右键菜单布局：窗口以球心为圆心撑大一圈，三颗迷你球按**扇形**环绕球
+ * （胶囊在正上/正下，两颗图标球挂左右斜角 —— 页面按 arcUp 摆）。
+ * 球心不动，收回时才不会跳。球贴屏幕顶时扇形往下翻。
  */
-const BALL_MENU_GAP = 10;    // 球与菜单列的间距
-const BALL_MENU_COL_W = 196; // 菜单列宽：胶囊最宽 190 + 一点余量
-const BALL_MENU_COL_H = 162; // 菜单列高：胶囊 30 + 两颗 48 + 间距 2×10 + 上下余量
+const BALL_MENU_R = 84;   // 扇形外扩半径（窗口边长 = 球窗 + 半径×2），给轨道和胶囊留位
 function ballMenuLayout() {
   const anchor = ballAnchor || clampBallPos(readBallPref().pos);
   const center = { x: Math.round(anchor.x + ballBoxPx / 2), y: Math.round(anchor.y + ballBoxPx / 2) };
   const area = screen.getDisplayNearestPoint(center).workArea;
-
-  // 右侧放不下（球贴屏幕右缘）就换到左侧
-  const colH = BALL_MENU_COL_H;
-  const w = ballBoxPx + BALL_MENU_GAP + BALL_MENU_COL_W;
-  const h = Math.max(ballBoxPx, colH);
-  const fitRight = center.x + ballBoxPx / 2 + BALL_MENU_GAP + BALL_MENU_COL_W <= area.x + area.width;
-
-  let x, ballLeft, colLeft;
-  if (fitRight) {
-    x = Math.round(center.x - ballBoxPx / 2);
-    ballLeft = 0;
-    colLeft = ballBoxPx + BALL_MENU_GAP;
-  } else {
-    x = Math.round(center.x + ballBoxPx / 2 - w);
-    ballLeft = w - ballBoxPx;
-    colLeft = 0;
-  }
-  x = Math.round(Math.min(Math.max(x, area.x), area.x + area.width - w));
-  const y = Math.round(Math.min(Math.max(center.y - h / 2, area.y), area.y + area.height - h));
+  const side = ballBoxPx + BALL_MENU_R * 2;
+  const x = Math.round(Math.min(Math.max(center.x - side / 2, area.x), area.x + area.width - side));
+  const y = Math.round(Math.min(Math.max(center.y - side / 2, area.y), area.y + area.height - side));
   return {
-    bounds: { x, y, width: w, height: h },
+    bounds: { x, y, width: side, height: side },
     off: { left: Math.round(center.x - ballBoxPx / 2) - x, top: Math.round(center.y - ballBoxPx / 2) - y },
-    // 菜单列：跟球垂直居中对齐
-    col: { left: colLeft, top: Math.round((h - colH) / 2), width: BALL_MENU_COL_W, height: colH },
+    // 胶囊挂在半径 disc/2+52 处、半高 15：球心离屏幕顶不足这个数就往下翻，别顶进菜单栏
+    arcUp: (center.y - area.y) >= ballDiscPx / 2 + 70,
   };
 }
 
@@ -2189,7 +2188,7 @@ function closeBallMenu() {
   ballMenuOpen = false;
   const off = ballMenuOff || { left: 0, top: 0 };
   ballMenuOff = null;
-  ballMenuCol = null;
+  ballMenuArcUp = true;
   if (ballWin && !ballWin.isDestroyed()) {
     const [x, y] = ballWin.getPosition();
     ballAnchor = clampBallPos({ x: x + off.left, y: y + off.top });
@@ -2606,11 +2605,11 @@ function registerBallIpc() {
     const lay = ballMenuLayout();
     ballMenuOpen = true;
     ballMenuOff = lay.off;
-    ballMenuCol = lay.col;
+    ballMenuArcUp = lay.arcUp;
     ballWin.setBounds(lay.bounds);
     hardenBallLevel();
     applyBallGeometry();
-    return { size: ballDiscPx, box: ballBoxPx, ball: lay.off, panel: null, menu: { on: true, col: lay.col } };
+    return { size: ballDiscPx, box: ballBoxPx, ball: lay.off, panel: null, menu: { on: true, arcUp: lay.arcUp, w: lay.bounds.width } };
   });
 
   /** 迷你球「连接信息」：原生菜单念清楚当前发给谁、服务状态，顺手能换目标 */
@@ -2681,26 +2680,41 @@ function registerBallIpc() {
 
   /** 球上的「打开界面」：球现在指谁就开谁的窗口 —— 连着别人开连接窗口，
       指本机才开主机界面。永远蹦主机界面会跟球的标题打架。 */
+  /** 点球本身会让球窗攥住焦点，收菜单的 setBounds 又会再抢一次 ——
+   *  所以「把界面叫起来」要：先松开球窗 → show/focus → 激活 app，
+   *  再延时一脚兜底（等收菜单的 setBounds 落定后重新确认），
+   *  否则菜单栏就停在别的应用名下，得关了球才恢复 */
+  const openAndActivate = async (focusFn) => {
+    try { if (ballWin && !ballWin.isDestroyed()) ballWin.blur(); } catch { /* 无所谓 */ }
+    await focusFn();
+    activateApp();
+    setTimeout(() => {
+      if (quitting) return;
+      activateApp();
+      try { if (ballWin && !ballWin.isDestroyed() && ballWin.isFocused()) ballWin.blur(); } catch { /* 同上 */ }
+    }, 220);
+  };
+
   ipcMain.handle('ball:open-host', () => {
     const t = ballTarget();
     if (t && t.kind === 'link') {
       const l = (t.id && links.get(t.id))
         || [...links.values()].find((x) => x.url.replace(/\/+$/, '') === t.base);
       if (l && l.win && !l.win.isDestroyed()) {
-        if (l.win.isMinimized()) l.win.restore();
-        l.win.show();
-        l.win.focus();
-        activateApp();   // 窗口本来就有焦点时 focus 事件不再发，这里必须显式补
+        openAndActivate(async () => {
+          if (l.win.isMinimized()) l.win.restore();
+          l.win.show();
+          l.win.focus();
+        });
         return { ok: true, opened: 'link' };
       }
       // 窗口真没了（重启过 / 被彻底关掉）：按球的记忆重新连那台 ——
       // 落到 openMyHost 会给人一张选择页或本机界面，跟球上显示的「连到 x.x.x」对不上
       const r = openLink(t.base);
-      if (r && r.ok) { activateApp(); return { ok: true, opened: 'link' }; }
+      if (r && r.ok) { openAndActivate(async () => {}); return { ok: true, opened: 'link' }; }
       // 地址连不上（对方下线/写坏了）才退回本机
     }
-    openMyHost();
-    activateApp();
+    openAndActivate(() => openMyHost());
     return { ok: true, opened: 'host' };
   });
   ipcMain.handle('ball:copy', (_e, text) => { clipboard.writeText(String(text || '')); return { ok: true }; });
