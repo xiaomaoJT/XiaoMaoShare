@@ -71,9 +71,11 @@
   }
 
   /* ---------------- 右键迷你球 ----------------
-     右键球，主进程把窗口朝左或朝右撑出去，这里在球旁边纵着一列摆三颗迷你球：
-     连接信息 / 打开主界面 / 关闭悬浮球。列的位置由主进程算好（ball:geometry / ball:menu
-     里的 menu.col），这里只负责把容器放上去 —— 项与项的间距交给 flex。 */
+     右键球，主进程把窗口以球心为圆心撑大一圈，这里把三个入口摆成纵向扇形：
+     右键菜单是**纵向扇形**：三个入口全部居中在球心竖轴上，从球往外依次是
+     连接信息胶囊 / 打开主界面 / 关闭悬浮球，各占一条水平带互不重叠。
+     点外面、Esc、执行完动作都会收回 —— 撑大的透明区域会挡住下面的窗口，
+     所以「点哪儿都收」不只是礼貌，是必须。 */
   #orbit {
     position: absolute; left: 0; top: 0; z-index: 15;
   }
@@ -421,33 +423,29 @@
 
   function showOrbit(r) {
     var box = r.box || 84;
-    var disc = r.size || 64;
     var b = r.ball || { left: 0, top: 0 };
-    var up = !(r.menu && r.menu.arcUp === false);   // 主进程说球贴近屏幕顶就往下翻
-    var W = (r.menu && r.menu.w) || (b.left * 2 + box); // 菜单态窗口边长（正方形）
+    var m = r.menu || {};
+    var W = m.w || (b.left * 2 + box);
+    var H = m.h || W;
     // #orbit 挂在 #ball 里，坐标是球内局部坐标 —— 把它铺满整个窗口，元素用窗口坐标摆
     orbit.style.left = Math.round(-b.left) + 'px';
     orbit.style.top = Math.round(-b.top) + 'px';
     orbit.style.width = W + 'px';
-    orbit.style.height = W + 'px';
+    orbit.style.height = H + 'px';
     updatePill();
-    // 扇形环绕：圆心 = 球心。胶囊挂正上/正下，两颗图标球挂左右斜角（±45° 方向）
-    var cx = b.left + box / 2, cy = b.top + box / 2;
-    var R = disc / 2 + 52;                          // 轨道半径：球边再留一手的距离
-    var dy = up ? -1 : 1;
-    var pill = $('btnBallInfo');
-    var halfPill = 97;                              // 胶囊最宽 190 的一半 + 余量
-    // 胶囊横向居中于球心，但球被挤到屏幕边时窗口会钳住球 —— 横坐标也得钳回窗口里
-    var pillCx = Math.min(Math.max(cx, halfPill), Math.max(halfPill, W - halfPill));
-    pill.style.left = Math.round(pillCx) + 'px';
-    pill.style.top = Math.round(cy + dy * R - 15) + 'px';
-    var minis = orbit.querySelectorAll('.mini:not(.pill)');
-    for (var i = 0; i < minis.length; i++) {
-      var sx = (i === 0) ? -0.72 : 0.72;            // 斜角方向，正中让给胶囊
-      var mx = Math.min(Math.max(cx + sx * R - 24, 2), Math.max(2, W - 50));
-      var my = Math.min(Math.max(cy + dy * 0.72 * R - 24, 2), Math.max(2, W - 50));
-      minis[i].style.left = Math.round(mx) + 'px';
-      minis[i].style.top = Math.round(my) + 'px';
+    // 纵向扇形：条目坐标全部由主进程算好下发（menu.items），这里只做摆位。
+    // 三条水平带互不重叠 —— 胶囊再宽也碰不到图标球。
+    if (m.items) {
+      var pill = $('btnBallInfo');
+      // pill.x 是胶囊中心横坐标（胶囊自带 translateX(-50%) 居中），host/off.x 是左上角；
+      // #orbit 整体偏移了 (-b.left,-b.top)，窗口坐标要减回去才是球内局部坐标
+      pill.style.left = Math.round(m.items.pill.x - b.left) + 'px';
+      pill.style.top = Math.round(m.items.pill.y - b.top) + 'px';
+      var minis = orbit.querySelectorAll('.mini:not(.pill)');  // DOM 顺序：打开主界面、关闭悬浮球
+      minis[0].style.left = Math.round(m.items.host.x - b.left) + 'px';
+      minis[0].style.top = Math.round(m.items.host.y - b.top) + 'px';
+      minis[1].style.left = Math.round(m.items.off.x - b.left) + 'px';
+      minis[1].style.top = Math.round(m.items.off.y - b.top) + 'px';
     }
     orbit.hidden = false;
     menuOpen = true;
@@ -475,7 +473,9 @@
   }, true);
 
   $('btnBallInfo').addEventListener('click', function () { closeMenu(); if (api.pickTarget) api.pickTarget(); });
-  $('btnBallHost').addEventListener('click', function () { closeMenu(); api.openHost(); });
+  // 「打开主界面」只藏视觉、不急着收菜单：收菜单的缩窗会跟窗口激活抢焦点，
+  // 把菜单栏搅回别的应用名下 —— 几何收回由主进程在激活落定后做（openAndActivate 里）。
+  $('btnBallHost').addEventListener('click', function () { hideOrbit(); menuOpen = false; api.openHost(); });
   $('btnBallOff').addEventListener('click', function () { api.hide(); });
 
   /* 球上 ⌘/Ctrl + 滚轮换大小：比翻菜单快。

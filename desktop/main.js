@@ -95,6 +95,7 @@ let ballBoxPx = 84;       // 当前球窗口边长 = 球体 + 一圈给阴影留
 let ballMenuOpen = false; // 右键菜单是否开着（开着时窗口朝菜单那一侧撑大）
 let ballMenuOff = null;   // 菜单开着时球在窗口内的偏移（球不再贴 0,0）
 let ballMenuArcUp = true; // 扇形朝上还是朝下（球贴近屏幕顶时往下翻）
+let ballMenuItems = null; // 菜单条目坐标（主进程算好下发，页面只摆位）
 
 /* ------------------------------------------------------------ 地址处理 */
 
@@ -2070,7 +2071,8 @@ function applyBallGeometry() {
   if (ballOpen && ballGeo) {
     payload = ballGeo.panelAndBall();
   } else if (ballMenuOpen && ballMenuOff) {
-    payload = { size: ballDiscPx, box: ballBoxPx, ball: ballMenuOff, panel: null, menu: { on: true, arcUp: ballMenuArcUp, w: ballWin.getBounds().width } };
+    const b = ballWin.getBounds();
+    payload = { size: ballDiscPx, box: ballBoxPx, ball: ballMenuOff, panel: null, menu: { on: true, arcUp: ballMenuArcUp, w: b.width, h: b.height, items: ballMenuItems } };
   } else {
     payload = { size: ballDiscPx, box: ballBoxPx, ball: { left: 0, top: 0 }, panel: null, menu: { on: false } };
   }
@@ -2098,6 +2100,7 @@ function createBallWindow() {
   ballMenuOpen = false;
   ballMenuOff = null;
   ballMenuArcUp = true;
+  ballMenuItems = null;
 
   ballWin = new BrowserWindow({
     x: pos.x, y: pos.y, width: ballBoxPx, height: ballBoxPx,
@@ -2151,6 +2154,7 @@ function destroyBallWindow() {
   ballMenuOpen = false;
   ballMenuOff = null;
   ballMenuArcUp = true;
+  ballMenuItems = null;
 }
 
 /** mac 上 setBounds / show 之后窗口层级偶尔会被系统重置（这仓库吃过亏），重要操作后补一遍 */
@@ -2162,24 +2166,45 @@ function hardenBallLevel() {
 }
 
 /**
- * 右键菜单布局：窗口以球心为圆心撑大一圈，三颗迷你球按**扇形**环绕球
- * （胶囊在正上/正下，两颗图标球挂左右斜角 —— 页面按 arcUp 摆）。
- * 球心不动，收回时才不会跳。球贴屏幕顶时扇形往下翻。
+ * 右键菜单布局：三个入口摆成**纵向扇形** —— 全部居中在球心的竖轴上，
+ * 从球往外依次是：连接信息胶囊（30 高）→ 打开主界面（48）→ 关闭悬浮球（48）。
+ * 每个条目各占一条水平带，纵向展开，横向零重叠：胶囊再宽也碰不到图标球。
+ * 球心不动，收回时才不会跳；球贴近屏幕顶时整条扇形往下翻。
+ * 条目坐标由主进程统一算好下发给页面（menu.items），页面只摆位不计算。
  */
-const BALL_MENU_R = 84;   // 扇形外扩半径（窗口边长 = 球窗 + 半径×2），给轨道和胶囊留位
+const BALL_MENU_W = 240;   // 菜单窗口宽：装下 190 的胶囊 + 两侧余量
 function ballMenuLayout() {
   const anchor = ballAnchor || clampBallPos(readBallPref().pos);
   const center = { x: Math.round(anchor.x + ballBoxPx / 2), y: Math.round(anchor.y + ballBoxPx / 2) };
   const area = screen.getDisplayNearestPoint(center).workArea;
-  const side = ballBoxPx + BALL_MENU_R * 2;
-  const x = Math.round(Math.min(Math.max(center.x - side / 2, area.x), area.x + area.width - side));
-  const y = Math.round(Math.min(Math.max(center.y - side / 2, area.y), area.y + area.height - side));
-  return {
-    bounds: { x, y, width: side, height: side },
-    off: { left: Math.round(center.x - ballBoxPx / 2) - x, top: Math.round(center.y - ballBoxPx / 2) - y },
-    // 胶囊挂在半径 disc/2+52 处、半高 15：球心离屏幕顶不足这个数就往下翻，别顶进菜单栏
-    arcUp: (center.y - area.y) >= ballDiscPx / 2 + 70,
-  };
+  const W = Math.max(BALL_MENU_W, ballBoxPx);
+  // 纵向扇形总高：顶边距8 + 关球48 + 间距10 + 打开界面48 + 间距10 + 胶囊30 + 球边距12
+  const stackH = 8 + 48 + 10 + 48 + 10 + 30 + 12;
+  const H = stackH + ballBoxPx;
+  const roomUp = center.y - area.y - ballBoxPx / 2;
+  const roomDown = area.y + area.height - center.y - ballBoxPx / 2;
+  const need = H - ballBoxPx;
+  const arcUp = roomUp >= need ? true : (roomDown >= need ? false : roomUp >= roomDown);
+  const x = Math.round(Math.min(Math.max(center.x - W / 2, area.x), area.x + area.width - W));
+  const y = Math.round(arcUp ? center.y - ballBoxPx / 2 - stackH : center.y - ballBoxPx / 2);
+  const off = { left: Math.round(center.x - ballBoxPx / 2) - x, top: Math.round(center.y - ballBoxPx / 2) - y };
+  // 条目坐标（窗口坐标系）。pill.x 是胶囊**中心**横坐标（页面用 translateX(-50%) 居中）；
+  // host/off.x 是 48 图标球的左上角横坐标。纵向从球往外：胶囊 → 打开界面 → 关球。
+  const cx = off.left + ballBoxPx / 2;
+  const pcx = Math.round(Math.min(Math.max(cx, 95), W - 95));
+  const mx = Math.round(cx - 24);
+  const items = arcUp
+    ? {
+        pill: { x: pcx, y: off.top - 42 },
+        host: { x: mx, y: off.top - 100 },
+        off: { x: mx, y: off.top - 158 },
+      }
+    : {
+        pill: { x: pcx, y: off.top + ballBoxPx + 12 },
+        host: { x: mx, y: off.top + ballBoxPx + 52 },
+        off: { x: mx, y: off.top + ballBoxPx + 110 },
+      };
+  return { bounds: { x, y, width: W, height: H }, off, arcUp, w: W, h: H, items };
 }
 
 /** 收回右键菜单：窗口缩回球大小，锚点按「当前窗口位置 + 球在窗口内的偏移」反推，球不跳 */
@@ -2189,6 +2214,7 @@ function closeBallMenu() {
   const off = ballMenuOff || { left: 0, top: 0 };
   ballMenuOff = null;
   ballMenuArcUp = true;
+  ballMenuItems = null;
   if (ballWin && !ballWin.isDestroyed()) {
     const [x, y] = ballWin.getPosition();
     ballAnchor = clampBallPos({ x: x + off.left, y: y + off.top });
@@ -2594,8 +2620,9 @@ function registerBallIpc() {
   });
 
   /**
-   * 右键迷你球菜单：窗口以球心为圆心撑大一圈，页面在球周围摆三颗迷你球
-   * （连接信息 / 打开主界面 / 关闭悬浮球）。点外面 / Esc / 执行完动作由页面调 on=false 收回。
+   * 右键迷你球菜单：窗口朝球心竖轴方向撑出一条纵向扇形，三个入口从球往外依次排开
+   * （连接信息胶囊 / 打开主界面 / 关闭悬浮球）。条目坐标由主进程算好（menu.items）。
+   * 点外面 / Esc / 执行完动作由页面调 on=false 收回。
    */
   ipcMain.handle('ball:menu', (_e, on) => {
     const collapsed = { size: ballDiscPx, box: ballBoxPx, ball: { left: 0, top: 0 }, panel: null, menu: { on: false } };
@@ -2606,10 +2633,11 @@ function registerBallIpc() {
     ballMenuOpen = true;
     ballMenuOff = lay.off;
     ballMenuArcUp = lay.arcUp;
+    ballMenuItems = lay.items;
     ballWin.setBounds(lay.bounds);
     hardenBallLevel();
     applyBallGeometry();
-    return { size: ballDiscPx, box: ballBoxPx, ball: lay.off, panel: null, menu: { on: true, arcUp: lay.arcUp, w: lay.bounds.width } };
+    return { size: ballDiscPx, box: ballBoxPx, ball: lay.off, panel: null, menu: { on: true, arcUp: lay.arcUp, w: lay.bounds.width, h: lay.bounds.height, items: lay.items } };
   });
 
   /** 迷你球「连接信息」：原生菜单念清楚当前发给谁、服务状态，顺手能换目标 */
@@ -2682,17 +2710,21 @@ function registerBallIpc() {
       指本机才开主机界面。永远蹦主机界面会跟球的标题打架。 */
   /** 点球本身会让球窗攥住焦点，收菜单的 setBounds 又会再抢一次 ——
    *  所以「把界面叫起来」要：先松开球窗 → show/focus → 激活 app，
-   *  再延时一脚兜底（等收菜单的 setBounds 落定后重新确认），
-   *  否则菜单栏就停在别的应用名下，得关了球才恢复 */
+   *  再延时兜底（等慢的窗口/导航落定后重新确认）。
+   *  收菜单的 setBounds 必须等激活落定之后才做（closeBallMenu 放在 220ms 那一脚里）：
+   *  菜单路径下缩窗发生在球窗还攥着焦点的时候，会把刚激活的状态搅回去，
+   *  菜单栏就停在别的应用名下，得关了球才恢复 —— 页面只藏视觉，几何由这里收回。 */
   const openAndActivate = async (focusFn) => {
     try { if (ballWin && !ballWin.isDestroyed()) ballWin.blur(); } catch { /* 无所谓 */ }
     await focusFn();
     activateApp();
-    setTimeout(() => {
+    const reconfirm = () => {
       if (quitting) return;
       activateApp();
       try { if (ballWin && !ballWin.isDestroyed() && ballWin.isFocused()) ballWin.blur(); } catch { /* 同上 */ }
-    }, 220);
+    };
+    setTimeout(() => { reconfirm(); closeBallMenu(); }, 220);
+    setTimeout(reconfirm, 600);   // 导航慢的窗口（openLink 重连）show 得晚，再补一脚
   };
 
   ipcMain.handle('ball:open-host', () => {
