@@ -5980,9 +5980,18 @@
   }
 
   /* ============================================================ 收到消息的系统通知
-     桌面里主进程已放行通知权限（客户端连别人主机、窗口没挂 preload 也一样能用），
-     浏览器里等用户点一下页面再申请。只提醒「别人发来的、且当前不在前台」的新消息。 */
+     桌面里优先交给主进程弹（Electron 的 Notification 会正常走 macOS 授权、点击能
+     把窗口拉回来）；页面内的 HTML5 Notification 只在浏览器/老桌面壳里当兜底 ——
+     那条路在 mac 上会被权限处理器短路，构造不报错但系统静默丢弃。
+     只提醒「别人发来的、且当前不在前台」的新消息。 */
   var seenItemIds = null;   // null = 还没跑过第一轮：第一轮只登记不弹，免得一进来刷屏
+  var pendingNotice = null; // 浏览器里权限还没批下来的那条，批下来再补
+  /** 桌面壳的通知通道：连接窗口给 xmNotice（只管通知），主窗口在 xmDesktop 上 */
+  function noticeBridge() {
+    if (window.xmNotice && typeof window.xmNotice.notifyIncoming === 'function') return window.xmNotice;
+    if (window.xmDesktop && typeof window.xmDesktop.notifyIncoming === 'function') return window.xmDesktop;
+    return null;
+  }
   function noticeIncoming(items) {
     items = items || [];
     var isFirst = seenItemIds === null;
@@ -6002,7 +6011,6 @@
   }
   function showIncomingNotice(items) {
     try {
-      if (!window.Notification || Notification.permission !== 'granted') return;
       var first = items[0];
       var title = 'XiaoMao 互传 · ' + (first.from || '有人');
       var body;
@@ -6015,16 +6023,33 @@
         var nm = ps[0] && ps[0].name;
         body = ps.length > 1 ? '发来 ' + ps.length + ' 个文件' : ('发来文件' + (nm ? '：' + nm : ''));
       }
+      var bridge = noticeBridge();
+      if (bridge) {
+        try { bridge.notifyIncoming({ title: title, body: body }); return; } catch (e) { /* 退回下面 */ }
+      }
+      if (!window.Notification) return;
+      if (Notification.permission === 'default') { pendingNotice = { title: title, body: body }; return; }
+      if (Notification.permission !== 'granted') return;
       var n = new Notification(title, { body: body, tag: 'xm-incoming' });
       n.onclick = function () { try { window.focus(); } catch (e) {} n.close(); };
     } catch (e) { /* 系统通知不可用就算了，别为一句提示打断接收 */ }
   }
+  function flushPendingNotice() {
+    if (!pendingNotice) return;
+    if (!window.Notification || Notification.permission !== 'granted') return;
+    var p = pendingNotice;
+    pendingNotice = null;
+    try { new Notification(p.title, { body: p.body, tag: 'xm-incoming' }); } catch (e) {}
+  }
   function ensureNotifyPermission() {
     try {
-      if (window.Notification && Notification.permission === 'default') Notification.requestPermission();
+      if (noticeBridge()) return;   // 桌面走主进程，不需要页面申请
+      if (window.Notification && Notification.permission === 'default') {
+        Promise.resolve(Notification.requestPermission()).then(flushPendingNotice, function () {});
+      }
     } catch (e) {}
   }
-  if (window.xmDesktop) ensureNotifyPermission();                                   // 桌面：主进程静默放行
+  if (noticeBridge()) ensureNotifyPermission();                                     // 桌面：主进程自己弹
   else window.addEventListener('pointerdown', ensureNotifyPermission, { once: true }); // 浏览器：等一次点击再问
 
   function poll(force) {

@@ -429,6 +429,10 @@ function openLink(rawUrl) {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,          // 对方页面是完全外部的内容，能收紧就收紧
+      // 只挂「上报通知」这一条通道：页面能喊主进程弹通知，但拿不到任何别的能力。
+      // 不挂这个的话，收到消息就只能退回页面里的 HTML5 通知 —— 而那条路在 macOS
+      // 上是被权限短路掉的（构造不报错，系统侧静默丢弃）
+      preload: path.join(__dirname, 'notice-preload.js'),
       spellcheck: false,
     },
   });
@@ -637,6 +641,34 @@ ipcMain.handle('start:dataDir', () => { openDataDirGuide(); return { ok: true };
 ipcMain.handle('start:forget', () => setStartMode('ask'));
 
 ipcMain.handle('link:connect', (_e, url) => openLink(url));
+
+// 「收到消息」：页面判断完要不要提醒，把标题/正文交过来，这里弹真正的系统通知
+ipcMain.handle('notice:incoming', (e, payload) => {
+  const win = BrowserWindow.fromWebContents(e.sender);
+  return notifyIncoming(payload, win);
+});
+// 自检入口（菜单 / 托盘里点一下）：通不通一眼就知道，不用等别人真发一条
+ipcMain.handle('notice:test', () => notifyIncoming({
+  title: 'XiaoMao 互传 · 通知自检',
+  body: '看到这条就说明系统通知是通的；别人发来内容时会这样提醒你。',
+}, hostWin));
+
+/**
+ * 诊断用：系统通知中心里现在到底有没有我们投递出去的东西。
+ * macOS 上未签名的构建永远返回空数组 —— 这是判断「到底有没有真投递」的硬证据。
+ */
+ipcMain.handle('notice:history', async () => {
+  try {
+    if (typeof Notification.getHistory !== 'function') return { error: '当前 Electron 没有这个接口' };
+    const list = await Notification.getHistory();
+    return {
+      count: list.length,
+      items: list.slice(0, 5).map((n) => ({ title: n.title, body: n.body })),
+    };
+  } catch (e) {
+    return { error: String((e && e.message) || e) };
+  }
+});
 
 ipcMain.handle('link:close', (_e, id) => {
   const l = links.get(id);
@@ -856,6 +888,24 @@ function buildMenu() {
         {
           label: '检查更新…',
           click: () => checkForUpdatesManually(),
+        },
+        {
+          // 通知到底通不通，点一下就知道了 —— 不用等别人真发条消息来试
+          label: '测试系统通知',
+          click: () => {
+            notifyIncoming({
+              title: 'XiaoMao 互传 · 通知自检',
+              body: '看到这条就说明系统通知是通的；别人发来内容时会这样提醒你。',
+            }, hostWin).then((r) => {
+              if (!r || !r.error) return;
+              dialog.showMessageBox({
+                type: 'warning',
+                message: '这条通知发不出去',
+                detail: `原因：${r.error}\n\n到「系统设置 → 通知」里找一下 XiaoMao 互传，确认允许通知。`,
+                buttons: ['好'],
+              }).catch(() => {});
+            });
+          },
         },
         {
           label: '自动下载更新',
@@ -1902,6 +1952,25 @@ function trayTemplate(inf) {
         { label: '大', type: 'radio', checked: readBallPref().size === 'lg', click: () => setBallSize('lg') },
       ],
     },
+    {
+      // 通不通不用等人真发一条消息来试：点一下就该看到一条系统通知。
+      // 弹不出来得说清楚原因，不然用户只会以为「又没反应」
+      label: '测试系统通知',
+      click: () => {
+        notifyIncoming({
+          title: 'XiaoMao 互传 · 通知自检',
+          body: '看到这条就说明系统通知是通的；别人发来内容时会这样提醒你。',
+        }, hostWin).then((r) => {
+          if (!r || !r.error) return;
+          dialog.showMessageBox({
+            type: 'warning',
+            message: '这条通知发不出去',
+            detail: `原因：${r.error}\n\n到「系统设置 → 通知」里找一下 XiaoMao 互传，确认允许通知。`,
+            buttons: ['好'],
+          }).catch(() => {});
+        });
+      },
+    },
     { type: 'separator' },
     { label: '退出', click: () => app.quit() },
   ];
@@ -1980,6 +2049,56 @@ function notifyTrayParked() {
       }).show();
     }
   } catch { /* 系统通知不可用就算了，别为一句提示把关闭流程弄崩 */ }
+}
+
+/* ============================================================ 收到消息的系统通知
+   页面只负责判断「该不该提醒」（是不是别人发来的、窗口在不在前台），
+   真正的「弹」交给主进程。
+
+   为什么不用页面里的 HTML5 Notification：主进程给会话放行权限时是直接返回
+   granted 的，Chromium 于是以为有权限，**绕过了 macOS 的授权流程** —— 系统那边
+   从没登记过这个 app，构造不报错、通知被静默丢弃（`com.apple.ncprefs` 里查不到
+   任何记录）。Electron 的 Notification 走的是系统通知框架，会正常走授权，
+   点一下还能把窗口拉回来。
+*/
+
+/**
+ * @param {{title?:string, body?:string}} [payload]
+ * @param {import('electron').BrowserWindow} [source] 点通知时要叫起来的窗口
+ * @returns {{ok:true} | {error:string}}
+ */
+function notifyIncoming(payload, source) {
+  const title = String((payload && payload.title) || 'XiaoMao 互传').slice(0, 120);
+  const body = String((payload && payload.body) || '').slice(0, 240);
+  if (!Notification.isSupported()) return Promise.resolve({ error: '这台系统不支持桌面通知' });
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (r) => { if (!settled) { settled = true; resolve(r); } };
+    try {
+      const n = new Notification({ title, body });
+      n.on('click', () => {
+        const target = (source && !source.isDestroyed()) ? source
+          : (hostWin && !hostWin.isDestroyed()) ? hostWin
+            : null;
+        if (!target) return;
+        try { if (target.isMinimized()) target.restore(); } catch { /* 无所谓 */ }
+        try { target.show(); } catch { /* 同上 */ }
+        activateApp();
+        try { target.focus(); } catch { /* 同上 */ }
+      });
+      // macOS 的通知走 UNNotification，**要求应用已代码签名**才有投递资格；
+      // 没签名时它会在这里报失败，而不是静默消失 —— 把原因带回去，别让人瞎猜
+      n.on('failed', (_evt, err) => done({
+        error: String(err || '系统拒绝了这条通知 —— macOS 要求应用已签名'),
+      }));
+      n.on('show', () => done({ ok: true }));
+      n.show();
+      // 没报失败就当发出去了（部分平台不发 show 事件）
+      setTimeout(() => done({ ok: true }), 900);
+    } catch (e) {
+      done({ error: String((e && e.message) || e) });
+    }
+  });
 }
 
 /**

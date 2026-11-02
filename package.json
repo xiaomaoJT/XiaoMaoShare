@@ -1,6 +1,6 @@
 {
   "name": "xiaomao-share",
-  "version": "2.4.0",
+  "version": "2.4.1",
   "private": true,
   "description": "XiaoMao 互传 —— 局域网内文字 / 图片 / 文件互传，零依赖",
   "author": "XiaoMaoShare <895250757@qq.com>",
@@ -42,15 +42,22 @@
       "desktop/**",
       "package.json"
     ],
-    "mac": {
-      "target": [
-        "dmg",
-        "zip"
-      ],
-      "category": "public.app-category.utilities",
-      "icon": "build/icon-mac.png",
-      "identity": null
-    },
+  "mac": {
+    "target": [
+      "dmg",
+      "zip"
+    ],
+    "category": "public.app-category.utilities",
+    "icon": "build/icon-mac.png",
+    "identity": "-",
+    "hardenedRuntime": true,
+    "gatekeeperAssess": false,
+    "entitlements": "build/entitlements.mac.plist",
+    "entitlementsInherit": "build/entitlements.mac.inherit.plist",
+    "extendInfo": {
+      "NSUserNotificationAlertStyle": "alert"
+    }
+  },
     "win": {
       "target": [
         "nsis",

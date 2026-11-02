@@ -70,6 +70,16 @@ contextBridge.exposeInMainWorld('xmDesktop', {
   /** 复制到系统剪贴板（页面在 http 下也能用 navigator.clipboard，但桌面里更稳） */
   copy: (text) => ipcRenderer.invoke('host:copy', text),
 
+  /**
+   * 收到消息时弹系统通知。
+   * 页面自己判断「该不该提醒」，这里只负责交给主进程去弹 —— 页面里的 HTML5
+   * Notification 在 macOS 上会被权限处理器短路（构造不报错、系统静默丢弃）。
+   */
+  notifyIncoming: (payload) => ipcRenderer.invoke('notice:incoming', payload),
+
+  /** 诊断：系统通知中心里有没有我们投递的记录（空 = 没真投递出去） */
+  noticeHistory: () => ipcRenderer.invoke('notice:history'),
+
   /** 复制图片到系统剪贴板：传 PNG 的 dataURL，聊天软件里直接粘贴（浏览器 http 下没有剪贴板 API，桌面独占） */
   copyImage: (dataUrl) => ipcRenderer.invoke('host:copyImage', dataUrl),
 
