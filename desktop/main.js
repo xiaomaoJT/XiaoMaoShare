@@ -3261,10 +3261,12 @@ function ensureWinShortcut() {
       try {
         const cur = shell.readShortcutLink(lnk);
         if (cur && cur.appUserModelId === WIN_APP_ID) return;  // 安装版装好的，别动它
+        // AUMID 对不上：'update' 未必改得动这个字段，删了重建更干脆
+        fs.unlinkSync(lnk);
       } catch { /* 读不出来就按下面重建 */ }
     }
     fs.mkdirSync(path.dirname(lnk), { recursive: true });
-    shell.writeShortcutLink(lnk, fs.existsSync(lnk) ? 'update' : 'create', {
+    shell.writeShortcutLink(lnk, 'create', {
       target: process.execPath,
       appUserModelId: WIN_APP_ID,
       description: 'XiaoMao 互传',
