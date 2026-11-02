@@ -12,7 +12,7 @@
  * 关掉界面不影响手机连进来。
  */
 
-const { app, BrowserWindow, ipcMain, Menu, Tray, shell, clipboard, dialog, nativeImage, screen, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, Tray, shell, clipboard, dialog, nativeImage, screen, session, Notification } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const { Readable } = require('node:stream');
@@ -3012,6 +3012,14 @@ if (!app.requestSingleInstanceLock()) {
     // 起来第一件事就是确认自己是「常规应用」：悬浮球的窗口层级调用会把 App 打成
     // accessory（无菜单栏），一旦被打进去，后面 show 多少窗口菜单栏都不会跟随
     ensureRegularApp();
+
+    // 「收到消息」要弹系统通知：页面用的是 HTML5 Notification，
+    // 这里只放行 notifications，其余一律收紧（连接窗口加载的是别人的内容）
+    try {
+      const ses = session.defaultSession;
+      ses.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === 'notifications'));
+      ses.setPermissionCheckHandler((_wc, permission) => permission === 'notifications');
+    } catch { /* 老版本 Electron 没这两个 API 就算了，页面里也有兜底 */ }
 
     buildMenu();          // 菜单先挂上，别让窗口出来时顶栏是空的
     buildTray();          // 托盘尽早建：关闭按钮的三种结局都依赖它在不在

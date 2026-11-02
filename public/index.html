@@ -5979,6 +5979,54 @@
     netFail = 0;
   }
 
+  /* ============================================================ 收到消息的系统通知
+     桌面里主进程已放行通知权限（客户端连别人主机、窗口没挂 preload 也一样能用），
+     浏览器里等用户点一下页面再申请。只提醒「别人发来的、且当前不在前台」的新消息。 */
+  var seenItemIds = null;   // null = 还没跑过第一轮：第一轮只登记不弹，免得一进来刷屏
+  function noticeIncoming(items) {
+    items = items || [];
+    var isFirst = seenItemIds === null;
+    if (isFirst) seenItemIds = new Set();
+    var fresh = [];
+    items.forEach(function (it) {
+      if (!it || !it.id || seenItemIds.has(it.id)) return;
+      seenItemIds.add(it.id);
+      if (!isFirst) fresh.push(it);
+    });
+    if (!fresh.length) return;
+    // 自己发的不打扰；窗口正看着的也不打扰
+    var fromOthers = fresh.filter(function (it) { return it.owner && it.owner !== state.cid; });
+    if (!fromOthers.length) return;
+    if (!document.hidden && document.hasFocus()) return;
+    showIncomingNotice(fromOthers);
+  }
+  function showIncomingNotice(items) {
+    try {
+      if (!window.Notification || Notification.permission !== 'granted') return;
+      var first = items[0];
+      var title = 'XiaoMao 互传 · ' + (first.from || '有人');
+      var body;
+      if (items.length > 1) {
+        body = items.length + ' 条新消息';
+      } else if (first.kind === 'text') {
+        body = String(first.text || '').slice(0, 120) || '发来一条消息';
+      } else {
+        var ps = first.parts || [];
+        var nm = ps[0] && ps[0].name;
+        body = ps.length > 1 ? '发来 ' + ps.length + ' 个文件' : ('发来文件' + (nm ? '：' + nm : ''));
+      }
+      var n = new Notification(title, { body: body, tag: 'xm-incoming' });
+      n.onclick = function () { try { window.focus(); } catch (e) {} n.close(); };
+    } catch (e) { /* 系统通知不可用就算了，别为一句提示打断接收 */ }
+  }
+  function ensureNotifyPermission() {
+    try {
+      if (window.Notification && Notification.permission === 'default') Notification.requestPermission();
+    } catch (e) {}
+  }
+  if (window.xmDesktop) ensureNotifyPermission();                                   // 桌面：主进程静默放行
+  else window.addEventListener('pointerdown', ensureNotifyPermission, { once: true }); // 浏览器：等一次点击再问
+
   function poll(force) {
     var url = '/api/list' + (state.cid ? '?cid=' + encodeURIComponent(state.cid) : '');
     fetch(url, { cache: 'no-store' }).then(function (r) {
@@ -6007,6 +6055,7 @@
       if (active && pollMs !== 800) { pollMs = 800; startPolling(); }
       else if (!active && pollMs === 800) { pollMs = 1500; startPolling(); }
       allItems = d.items || [];
+      noticeIncoming(allItems);
       var sig = allItems.map(function (x) { return x.id; }).join(',');
       if (!force && sig === lastSig) { detectEdits(); detectNotes(); tickTimes(); return; }
       lastSig = sig;
@@ -6389,21 +6438,25 @@
     return row;
   }
 
+  /* 大文件分片：8MB 一片。断一片只重发这一片，进度只增不减，不再整包归零 */
+  var UPLOAD_CHUNK = 8 * 1024 * 1024;
+
   function startUpload(b) {
     b.done = new Promise(function (resolve) {
-      var xhr = new XMLHttpRequest();
-      xhr.open('POST', '/api/upload?name=' + encodeURIComponent(b.name) +
-        '&type=' + encodeURIComponent((b.file && b.file.type) || '') +
-        '&cid=' + encodeURIComponent(state.cid));
+      var total = b.size || (b.file && b.file.size) || 0;
 
       b.refs.bar.hidden = false;
-      b.refs.sz.textContent = '0% · ' + fmtSize(b.size);
+      b.refs.sz.textContent = '0% · ' + fmtSize(total);
 
-      xhr.upload.onprogress = function (e) {
-        if (!e.lengthComputable) return;
-        b.refs.fill.style.width = Math.round((e.loaded / e.total) * 100) + '%';
-        b.refs.sz.textContent = Math.round((e.loaded / e.total) * 100) + '% · ' + fmtSize(e.total);
-      };
+      // 记下已显示过的最大百分比：重试只可能往回退一点点，绝不许归零
+      var shownPct = 0;
+      function setPct(doneBytes) {
+        var pct = total ? Math.min(100, Math.round((doneBytes / total) * 100)) : 0;
+        if (pct < shownPct) pct = shownPct;
+        shownPct = pct;
+        b.refs.fill.style.width = pct + '%';
+        b.refs.sz.textContent = pct + '% · ' + fmtSize(total);
+      }
 
       function fail(msg) {
         b.error = msg;
@@ -6414,21 +6467,86 @@
         resolve(b);
       }
 
-      xhr.onload = function () {
-        var d = {};
-        try { d = JSON.parse(xhr.responseText); } catch (e) {}
-        if (xhr.status === 200 && d.part) {
-          b.fid = d.part.fid;
-          b.refs.bar.hidden = true;
-          b.refs.sz.textContent = fmtSize(b.size);
-          syncSend();
-          resolve(b);
-        } else {
-          fail(d.error || '上传失败');
+      function finishWith(part) {
+        b.fid = part.fid;
+        b.refs.bar.hidden = true;
+        b.refs.sz.textContent = fmtSize(b.size);
+        syncSend();
+        resolve(b);
+      }
+
+      // 只有「大文件 + 服务端支持分片」才切片；否则一律整包（与旧版完全一致，兼容老主机）
+      var useChunk = total > UPLOAD_CHUNK &&
+        b.file && typeof b.file.slice === 'function' &&
+        !!(state.caps && state.caps.chunked);
+
+      if (!useChunk) {
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/upload?name=' + encodeURIComponent(b.name) +
+          '&type=' + encodeURIComponent((b.file && b.file.type) || '') +
+          '&cid=' + encodeURIComponent(state.cid));
+        xhr.upload.onprogress = function (e) {
+          if (!e.lengthComputable) return;
+          setPct(e.loaded);
+        };
+        xhr.onload = function () {
+          var d = {};
+          try { d = JSON.parse(xhr.responseText); } catch (e) {}
+          if (xhr.status === 200 && d.part) finishWith(d.part);
+          else fail(d.error || '上传失败');
+        };
+        xhr.onerror = function () { fail('上传失败'); };
+        xhr.send(b.file);
+        return;
+      }
+
+      // 大文件：同一个 uid 逐片发，最后一片带 final=1；断片只重发这一片
+      var uid = 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+
+      function postChunk(offset, blob, isLast, left) {
+        return new Promise(function (res, rej) {
+          var xhr = new XMLHttpRequest();
+          xhr.open('POST', '/api/upload?name=' + encodeURIComponent(b.name) +
+            '&type=' + encodeURIComponent((b.file && b.file.type) || '') +
+            '&cid=' + encodeURIComponent(state.cid) +
+            '&uid=' + encodeURIComponent(uid) +
+            '&offset=' + offset + '&total=' + total + (isLast ? '&final=1' : ''));
+          xhr.upload.onprogress = function (e) {
+            if (!e.lengthComputable) return;
+            setPct(offset + e.loaded);   // 全局进度 = 已完成字节 + 本片已发字节
+          };
+          xhr.onload = function () {
+            var d = {};
+            try { d = JSON.parse(xhr.responseText); } catch (e) {}
+            if (xhr.status === 200 && (d.part || d.final === false)) res(d);
+            else rej(new Error(d.error || '上传失败'));
+          };
+          xhr.onerror = function () { rej(new Error('网络中断')); };
+          xhr.onabort = function () { rej(new Error('上传中断')); };
+          xhr.send(blob);
+        }).catch(function (err) {
+          if (left <= 0) throw err;
+          // 等一会儿再发同一片：进度停在 offset，不归零
+          return new Promise(function (r) { setTimeout(r, 350 * (4 - left)); })
+            .then(function () { return postChunk(offset, blob, isLast, left - 1); });
+        });
+      }
+
+      (async function () {
+        try {
+          var part = null;
+          for (var off = 0; off < total; off += UPLOAD_CHUNK) {
+            var end = Math.min(off + UPLOAD_CHUNK, total);
+            var d = await postChunk(off, b.file.slice(off, end), end >= total, 3);
+            if (d && d.part) part = d.part;
+            setPct(end);
+          }
+          if (!part) { fail('上传失败'); return; }
+          finishWith(part);
+        } catch (err) {
+          fail((err && err.message) || '上传失败');
         }
-      };
-      xhr.onerror = function () { fail('上传失败'); };
-      xhr.send(b.file);
+      })();
     });
   }
 

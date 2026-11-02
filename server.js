@@ -192,6 +192,21 @@ function findDuplicate(hash, size) {
 }
 
 /**
+ * 读完整个文件算 sha256。
+ * 整包上传能在流里顺手算；分片上传跨了多个请求，续不上流式的 hash 状态，
+ * 只能等最后一片落盘后把文件读一遍 —— 217MB 在 SSD 上也就百来毫秒。
+ */
+function sha256File(filePath) {
+  return new Promise((resolve, reject) => {
+    const h = crypto.createHash('sha256');
+    const rs = fs.createReadStream(filePath, { highWaterMark: 256 * 1024 });
+    rs.on('data', (c) => h.update(c));
+    rs.on('error', reject);
+    rs.on('end', () => resolve(h.digest('hex')));
+  });
+}
+
+/**
  * 暂存区：先上传拿 fid，再调 /api/send 一次性组成一条消息。
  * 这样多文件能合并发送，且上传过程依旧是流式落盘，不占内存。
  */
@@ -205,7 +220,13 @@ const uploads = new Map(); // id -> { id, name, size, got, at }
 
 function uploadsPayload() {
   const now = Date.now();
-  for (const [id, u] of uploads) if (now - u.at > 10 * 60e3) uploads.delete(id); // 兜底：卡死的传输别常驻
+  for (const [id, u] of uploads) {
+    if (now - u.at > 10 * 60e3) {
+      // 兜底：卡死的传输别常驻；分片传到一半就没影的，半截文件也一起清掉
+      uploads.delete(id);
+      if (u.file) fs.unlink(path.join(FILES_DIR, u.file), () => {});
+    }
+  }
   return [...uploads.values()].map((u) => ({ id: u.id, name: u.name, size: u.size, got: u.got, at: u.at }));
 }
 
@@ -904,6 +925,9 @@ function capsPayload(req, cid) {
     priv: host || !!rc.priv,
     moderate: host || !!rc.moderate,
     devices: host || !!rc.devices,
+    // 服务端支持「大文件分片 + 断点续传」：客户端据此决定切不切片，
+    // 老主机没这个位就自动退回整包上传，避免把每片当成一个独立文件
+    chunked: true,
     role,
   };
 }
@@ -2965,54 +2989,100 @@ const server = http.createServer((req, res) => {
 
     const owner = touchClient(req, url.searchParams.get('cid'), '');
 
-    const id = newId();
+    /*
+     * 分片上传（大文件抗断）：
+     *   客户端把一个文件切片，带同一个 uid 逐片 POST：
+     *   offset = 本片起始字节，total = 整个文件大小，最后一片带 final=1。
+     *   任何一片失败，只要用同样的 uid/offset 重传就好 —— 已落盘的字节不丢，
+     *   进度（uploads.got）只增不减，不会再出现「走一半归零」。
+     *   不带 uid 的请求走原来的整包路径，行为与旧版完全一致（老客户端不受影响）。
+     */
+    const uid = String(url.searchParams.get('uid') || '').replace(/[^\w-]/g, '').slice(0, 64);
+    const chunked = !!uid;
+    const offset = chunked ? Math.max(0, Math.floor(Number(url.searchParams.get('offset') || 0) || 0)) : 0;
+    const finalChunk = chunked && url.searchParams.get('final') === '1';
+    const contentLen = Number(req.headers['content-length']) || 0;
+    // total 是进度条的分母：分片用客户端声明的文件总大小，整包用 Content-Length
+    const total = chunked
+      ? (Math.max(0, Math.floor(Number(url.searchParams.get('total') || 0) || 0)) || offset + contentLen)
+      : contentLen;
+
+    const id = chunked ? uid : newId();
     const ext = path.extname(name).slice(0, 12).replace(/[^\w.]/g, '');
     const stored = id + ext;
-    const ws = fs.createWriteStream(path.join(FILES_DIR, stored));
+    const filePath = path.join(FILES_DIR, stored);
 
-    // Content-Length 是发送方报的总量，有它才能算百分比；拿不到就只报已收字节
-    const total = Number(req.headers['content-length']) || 0;
-    uploads.set(id, { id, name, size: total, got: 0, at: Date.now() });
+    uploads.set(id, { id, name, size: total, got: offset, file: stored, at: Date.now() });
 
-    let size = 0;
-    let aborted = false;
+    let got = offset;          // 这个文件截至目前真正落盘的字节数
     let done = false;
-    // 边写边算指纹：写完就知道这份内容是不是已经存过一份了
+    let ws = null;
+    // 整包边写边算指纹；分片跨请求续不上 hash 状态，等最后一片读完再算
     const hash = crypto.createHash('sha256');
 
     const fail = (code, msg) => {
       if (done) return;
       done = true;
-      aborted = true;
       uploads.delete(id);
-      try { ws.destroy(); } catch {}
-      fs.unlink(path.join(FILES_DIR, stored), () => {});
+      try { if (ws) ws.destroy(); } catch {}
+      if (!chunked) fs.unlink(filePath, () => {});   // 分片保留已写字节，等续传
       json(res, code, { error: msg });
     };
 
+    // 写入流：分片从 offset 处覆盖写；首片 / 整包从头写（w）
+    if (chunked && offset > 0) {
+      if (!fs.existsSync(filePath)) { uploads.delete(id); return json(res, 409, { error: '断点已失效，请重新发送' }); }
+      ws = fs.createWriteStream(filePath, { flags: 'r+', start: offset });
+    } else {
+      ws = fs.createWriteStream(filePath, { flags: 'w' });
+    }
+
     req.on('data', (chunk) => {
-      size += chunk.length;
-      if (size > MAX_FILE) fail(413, '文件过大');
-      hash.update(chunk);
+      got += chunk.length;
+      if (got > MAX_FILE) return fail(413, '文件过大');
+      if (!chunked) hash.update(chunk);
       const u = uploads.get(id);
-      if (u) { u.got = size; u.at = Date.now(); }
+      if (u) { u.got = got; u.at = Date.now(); }
     });
 
-    req.on('aborted', () => fail(499, '已取消'));
+    // 分片中断不清理：留着让客户端用同一 uid/offset 续传；整包中断才作废
+    req.on('aborted', () => { if (!chunked) fail(499, '已取消'); });
     ws.on('error', () => fail(500, '写入失败'));
 
-    ws.on('finish', () => {
+    ws.on('finish', async () => {
       if (done) return;
+
+      // 还没到最后一片：只回报「已收到多少」，文件留盘等下一片
+      if (chunked && !finalChunk) {
+        done = true;
+        const u = uploads.get(id);
+        if (u) { u.got = got; u.at = Date.now(); }
+        return json(res, 200, { ok: true, got, total, final: false });
+      }
+      if (!got) {
+        done = true;
+        uploads.delete(id);
+        try { fs.unlink(filePath, () => {}); } catch {}
+        return json(res, 400, { error: '空文件' });
+      }
+
+      // 指纹：分片要读回整文件，整包用流里顺手算的
+      let digest;
+      if (chunked) {
+        try { digest = await sha256File(filePath); }
+        catch { fail(500, '校验失败'); return; }
+        if (done) return;
+      } else {
+        digest = hash.digest('hex');
+      }
       done = true;
       uploads.delete(id);
-      if (!size) return fail(400, '空文件');
 
-      const digest = hash.digest('hex');
       let stored_ = stored;
-      const dup = findDuplicate(digest, size);
+      const dup = findDuplicate(digest, got);
       if (dup) {
         // 内容磁盘上已经有了，刚写的这份直接丢掉，指向原来那份
-        fs.unlink(path.join(FILES_DIR, stored), () => {});
+        fs.unlink(filePath, () => {});
         stored_ = dup;
       }
 
@@ -3020,7 +3090,7 @@ const server = http.createServer((req, res) => {
         kind: isImage ? 'image' : 'file',
         fid: id,
         name,
-        size,
+        size: got,
         mime: mimeOf(name, declaredType),
         file: stored_,
         hash: digest,
