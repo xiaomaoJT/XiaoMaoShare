@@ -2073,6 +2073,8 @@
   html.desktop-mac .top-in{padding-left:82px}
   /* Windows 无边框：红绿灯 + ⋯ 独占最上面一条标题栏行，header 从它下面开始 */
   html.desktop-win .top{top:34px}
+  /* 吸顶输入条也一样：34px 标题栏 + 59px header，不然滚动吸顶时上半截钻进 header 底下 */
+  html.desktop-win .composer-bar{top:93px}
 
   /* 自绘标题栏行：跟 header 同底色/同毛玻璃，视觉上连成一体；
      z-index 盖过所有弹层 —— 弹窗全开着也点得到（mac 红绿灯同款行为） */
