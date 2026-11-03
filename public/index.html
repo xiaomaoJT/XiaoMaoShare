@@ -51,6 +51,9 @@
     --shadow:0 1px 2px rgba(16,24,40,.04), 0 10px 28px -14px rgba(16,24,40,.22);
     --shadow-sm:0 1px 2px rgba(16,24,40,.05);
     --glass:0px;
+    /* 滚动条：细、圆、低调；静止不动 0.9 秒后自动隐去（.scrolling 由脚本挂） */
+    --sb-thumb:rgba(16,24,40,.24);
+    --sb-thumb-hover:rgba(16,24,40,.42);
     /* --tfs：正文字号倍率，外观设置里可调（0.92 / 1 / 1.12 / 1.26） */
     --tfs:1;
   }
@@ -66,6 +69,8 @@
     --shadow:0 1px 2px rgba(0,0,0,.35), 0 10px 28px -14px rgba(0,0,0,.7);
     --shadow-sm:0 1px 2px rgba(0,0,0,.3);
     --glass:0px;
+    --sb-thumb:rgba(255,255,255,.20);
+    --sb-thumb-hover:rgba(255,255,255,.36);
   }
   :root[data-theme="glass"]{
     --bg:#e9eefa;
@@ -83,6 +88,8 @@
     --shadow:0 10px 40px -14px rgba(28,42,74,.36);
     --shadow-sm:0 4px 16px -8px rgba(28,42,74,.26);
     --glass:20px;
+    --sb-thumb:rgba(28,42,74,.26);
+    --sb-thumb-hover:rgba(28,42,74,.44);
   }
   /* 不支持 backdrop-filter 的浏览器（老 WebView / 部分安卓内置浏览器）直接给实色，
      否则会退化成「半透明白底 + 无模糊」，字全糊在一块。 */
@@ -95,9 +102,22 @@
   }
 
   html,body{margin:0;padding:0}
+  /* ---------------- 滚动条：细、圆、随主题，静止 0.9s 后自动隐去 ----------------
+     用 3px 透明边框把滑块「挤细」，两侧留出空气；静止时只把颜色变透明，
+     位置和通道都还在，不会因为消失/出现让内容左右跳一下 */
+  html::-webkit-scrollbar{width:11px;height:11px}
+  html::-webkit-scrollbar-track{background:transparent}
+  html::-webkit-scrollbar-thumb{
+    background-color:var(--sb-thumb);
+    border:3px solid transparent; background-clip:content-box; border-radius:999px;
+    transition:background-color .22s ease;
+  }
+  html::-webkit-scrollbar-thumb:hover,
+  html::-webkit-scrollbar-thumb:active{background-color:var(--sb-thumb-hover)}
+  html:not(.scrolling)::-webkit-scrollbar-thumb{background-color:transparent}
+  html::-webkit-scrollbar-corner{background:transparent}
   body{
-    min-height:100vh; display:flex; flex-direction:column; overflow-x:hidden;
-    color:var(--text); background-color:var(--bg); background-image:var(--bg-image);
+    min-height:100vh; display:flex; flex-direction:column; overflow-x:hidden;    color:var(--text); background-color:var(--bg); background-image:var(--bg-image);
     background-attachment:fixed; background-repeat:no-repeat;
     font:15px/1.55 -apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;
     -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
@@ -255,8 +275,14 @@
   .composer-bar{
     position:sticky; top:59px; z-index:25;
     padding:9px 0 8px;
-    background:var(--header);
-    -webkit-backdrop-filter:blur(16px) saturate(170%); backdrop-filter:blur(16px) saturate(170%);
+    /* 这里必须完全不透：以前用半透明 + blur，滚动时消息会从输入卡下方的
+       8px 缝里透出来，视觉上是「一行字被切掉一半」，看着像坏了。
+       做法是 header 同色叠在页面那份 fixed 渐变上 —— 观感与背后完全一致，
+       但底下什么都不透。渐变用 fixed，和 body 的 background-attachment 对齐 */
+    background-color:var(--bg);
+    background-image:linear-gradient(var(--header),var(--header)),var(--bg-image);
+    background-attachment:fixed;
+    background-repeat:no-repeat;
     transition:box-shadow .22s, border-color .22s;
     border-bottom:1px solid transparent;
   }
@@ -2073,6 +2099,10 @@
   html.desktop-mac .top-in{padding-left:82px}
   /* Windows 无边框：红绿灯 + ⋯ 独占最上面一条标题栏行，header 从它下面开始 */
   html.desktop-win .top{top:34px}
+  /* 那条自绘标题栏是 fixed 的，不占流内空间 —— 不让页面整体让出 34px 的话，
+     header 会被 sticky 往下推 34px，而下面的内容没跟着走，静止状态下输入条就压住
+     列表工具栏 12px（「共 N 条内容」字顶被切）。给 body 让出位置，流内流外才对齐 */
+  html.desktop-win body{padding-top:34px}
   /* 吸顶输入条也一样：34px 标题栏 + 59px header，不然滚动吸顶时上半截钻进 header 底下 */
   html.desktop-win .composer-bar{top:93px}
 
@@ -9244,9 +9274,27 @@
   // 输入条吸顶 + 回到顶部按钮显隐
   var composerBar = $('composerBar');
   var toTop = $('toTop');
+  // 吸顶线不是常数：mac 上 header 59px，Windows 还要多一条 34px 标题栏行。
+  // 直接读计算值（.composer-bar 的 sticky top），平台差异由 CSS 决定，这里不重复硬编码
+  var stickAt = 56;
+  try { stickAt = parseInt(getComputedStyle(composerBar).top, 10) || 56; } catch (e) { /* 拿不到就退回老值 */ }
+  // 滚动条自动显隐：滚动时给 <html> 挂 .scrolling，停手 0.9s 后摘掉（滑块淡出）。
+  // 只在滚动/贴近右边缘时出现 —— 平时不占视线，又随时找得到
+  var sbTimer = null;
+  function flashScrollbar() {
+    var root = document.documentElement;
+    if (!root.classList.contains('scrolling')) root.classList.add('scrolling');
+    clearTimeout(sbTimer);
+    sbTimer = setTimeout(function () { root.classList.remove('scrolling'); }, 900);
+  }
+  window.addEventListener('scroll', flashScrollbar, { passive: true });
+  window.addEventListener('mousemove', function (e) {
+    if (e.clientX >= window.innerWidth - 16) flashScrollbar();
+  }, { passive: true });
+
   function onScroll() {
     var y = window.scrollY || window.pageYOffset || 0;
-    if (composerBar) composerBar.classList.toggle('stuck', y > 56);
+    if (composerBar) composerBar.classList.toggle('stuck', y > stickAt - 3);
     if (toTop) toTop.hidden = y < 600;
   }
   window.addEventListener('scroll', onScroll, { passive: true });
