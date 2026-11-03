@@ -3749,9 +3749,36 @@ function stopServer() {
 }
 
 /**
+ * 已落盘的证书还能不能接着用。
+ *
+ * 光看「文件在不在」不够 —— 证书里的 SAN 是在签发那一刻写死的：
+ *   1) 换了 Wi-Fi / 路由器重新分配地址，旧证书里的局域网 IP 就作废了。
+ *      这时手机打开会报「证书名称与网址不符」，桌面端更是直接校验证书失败、显示连不上，
+ *      而本机 localhost 一切正常 —— 就是「本机用得了、别的机器连不上」这个现象。
+ *   2) 只生成了 localhost/127.0.0.1（签发时刚好没插网线）同理。
+ * 所以每次起服务都对一遍：到期临近、或少了任何一个当前的局域网地址，就重签。
+ */
+function certStillUsable(pem) {
+  try {
+    const x = new crypto.X509Certificate(pem);
+    if (!(new Date(x.validTo).getTime() - Date.now() > 7 * 24 * 3600 * 1000)) return false;
+    const san = String(x.subjectAltName || '');
+    const need = ['127.0.0.1'].concat(lanAddresses().map((n) => n.address).filter(Boolean));
+    for (const ip of need) {
+      // openssl 与内置生成器出来的 SAN 文本格式略有差别（"IP Address:x" / "IP:x"），两种都认
+      if (!san.includes('IP Address:' + ip) && !san.includes('IP:' + ip)) return false;
+    }
+    return true;
+  } catch (e) {
+    return false; // 解析不了（文件损坏 / 老格式）就当不能用，重签一份
+  }
+}
+
+/**
  * 生成并持久化自签证书，供 HTTPS 服务使用。
- * 证书存到用户目录（跨平台都写得了），首次生成后用同一份，避免每次重启都换证
- * （换证会让浏览器把「继续访问」的例外清掉，接收端又得点一次警告）。
+ * 证书存到用户目录（跨平台都写得了）。只要它还没到期、且覆盖当前所有局域网地址就复用，
+ * 避免每次重启都换证（换证会让浏览器把「继续访问」的例外清掉，接收端又得点一次警告）；
+ * 覆盖不到当前地址（换了网络）才重签，否则别的机器连不上，见 certStillUsable。
  *
  * 生成有两条路，同样的 PEM 落盘位置，谁先成功用谁：
  *   1) openssl（mac/Linux 上基本都有，历史上一直用它）
@@ -3763,13 +3790,16 @@ function ensureCert() {
   const dir = path.join(os.homedir(), '.xiaomao-share', 'certs');
   const keyPath = path.join(dir, 'key.pem');
   const certPath = path.join(dir, 'cert.pem');
+  let existing = null;
   try {
     if (fs.existsSync(keyPath) && fs.existsSync(certPath)) {
-      return { key: fs.readFileSync(keyPath), cert: fs.readFileSync(certPath) };
+      existing = { key: fs.readFileSync(keyPath), cert: fs.readFileSync(certPath) };
     }
   } catch (e) {
     // 读不出来就当没有，下面重新生成
   }
+  if (existing && certStillUsable(existing.cert)) return existing;
+  if (existing) console.log('[https] 旧证书没覆盖当前网络地址（或快到期），重新签发一份');
 
   const sans = ['IP:127.0.0.1', 'DNS:localhost'];
   const ips = [];
@@ -3802,7 +3832,7 @@ function ensureCert() {
       httpsError = '自签证书生成失败：' + ((e1 && (e1.code || e1.message)) || 'openssl 不可用') +
         ' / ' + ((e2 && e2.message) || '内置生成器失败');
       console.warn('[https]', httpsError, '（HTTP 不受影响）');
-      return null;
+      return existing; // 重签失败就先用旧的：至少本机 localhost 还能用
     }
   }
 }
