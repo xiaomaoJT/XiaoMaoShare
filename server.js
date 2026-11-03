@@ -12,7 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
-const { exec } = require('child_process');
+const { exec, execFileSync } = require('child_process');
 const pkg = require('./package.json'); // 版本号唯一来源，前端通过 /api/version 读取
 
 const ROOT = __dirname;
@@ -1806,7 +1806,7 @@ function openBrowser(url) {
 
 /* ------------------------------------------------------------------ 路由 */
 
-const server = http.createServer((req, res) => {
+const onRequest = (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   const pathname = decodeURIComponent(url.pathname);
   const method = req.method;
@@ -1838,6 +1838,22 @@ const server = http.createServer((req, res) => {
       res.end(buf);
     });
     return;
+  }
+
+  // Service Worker：缓存策略由 sw.js 自己管，这里只保证它永远不被浏览器长缓存（否则 SW 更新滞后）
+  if (method === 'GET' && pathname === '/sw.js') {
+    return fs.readFile(path.join(PUBLIC_DIR, 'sw.js'), (err, buf) => {
+      if (err) {
+        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+        return res.end('Not Found');
+      }
+      res.writeHead(200, {
+        'Content-Type': 'application/javascript; charset=utf-8',
+        'Cache-Control': 'no-cache',
+        'Service-Worker-Allowed': '/',
+      });
+      res.end(buf);
+    });
   }
 
   // 静态资源（图标 / 品牌图 / 页面共用的小脚本）
@@ -1906,6 +1922,12 @@ const server = http.createServer((req, res) => {
   // 版本号（package.json 为唯一来源，前端关于弹窗读取）
   if (method === 'GET' && pathname === '/api/version') {
     json(res, 200, { version: pkg.version });
+    return;
+  }
+
+  // HTTPS 是否可用 + 端口：前端据此决定是否提示「切到 HTTPS 安全访问」
+  if (method === 'GET' && pathname === '/api/https') {
+    json(res, 200, { enabled: !!httpsServer, port: httpsPort });
     return;
   }
 
@@ -3525,7 +3547,23 @@ const server = http.createServer((req, res) => {
 
   res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
   res.end('Not Found');
-});
+};
+
+const server = http.createServer(onRequest);
+
+let httpsServer = null;
+let httpsPort = 0;
+
+/** 在指定 server 上 listen 一次，占用就抛 EADDRINUSE 由调用方决定要不要往上试 */
+function listenOnceOn(srv, port) {
+  return new Promise((resolve, reject) => {
+    const onErr = (err) => { srv.removeListener('listening', onOk); reject(err); };
+    const onOk = () => { srv.removeListener('error', onErr); resolve(); };
+    srv.once('error', onErr);
+    srv.once('listening', onOk);
+    srv.listen(port, '0.0.0.0');
+  });
+}
 
 /* ------------------------------------------------------------------ 启动 */
 
@@ -3542,6 +3580,13 @@ const server = http.createServer((req, res) => {
 function serverInfo() {
   const addr = server.address();
   const port = addr && typeof addr === 'object' ? addr.port : 0;
+  const httpsInfo = httpsServer && httpsServer.listening ? {
+    enabled: true,
+    port: httpsPort,
+    lan: lanAddresses().map((n) => ({
+      name: n.name, address: n.address, url: `https://${n.address}:${httpsPort}/`,
+    })),
+  } : { enabled: false, port: 0, lan: [] };
   return {
     running: !!server.listening,
     port,
@@ -3550,6 +3595,7 @@ function serverInfo() {
     lan: lanAddresses().map((n) => ({
       name: n.name, address: n.address, url: `http://${n.address}:${port}/`,
     })),
+    https: httpsInfo,
     dataDir: DATA_DIR,
     count: items.length,
   };
@@ -3565,6 +3611,12 @@ function printBanner(info) {
     console.log('\n  手机连同一个 Wi-Fi，在浏览器里打开上面「局域网」地址');
   } else {
     console.log('  未检测到局域网地址，请确认已连上 Wi-Fi / 网线');
+  }
+  if (info.https && info.https.enabled) {
+    console.log('  ───────────');
+    console.log('  HTTPS 安全访问（离线刷新可用）：');
+    for (const n of info.https.lan) console.log(`   ${n.url}`);
+    console.log('  首次打开会提示证书不受信任，点「继续」即可；之后主机停止刷新也不白屏');
   }
   console.log(line);
   console.log(`  数据目录 ${info.dataDir}`);
@@ -3633,6 +3685,23 @@ async function startServer(opts = {}) {
   }
   if (lastErr) throw lastErr;
 
+  // HTTPS：自签证书能生成就并行起一个安全上下文，接收端可切过去获得「离线刷新」能力（主机停止后刷新仍看得到内容）
+  const cert = ensureCert();
+  if (cert) {
+    try {
+      httpsServer = https.createServer(cert, onRequest);
+      const httpsBase = base + 1; // 与 HTTP 错开一个端口
+      let hsErr = null;
+      for (let i = 0; i < tries; i++) {
+        try { await listenOnceOn(httpsServer, httpsBase + i); httpsPort = httpsBase + i; hsErr = null; break; }
+        catch (err) { hsErr = err; if (err.code !== 'EADDRINUSE') break; }
+      }
+      if (hsErr) { console.warn('[https] 启动失败：', hsErr.message); try { httpsServer.close(); } catch {} httpsServer = null; }
+    } catch (e) {
+      console.warn('[https] 启动异常：', e.message); httpsServer = null;
+    }
+  }
+
   sweepExpired(); // 开张前先把过期内容清掉，banner 上的条数才是真实存量
   const info = serverInfo();
   if (opts.banner !== false) printBanner(info);
@@ -3643,11 +3712,48 @@ async function startServer(opts = {}) {
 /** 关掉服务。先断掉 keep-alive 长连接，否则 close 会一直等着它们超时 */
 function stopServer() {
   return new Promise((resolve) => {
-    if (!server.listening) return resolve();
-    if (typeof server.closeAllConnections === 'function') server.closeAllConnections();
-    server.close(() => resolve());
-    setTimeout(resolve, 1500).unref(); // 兜底，别让宿主退出时卡住
+    const targets = [];
+    if (server.listening) targets.push(server);
+    if (httpsServer && httpsServer.listening) targets.push(httpsServer);
+    if (!targets.length) return resolve();
+    let pending = targets.length;
+    const done = () => { if (--pending <= 0) resolve(); };
+    for (const srv of targets) {
+      if (typeof srv.closeAllConnections === 'function') srv.closeAllConnections();
+      srv.close(done);
+      setTimeout(done, 1500).unref(); // 兜底，别让宿主退出时卡住
+    }
+    setTimeout(resolve, 1600).unref();
   });
+}
+
+/**
+ * 生成并持久化自签证书，供 HTTPS 服务使用。
+ * 证书存到用户目录（跨平台都写得了），首次生成后用同一份，避免每次重启都换证
+ * （换证会让浏览器把「继续访问」的例外清掉，接收端又得点一次警告）。
+ * 生成失败（比如环境里没有 openssl）就返回 null，HTTPS 自动降级为不可用，不影响 HTTP。
+ */
+function ensureCert() {
+  try {
+    const dir = path.join(os.homedir(), '.xiaomao-share', 'certs');
+    const keyPath = path.join(dir, 'key.pem');
+    const certPath = path.join(dir, 'cert.pem');
+    if (fs.existsSync(keyPath) && fs.existsSync(certPath)) {
+      return { key: fs.readFileSync(keyPath), cert: fs.readFileSync(certPath) };
+    }
+    fs.mkdirSync(dir, { recursive: true });
+    const sans = ['IP:127.0.0.1', 'DNS:localhost'];
+    for (const n of lanAddresses()) if (n.address) sans.push('IP:' + n.address);
+    execFileSync('openssl', [
+      'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
+      '-keyout', keyPath, '-out', certPath, '-days', '3650',
+      '-subj', '/CN=XiaoMaoShare', '-addext', 'subjectAltName=' + sans.join(','),
+    ], { stdio: 'ignore' });
+    return { key: fs.readFileSync(keyPath), cert: fs.readFileSync(certPath) };
+  } catch (e) {
+    console.warn('[https] 自签证书生成失败，HTTPS 不可用（HTTP 不受影响）：', e.message);
+    return null;
+  }
 }
 
 // 直接 `node server.js` 时保持原本的 CLI 行为；被 require（桌面壳）时什么都不做

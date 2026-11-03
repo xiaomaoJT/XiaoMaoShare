@@ -98,6 +98,43 @@ let ballMenuSeq = 0;      // 菜单展开序号：延时收回时用来判断「
 let ballOnline = false;   // 最近一次拉列表的连接状态，菜单胶囊拿来点绿灯
 let ballActivating = false; // 「打开界面」激活流程进行中（这期间失焦不收菜单）
 
+/* ------------------------------------------------- 连别人时的历史快照缓存
+   主进程本来就每隔几秒去对方主机拉一次 /api/list（见 startNoticeWatch），
+   顺手把最近一次成功的结果按 origin 存下来。对方服务一停、连接窗口被刷新/
+   重开时，did-fail-load 兜不住（页面在死掉的主机那边），我们就用这份快照
+   渲染一个「对方主机不在线 + 最后的文件列表」，而不是一句冷冰冰的连不上。 */
+const linkSnaps = new Map(); // origin -> { data, at, sig }
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+}
+
+function loadLinkSnaps() {
+  try {
+    const o = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'link-snapshots.json'), 'utf8'));
+    if (o && typeof o === 'object') for (const k in o) linkSnaps.set(k, o[k]);
+  } catch {}
+}
+
+function saveLinkSnaps() {
+  try {
+    const o = {};
+    for (const [k, v] of linkSnaps) o[k] = v;
+    fs.writeFileSync(path.join(app.getPath('userData'), 'link-snapshots.json'), JSON.stringify(o));
+  } catch {}
+}
+
+function cacheSnapshot(origin, data) {
+  if (!origin || !data) return;
+  const sig = JSON.stringify(data.items || '');
+  const prev = linkSnaps.get(origin);
+  if (prev && prev.sig === sig) { prev.at = Date.now(); return; } // 没变化只更新时间，不落盘
+  linkSnaps.set(origin, { data, at: Date.now(), sig });
+  saveLinkSnaps();
+}
+
 /* ------------------------------------------------------------ 地址处理 */
 
 /**
@@ -475,7 +512,9 @@ function openLink(rawUrl) {
 
   win.webContents.on('did-fail-load', (_e, code, desc, url, isMainFrame) => {
     if (!isMainFrame || code === -3) return; // -3 = 用户自己取消，不算失败
-    win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(offlinePage(n.host)));
+    let snap = null;
+    try { const origin = new URL(n.url).origin; snap = linkSnaps.get(origin) || null; } catch {}
+    win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(offlinePage(n.host, snap)));
   });
 
   const rec = { id, url: n.url, host: n.host, win, cid: '' };
@@ -537,22 +576,46 @@ async function openConnectPanel() {
   w.webContents.send(atStartPage ? 'desktop:start-ask-link' : 'desktop:open-connect');
 }
 
-/** 连不上时给一页人话，而不是 Electron 那句 ERR_CONNECTION_REFUSED */
-function offlinePage(host) {
-  return `<!doctype html><meta charset="utf-8"><title>连不上</title>
+/** 连不上时给一页人话，而不是 Electron 那句 ERR_CONNECTION_REFUSED。
+   若主进程手里还有对方最后的列表快照，一并陈列出来，并明确告诉用户「主机不在线」 */
+function offlinePage(host, snap) {
+  const h = String(host || '').replace(/[<>&]/g, '');
+  let listHtml = '';
+  const items = snap && snap.data && Array.isArray(snap.data.items) ? snap.data.items : [];
+  if (items.length) {
+    const at = snap.at ? new Date(snap.at).toLocaleString() : '';
+    listHtml = '<p class="sub">以下为最后的快照' + (at ? '（' + escapeHtml(at) + '）' : '') + '：</p>'
+      + '<ul class="lst">'
+      + items.slice(0, 60).map((it) => {
+        const kind = it.kind === 'text' ? '文字' : '文件';
+        const title = it.kind === 'text'
+          ? String(it.text || '').slice(0, 80)
+          : ((it.parts && it.parts[0] && it.parts[0].name) || '附件');
+        const from = it.from ? ' · ' + String(it.from) : '';
+        return '<li><span class="tag">' + kind + '</span>' + escapeHtml(title) + escapeHtml(from) + '</li>';
+      }).join('')
+      + '</ul>';
+  }
+  return `<!doctype html><meta charset="utf-8"><title>对方主机不在线</title>
 <style>
   html,body{height:100%;margin:0}
   body{display:grid;place-items:center;background:#f4f6f9;
        font:14px/1.7 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;color:#3d4450}
-  .box{max-width:400px;padding:28px;text-align:center}
-  h1{font-size:17px;margin:0 0 10px}
+  .box{max-width:460px;padding:28px;text-align:center}
+  h1{font-size:17px;margin:0 0 10px;color:#b42318}
   p{margin:0 0 8px;color:#6b7280}
   code{background:#eef1f6;padding:2px 6px;border-radius:5px;font-size:13px}
+  .sub{margin-top:18px;font-size:13px}
+  .lst{list-style:none;padding:0;margin:10px 0 0;text-align:left;max-height:320px;overflow:auto}
+  .lst li{padding:7px 10px;border:1px solid #e5e8ef;border-radius:8px;margin-bottom:6px;font-size:13px;
+          display:flex;gap:8px;align-items:center;background:#fff}
+  .tag{flex:none;background:#eef1f6;color:#52607a;border-radius:5px;padding:1px 6px;font-size:12px}
 </style>
 <div class="box">
-  <h1>连不上 ${host.replace(/[<>&]/g, '')}</h1>
-  <p>对方可能没开服务、或者已经不在同一个网络里。</p>
-  <p>请确认 <code>${host.replace(/[<>&]/g, '')}</code> 能打开，再重试。</p>
+  <h1>对方主机不在线</h1>
+  <p>连不上 <code>${h}</code>。对方可能关掉了服务，或已不在同一网络。</p>
+  ${listHtml}
+  <p class="sub">恢复连接后刷新即可看到最新内容。</p>
 </div>`;
 }
 
@@ -2187,6 +2250,7 @@ function startNoticeWatch(win) {
       });
       if (!r.ok) return;
       data = await r.json();
+      cacheSnapshot(base, data);      // 趁连得上的时候，把对方的列表快照存下来备用
     } catch { return; }               // 对方离线 / 刚重启，下一拍再试，不打扰人
 
     const items = Array.isArray(data && data.items) ? data.items : [];
@@ -3386,6 +3450,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('second-instance', () => { ensureHostWindow(); });
 
   app.whenReady().then(async () => {
+    loadLinkSnaps();
     // macOS 开发模式下 Dock 上是 Electron 自带图标（装成 app 才有自己的），
     // 运行时换成我们的，免得调试时 Dock 里一直坐着一个 Electron
     if (IS_MAC && app.dock) {

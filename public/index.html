@@ -9581,5 +9581,38 @@
   })();
 })();
 </script>
+
+<!-- 切到 HTTPS 的提示横幅：仅在非安全上下文（http://局域网IP）显示，让接收端自行选择是否升级 -->
+<div id="xmHttpsBanner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:99999;background:#0a7d4d;color:#fff;font:13px/1.5 -apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;padding:8px 14px;align-items:center;gap:10px;box-shadow:0 1px 6px rgba(0,0,0,.25)">
+  <span style="flex:1">对方断开后刷新页面也能看得到内容？可切换到 HTTPS 安全访问（首次会提示证书不受信任，点「继续」即可）。</span>
+  <button id="xmHttpsGo" style="background:#fff;color:#0a7d4d;border:0;border-radius:6px;padding:5px 12px;font:inherit;font-weight:600;cursor:pointer">切换到 HTTPS</button>
+  <button id="xmHttpsClose" style="background:transparent;color:#fff;border:0;cursor:pointer;font:18px/1 sans-serif;opacity:.85;padding:0 4px">×</button>
+</div>
+<script>
+(function () {
+  if (window.isSecureContext) return; // localhost / https 已是安全上下文，无需提示
+  try {
+    fetch('/api/https').then(function (r) { return r.json(); }).then(function (d) {
+      if (!d || !d.enabled) return;
+      var b = document.getElementById('xmHttpsBanner');
+      if (!b) return;
+      b.style.display = 'flex';
+      document.getElementById('xmHttpsGo').addEventListener('click', function () {
+        var u = 'https://' + location.hostname + ':' + d.port + '/';
+        window.open(u, '_blank');
+      });
+      document.getElementById('xmHttpsClose').addEventListener('click', function () { b.style.display = 'none'; });
+    }).catch(function () {});
+  } catch (e) {}
+})();
+</script>
+<script>
+// 安全上下文（localhost / https）下注册 Service Worker：预缓存壳页面，主机停止后刷新仍能还原内容
+if (window.isSecureContext && 'serviceWorker' in navigator) {
+  window.addEventListener('load', function () {
+    navigator.serviceWorker.register('/sw.js').catch(function () { /* 离线能力不可用不影响主流程 */ });
+  });
+}
+</script>
 </body>
 </html>
