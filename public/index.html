@@ -58,7 +58,8 @@
     --bg:#0d1015;
     --bg-image:radial-gradient(900px 420px at 8% -8%, #17203a 0%, transparent 60%);
     --card:#161b22; --card-2:#1b2129; --fill:#1b2129;
-    --text:#e7ecf3; --sub:#8c96a8; --faint:#5f6b7d;
+    /* 字色整体提亮一档：纯黑底上 #e7ecf3 的正文偏闷，层次也拉不开 */
+    --text:#f2f5fa; --sub:#a3aec1; --faint:#74839a;
     --line:#242c37; --line-soft:#1d242e;
     --accent:#6b8afd; --accent-soft:#1d2740;
     --header:rgba(13,16,21,.80);
@@ -1893,12 +1894,16 @@
     .set-tab .pg{display:none}
     .set-pane{width:100%}
   }
-  /* 毛玻璃下吸顶的分段条要更实一点，否则内容从底下透出来 */
+  /* 毛玻璃下吸顶的分段条：磨砂半透明，跟卡片同质感 —— 整条死白贴在玻璃上很突兀 */
   @media (max-width:640px){
     :root[data-theme="glass"] .set-nav{
-      background:rgba(255,255,255,.94);
-      -webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);
+      background:rgba(255,255,255,.55);
+      -webkit-backdrop-filter:blur(14px) saturate(160%);backdrop-filter:blur(14px) saturate(160%);
+      box-shadow:inset 0 1px 0 rgba(255,255,255,.5);
     }
+    /* 未选中的 tab 别再各自垫一层白底，让磨砂底透出来；选中的保留淡蓝 */
+    :root[data-theme="glass"] .set-tab{background:transparent;border-color:transparent}
+    :root[data-theme="glass"] .set-tab.on{background:var(--accent-soft);border-color:rgba(53,87,232,.30)}
   }
 
   /* ---- 单台设备的发送权限：一行小开关 ---- */
@@ -2072,6 +2077,8 @@
   .dc-h .st.off{color:var(--faint);background:var(--line-soft)}
 
   /* 本机地址：地址本身是主角，复制是配角 */
+  /* 多张地址卡纵向排开，别贴在一起 */
+  .dc-addrs{display:flex;flex-direction:column;gap:8px}
   .dc-addr{
     display:flex;align-items:center;gap:10px;padding:11px 12px;
     background:var(--card-2);border:1px solid var(--line);border-radius:12px;
@@ -3119,7 +3126,7 @@
       n.st = mk('span', 'st', '…');
       h1.appendChild(n.st);
       s1.appendChild(h1);
-      n.addrBox = mk('div');
+      n.addrBox = mk('div', 'dc-addrs');
       s1.appendChild(n.addrBox);
 
       // 出码：手机相机扫一下就进来，省得手输地址（复用主控的扫码弹窗）
