@@ -2071,43 +2071,50 @@
   html.desktop .top .mark{-webkit-app-region:no-drag}
   /* macOS 的红绿灯压在左上角，窄窗口时别让 logo 被盖住 */
   html.desktop-mac .top-in{padding-left:82px}
-  /* Windows 无边框：左上角是自绘红绿灯（macOS 同款），顶栏内容给它们让位 */
-  html.desktop-win .top-in{padding-left:118px}
+  /* Windows 无边框：红绿灯 + ⋯ 独占最上面一条标题栏行，header 从它下面开始 */
+  html.desktop-win .top{top:34px}
 
-  /* 自绘窗口按钮条：fixed 挂 body 根，z-index 盖过所有弹层 —— 弹窗开着也能关窗口 */
+  /* 自绘标题栏行：跟 header 同底色/同毛玻璃，视觉上连成一体；
+     z-index 盖过所有弹层 —— 弹窗全开着也点得到（mac 红绿灯同款行为） */
   .winctl{
-    position:fixed;top:0;left:0;z-index:9999;
-    display:flex;align-items:center;gap:8px;
-    height:58px;padding:0 16px;
+    position:fixed;top:0;left:0;right:0;z-index:9999;
+    display:flex;align-items:center;gap:9px;
+    height:34px;padding:0 14px;
+    background:var(--header);
+    -webkit-backdrop-filter:saturate(180%) blur(16px);backdrop-filter:saturate(180%) blur(16px);
     -webkit-app-region:drag;user-select:none;-webkit-user-select:none;
   }
+  :root[data-theme="glass"] .winctl{background:rgba(255,255,255,.72)}
   .winctl .wdot{
     flex:none;width:12px;height:12px;border-radius:50%;padding:0;position:relative;
     border:1px solid rgba(0,0,0,.14);cursor:pointer;
     -webkit-app-region:no-drag;
   }
-  .winctl .wdot::after{
-    content:'';position:absolute;inset:0;display:grid;place-items:center;
-    font:700 10px/1 'Segoe UI',system-ui,sans-serif;color:rgba(0,0,0,.55);
-    opacity:0;transition:opacity .12s;
-  }
+  /* 字形用 CSS 画（线条/方框），50% 定位 + translate 保证绝对居中，不赌字体渲染 */
   .winctl .wdot.close{background:#ff5f57}
-  .winctl .wdot.close::after{content:'\00D7'}   /* × */
   .winctl .wdot.min{background:#febc2e}
-  .winctl .wdot.min::after{content:'\2212'}     /* − */
   .winctl .wdot.max{background:#28c840}
-  .winctl .wdot.max::after{content:'\25A1'}     /* □ */
-  .winctl.maxed .wdot.max::after{content:'\2750'} /* ❐ 还原 */
-  .winctl .wdot:hover::after{opacity:1}
+  .winctl .wdot span{position:absolute;inset:0;opacity:0;transition:opacity .12s}
+  .winctl .wdot span::before,.winctl .wdot span::after{
+    content:'';position:absolute;left:50%;top:50%;background:rgba(0,0,0,.55);border-radius:1px;
+  }
+  .winctl .wdot.close span::before{width:7px;height:1.4px;transform:translate(-50%,-50%) rotate(45deg)}
+  .winctl .wdot.close span::after{width:7px;height:1.4px;transform:translate(-50%,-50%) rotate(-45deg)}
+  .winctl .wdot.min span::before{width:6.5px;height:1.4px;transform:translate(-50%,-50%)}
+  .winctl .wdot.max span::before{width:6px;height:6px;background:none;border:1.3px solid rgba(0,0,0,.55);transform:translate(-50%,-50%)}
+  /* 还原（已最大化）：前后错位的两个小方框 */
+  .winctl.maxed .wdot.max span::before{width:4.4px;height:4.4px;border-width:1.2px;transform:translate(-26%,-74%)}
+  .winctl.maxed .wdot.max span::after{width:4.4px;height:4.4px;background:none;border:1.2px solid rgba(0,0,0,.55);transform:translate(-74%,-26%)}
+  .winctl .wdot:hover span{opacity:1}
   .winctl .wdot:active{filter:brightness(.88)}
   /* 窗口失焦：整体变灰、字形隐藏（macOS 行为） */
   .winctl.dimm .wdot{background:#c8cdd5;border-color:rgba(0,0,0,.06)}
-  .winctl.dimm .wdot::after{opacity:0!important}
+  .winctl.dimm .wdot span{opacity:0!important}
   /* ⋯ 菜单按钮：把原生应用菜单弹回来（无边框窗口没有菜单栏，Alt 呼不出） */
   .winctl .wmenu{
-    flex:none;width:24px;height:24px;margin-left:6px;padding:0;
-    display:grid;place-items:center;cursor:pointer;border-radius:8px;
-    background:var(--card-2);border:1px solid var(--line);color:var(--sub);
+    flex:none;width:22px;height:22px;padding:0;
+    display:grid;place-items:center;cursor:pointer;border-radius:7px;
+    background:transparent;border:0;color:var(--sub);
     -webkit-app-region:no-drag;
   }
   .winctl .wmenu:hover{color:var(--text);background:var(--fill)}
@@ -3058,7 +3065,8 @@
 
     /**
      * Windows 无边框：自绘 macOS 同款红绿灯（关/最小/最大化）+ ⋯ 菜单按钮。
-     * fixed 挂在 body 根上、z-index 拉满 —— 弹窗/遮罩全开着也点得到（mac 红绿灯同款行为）；
+     * 独占最上面一条标题栏行，header 从它下面开始；fixed 挂 body 根、
+     * z-index 拉满 —— 弹窗/遮罩全开着也点得到（mac 红绿灯同款行为）；
      * 颜色是普通 DOM，天然跟随主题变量，不用向主进程同步。
      */
     function setupWinControls() {
@@ -3072,6 +3080,7 @@
         b.className = 'wdot ' + kind;
         b.title = title;
         b.setAttribute('aria-label', title);
+        b.appendChild(document.createElement('span'));  // 字形容器，CSS 画线/方框
         b.onclick = function () { api.winAction(act); };
         return b;
       }

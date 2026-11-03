@@ -32,32 +32,31 @@
   #drag { position: fixed; inset: 0 0 auto 0; height: 46px; z-index: 10; -webkit-app-region: drag; }
   html[data-platform="darwin"] #drag { height: 62px; }
 
-  /* Windows 无边框：左上角自绘 macOS 同款红绿灯（跟主界面同一套样式） */
+  /* Windows 无边框：红绿灯独占最上面一条标题栏行（页面背景均匀，透明底即可） */
   .winctl{
-    position:fixed;top:0;left:0;z-index:20;
-    display:flex;align-items:center;gap:8px;height:46px;padding:0 16px;
+    position:fixed;top:0;left:0;right:0;z-index:20;
+    display:flex;align-items:center;gap:9px;height:34px;padding:0 14px;
     -webkit-app-region:drag;user-select:none;
   }
   .winctl .wdot{
     flex:none;width:12px;height:12px;border-radius:50%;padding:0;position:relative;
     border:1px solid rgba(0,0,0,.14);cursor:pointer;-webkit-app-region:no-drag;
   }
-  .winctl .wdot::after{
-    content:'';position:absolute;inset:0;display:grid;place-items:center;
-    font:700 10px/1 'Segoe UI',system-ui,sans-serif;color:rgba(0,0,0,.55);
-    opacity:0;transition:opacity .12s;
+  /* 字形用 CSS 画（线条/方框），50% 定位 + translate 保证绝对居中，不赌字体渲染 */
+  .winctl .wdot span{position:absolute;inset:0;opacity:0;transition:opacity .12s}
+  .winctl .wdot span::before,.winctl .wdot span::after{
+    content:'';position:absolute;left:50%;top:50%;background:rgba(0,0,0,.55);border-radius:1px;
   }
-  .winctl .wdot.close{background:#ff5f57}
-  .winctl .wdot.close::after{content:'\00D7'}
-  .winctl .wdot.min{background:#febc2e}
-  .winctl .wdot.min::after{content:'\2212'}
-  .winctl .wdot.max{background:#28c840}
-  .winctl .wdot.max::after{content:'\25A1'}
-  .winctl.maxed .wdot.max::after{content:'\2750'}
-  .winctl .wdot:hover::after{opacity:1}
+  .winctl .wdot.close span::before{width:7px;height:1.4px;transform:translate(-50%,-50%) rotate(45deg)}
+  .winctl .wdot.close span::after{width:7px;height:1.4px;transform:translate(-50%,-50%) rotate(-45deg)}
+  .winctl .wdot.min span::before{width:6.5px;height:1.4px;transform:translate(-50%,-50%)}
+  .winctl .wdot.max span::before{width:6px;height:6px;background:none;border:1.3px solid rgba(0,0,0,.55);transform:translate(-50%,-50%)}
+  .winctl.maxed .wdot.max span::before{width:4.4px;height:4.4px;border-width:1.2px;transform:translate(-26%,-74%)}
+  .winctl.maxed .wdot.max span::after{width:4.4px;height:4.4px;background:none;border:1.2px solid rgba(0,0,0,.55);transform:translate(-74%,-26%)}
+  .winctl .wdot:hover span{opacity:1}
   .winctl .wdot:active{filter:brightness(.88)}
   .winctl.dimm .wdot{background:#c8cdd5;border-color:rgba(0,0,0,.06)}
-  .winctl.dimm .wdot::after{opacity:0!important}
+  .winctl.dimm .wdot span{opacity:0!important}
 
   .center { height: 100%; display: flex; align-items: center; justify-content: center; padding: 28px; }
 
@@ -328,6 +327,7 @@
       b.className = 'wdot ' + d[0];
       b.title = d[1];
       b.setAttribute('aria-label', d[1]);
+      b.appendChild(document.createElement('span'));  // 字形容器，CSS 画线/方框
       b.onclick = function () { api.winAction(d[2]); };
       bar.appendChild(b);
     });
