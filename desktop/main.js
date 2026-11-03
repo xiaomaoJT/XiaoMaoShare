@@ -156,7 +156,9 @@ function normalizeLink(input) {
   if (u.protocol !== 'http:' && u.protocol !== 'https:') return { error: '只支持 http / https 地址' };
   if (!u.hostname) return { error: '地址里没有主机名' };
   // 对方多半用的就是默认端口，没写就补上，省得每次都要记
+  // （https 端口约定是 http 端口 + 1，跟主机侧的自动错开保持一致）
   if (!u.port && u.protocol === 'http:') u.port = String(DEFAULT_PORT);
+  if (!u.port && u.protocol === 'https:') u.port = String(DEFAULT_PORT + 1);
 
   const url = u.origin + (u.pathname === '/' ? '' : u.pathname);
   return { url, host: u.host };
@@ -720,6 +722,7 @@ ipcMain.handle('start:state', (e) => {
     mode: p.mode,
     lastLinkUrl: p.lastLinkUrl,
     keepHost: p.keepHost,
+    https: p.https,
     recent: readRecent(),
     dataDir: server.DATA_DIR,
     // 选择页把端口固定显示成「:6767」，跟着这里的常量走，改端口不用改两处
@@ -736,6 +739,7 @@ ipcMain.handle('start:choose', (_e, payload) => {
     url: typeof p.url === 'string' ? p.url : '',
     keepHost: p.keepHost === true,
     remember: !!p.remember,
+    https: p.https === true,
   }).catch((e) => startPageError('启动失败：' + ((e && e.message) || '未知错误')));
   return { ok: true };
 });
@@ -1676,6 +1680,7 @@ function readStartPref() {
     mode: ['ask', 'host', 'link'].includes(s.startMode) ? s.startMode : 'ask',
     lastLinkUrl: typeof s.lastLinkUrl === 'string' ? s.lastLinkUrl : '',
     keepHost: s.keepHost === true, // 默认关：纯客户端，不监听任何端口
+    https: s.https === true,       // 默认关：HTTPS 多占一个端口，选择页勾了才起
   };
 }
 
@@ -1722,8 +1727,9 @@ async function ensureHostServer() {
   if (inf.running) { hostInfo = inf; return hostInfo; }
 
   const pref = readPortPref() || DEFAULT_PORT;
+  const wantHttps = readStartPref().https; // 勾选状态由 applyStartChoice 统一落盘
   let err = null;
-  try { hostInfo = await server.startServer({ port: pref }); } catch (e) { err = e; }
+  try { hostInfo = await server.startServer({ port: pref, https: wantHttps }); } catch (e) { err = e; }
 
   while (!hostInfo) {
     const choice = dialog.showMessageBoxSync({
@@ -1738,7 +1744,7 @@ async function ensureHostServer() {
     if (choice !== 0) return null;
     const p = await askPort(pref);
     if (!p) return null;
-    try { hostInfo = await server.startServer({ port: p }); } catch (e) { err = e; }
+    try { hostInfo = await server.startServer({ port: p, https: wantHttps }); } catch (e) { err = e; }
   }
 
   writePortPref(hostInfo.port); // 记住实际端口，地址才稳定
@@ -1846,6 +1852,9 @@ function maybeFirstRunGuide() {
  */
 async function applyStartChoice(c) {
   const remember = !!c.remember;
+  // HTTPS 是个随时生效的偏好：不管记不记住这次选择，都先把勾选状态记下来，
+  // ensureHostServer 从这里读，菜单/托盘里的启动路径才不会各拿各的
+  updateSettings({ https: c.https === true });
   let target = c.action === 'link' ? 'link' : 'host';
   let linkUrl = '';
   let linkHost = '';
@@ -1893,6 +1902,17 @@ async function applyStartChoice(c) {
       startPageError('本机服务没起来。可以再试一次，或者先连别人的主机。');
       return;
     }
+    // 用户明确勾了 HTTPS 却没起来：HTTP 照常用，但得说清楚为什么没有 https 地址
+    if (c.https === true && info.https && info.https.enabled === false) {
+      dialog.showMessageBoxSync({
+        type: 'warning',
+        title: 'HTTPS 没能启用',
+        message: 'HTTPS 服务没有启动',
+        detail: (info.https.error || '未知原因') + '\n\n本次只有 HTTP 访问可用；解决后重新启动即可再试。',
+        buttons: ['知道了'],
+        defaultId: 0,
+      });
+    }
     if (!hostWin || hostWin.isDestroyed()) createHostWindow();
     hostWin.loadURL(info.hostUrl);
     // ensureHostWindow 会先把主窗藏起来换装（免得闪选择页），这里到位了再亮出来；
@@ -1907,8 +1927,13 @@ async function applyStartChoice(c) {
 
   // ---- 连别人 ----
   // 本机服务起不来不拖累连接：连别人照样能用，只是这台电脑暂时不对外提供服务
-  if (c.keepHost === true && !(await ensureHostServer())) {
-    pending = '本机服务没起来，这次只能当普通设备用';
+  if (c.keepHost === true) {
+    const hi = await ensureHostServer();
+    if (!hi) {
+      pending = '本机服务没起来，这次只能当普通设备用';
+    } else if (c.https === true && hi.https && hi.https.enabled === false) {
+      pending = 'HTTPS 没能启用（' + (hi.https.error || '未知原因') + '），本机只有 HTTP 访问';
+    }
   }
 
   if (!hostWin || hostWin.isDestroyed()) createHostWindow();

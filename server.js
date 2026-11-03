@@ -1909,10 +1909,16 @@ const onRequest = (req, res) => {
   if (method === 'GET' && pathname === '/api/info') {
     const port = server.address().port;
     const st = authState(req);
+    // HTTPS 开着时把 https 地址排前面：扫码默认就扫到 https（能获得离线刷新能力）
     json(res, 200, {
       host: os.hostname().replace(/\.local$/i, ''),
       port,
-      urls: lanAddresses().map((n) => `http://${n.address}:${port}`),
+      urls: [
+        ...(httpsServer && httpsServer.listening
+          ? lanAddresses().map((n) => `https://${n.address}:${httpsPort}`)
+          : []),
+        ...lanAddresses().map((n) => `http://${n.address}:${port}`),
+      ],
       authorized: st.authorized,
       status: st.status,
       admin: isHostRequest(req),
@@ -2638,14 +2644,16 @@ const onRequest = (req, res) => {
   // 主设备生成二维码（其他设备扫码直接打开）
   if (method === 'GET' && pathname === '/api/qr') {
     if (!manage) return json(res, 403, { error: '没有管理权限' });
-    const port = server.address().port;
     const list = lanAddresses();
     const pick = String(url.searchParams.get('ip') || '') || (list[0] && list[0].address);
     if (!pick) {
       res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
       return res.end('未找到可用的局域网地址');
     }
-    const text = `http://${pick}:${port}`;
+    // scheme=https 生成 https 地址的码（只在 HTTPS 真在跑时生效）
+    const scheme = url.searchParams.get('scheme') === 'https' && httpsServer && httpsServer.listening ? 'https' : 'http';
+    const qport = scheme === 'https' ? httpsPort : server.address().port;
+    const text = `${scheme}://${pick}:${qport}`;
     const px = Math.min(720, Math.max(120, Number(url.searchParams.get('px')) || 260));
     const svg = QR.svg(text, px);
     res.writeHead(200, {
@@ -3560,6 +3568,7 @@ const server = http.createServer(onRequest);
 
 let httpsServer = null;
 let httpsPort = 0;
+let httpsError = '';   // 用户明确要 HTTPS 却没起来时，把原因带给桌面壳弹给人看
 
 /** 在指定 server 上 listen 一次，占用就抛 EADDRINUSE 由调用方决定要不要往上试 */
 function listenOnceOn(srv, port) {
@@ -3593,7 +3602,7 @@ function serverInfo() {
     lan: lanAddresses().map((n) => ({
       name: n.name, address: n.address, url: `https://${n.address}:${httpsPort}/`,
     })),
-  } : { enabled: false, port: 0, lan: [] };
+  } : { enabled: false, port: 0, lan: [], error: httpsError };
   return {
     running: !!server.listening,
     port,
@@ -3692,20 +3701,25 @@ async function startServer(opts = {}) {
   }
   if (lastErr) throw lastErr;
 
-  // HTTPS：自签证书能生成就并行起一个安全上下文，接收端可切过去获得「离线刷新」能力（主机停止后刷新仍看得到内容）
-  const cert = ensureCert();
-  if (cert) {
-    try {
-      httpsServer = https.createServer(cert, onRequest);
-      const httpsBase = base + 1; // 与 HTTP 错开一个端口
-      let hsErr = null;
-      for (let i = 0; i < tries; i++) {
-        try { await listenOnceOn(httpsServer, httpsBase + i); httpsPort = httpsBase + i; hsErr = null; break; }
-        catch (err) { hsErr = err; if (err.code !== 'EADDRINUSE') break; }
+  // HTTPS：只在明确要求时启动（默认不起 —— 多占一个端口，接收端首次还要点一次证书警告）。
+  // 要了但起不来不拖累 HTTP：原因写进 serverInfo.https.error，桌面壳会弹给人看。
+  httpsError = '';
+  if (opts.https === true) {
+    const cert = ensureCert();
+    if (cert) {
+      try {
+        httpsServer = https.createServer(cert, onRequest);
+        const httpsBase = base + 1; // 与 HTTP 错开一个端口
+        let hsErr = null;
+        for (let i = 0; i < tries; i++) {
+          try { await listenOnceOn(httpsServer, httpsBase + i); httpsPort = httpsBase + i; hsErr = null; break; }
+          catch (err) { hsErr = err; if (err.code !== 'EADDRINUSE') break; }
+        }
+        if (hsErr) { httpsError = hsErr.message; console.warn('[https] 启动失败：', hsErr.message); try { httpsServer.close(); } catch {} httpsServer = null; }
+      } catch (e) {
+        httpsError = e.message;
+        console.warn('[https] 启动异常：', e.message); httpsServer = null;
       }
-      if (hsErr) { console.warn('[https] 启动失败：', hsErr.message); try { httpsServer.close(); } catch {} httpsServer = null; }
-    } catch (e) {
-      console.warn('[https] 启动异常：', e.message); httpsServer = null;
     }
   }
 
@@ -3758,14 +3772,16 @@ function ensureCert() {
     ], { stdio: 'ignore' });
     return { key: fs.readFileSync(keyPath), cert: fs.readFileSync(certPath) };
   } catch (e) {
-    console.warn('[https] 自签证书生成失败，HTTPS 不可用（HTTP 不受影响）：', e.message);
+    httpsError = '自签证书生成失败：' + e.message;
+    console.warn('[https]', httpsError, '（HTTP 不受影响）');
     return null;
   }
 }
 
 // 直接 `node server.js` 时保持原本的 CLI 行为；被 require（桌面壳）时什么都不做
 if (require.main === module) {
-  startServer({ open: OPEN_ON_START }).catch((err) => {
+  // CLI 想要 HTTPS：node server.js --https
+  startServer({ open: OPEN_ON_START, https: process.argv.includes('--https') }).catch((err) => {
     console.error('启动失败：', err.message);
     process.exit(1);
   });

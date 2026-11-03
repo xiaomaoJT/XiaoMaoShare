@@ -8738,11 +8738,19 @@
       var m = /^https?:\/\/([^:/]+)/.exec(u);
       return m ? m[1] : u;
     }
+    /** chip 上显示 ip:port：http 和 https 端口不同，只显示 IP 会分不清哪个是哪个 */
+    function hostOf(u) {
+      return u.replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    }
     function select(i) {
       cur = i;
       var u = urls[i];
-      img.src = '/api/qr?px=560&ip=' + encodeURIComponent(ipOf(u));
+      img.src = '/api/qr?px=560&scheme=' + (u.indexOf('https://') === 0 ? 'https' : 'http')
+        + '&ip=' + encodeURIComponent(ipOf(u));
       urlEl.textContent = u;
+      tip.textContent = u.indexOf('https://') === 0
+        ? 'https 地址首次打开要点一次「继续前往」；之后主机停止服务，对方刷新页面仍能看到内容。'
+        : '对方扫开后会要求输入接入密码（默认 XM），再由你在这里点「同意」。';
       Array.prototype.forEach.call(ipsEl.children, function (b, k) {
         b.classList.toggle('on', k === i);
       });
@@ -8750,7 +8758,7 @@
     urls.forEach(function (u, i) {
       var b = document.createElement('button');
       b.className = 'qr-ip';
-      b.textContent = ipOf(u);
+      b.textContent = hostOf(u);
       b.title = u;
       b.onclick = function () { select(i); };
       ipsEl.appendChild(b);
