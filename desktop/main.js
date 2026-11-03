@@ -338,6 +338,9 @@ function createHostWindow() {
     // 窗口按钮由页面自绘成 macOS 红绿灯样式（跟随主题、不占独立一条），
     // 菜单功能从顶栏 ⋯ 按钮弹原生菜单回来（无边框窗口里菜单栏永远不显示，Alt 没用）
     frame: IS_WIN ? false : undefined,
+    // Win11（build 22000+）给无边框窗口开系统圆角，DWM 自己裁剪、最大化时不圆（系统行为）；
+    // Win10 的 DWM 没有这个能力，此项无效果 —— 只能透明窗口自绘，代价太大不值得
+    roundedCorners: true,
     titleBarStyle: IS_MAC ? 'hiddenInset' : undefined,
     trafficLightPosition: IS_MAC ? { x: 16, y: 18 } : undefined,
     webPreferences: {
