@@ -2071,13 +2071,46 @@
   html.desktop .top .mark{-webkit-app-region:no-drag}
   /* macOS 的红绿灯压在左上角，窄窗口时别让 logo 被盖住 */
   html.desktop-mac .top-in{padding-left:82px}
-  /* Windows 沉浸式：右上角是系统 overlay 按钮（最小化/最大化/关闭），
-     顶栏内容不许排到它底下 —— 窗口拉到最窄时最明显。
-     env(titlebar-area-width) 只在 overlay 启用时有效；兜底 100vw 算出 0，
-     max() 保证回落到默认 14px 内边距 */
-  html.desktop-win .top-in{
-    padding-right:calc(max(14px, 100vw - env(titlebar-area-width, 100vw) + 10px));
+  /* Windows 无边框：左上角是自绘红绿灯（macOS 同款），顶栏内容给它们让位 */
+  html.desktop-win .top-in{padding-left:118px}
+
+  /* 自绘窗口按钮条：fixed 挂 body 根，z-index 盖过所有弹层 —— 弹窗开着也能关窗口 */
+  .winctl{
+    position:fixed;top:0;left:0;z-index:9999;
+    display:flex;align-items:center;gap:8px;
+    height:58px;padding:0 16px;
+    -webkit-app-region:drag;user-select:none;-webkit-user-select:none;
   }
+  .winctl .wdot{
+    flex:none;width:12px;height:12px;border-radius:50%;padding:0;position:relative;
+    border:1px solid rgba(0,0,0,.14);cursor:pointer;
+    -webkit-app-region:no-drag;
+  }
+  .winctl .wdot::after{
+    content:'';position:absolute;inset:0;display:grid;place-items:center;
+    font:700 10px/1 'Segoe UI',system-ui,sans-serif;color:rgba(0,0,0,.55);
+    opacity:0;transition:opacity .12s;
+  }
+  .winctl .wdot.close{background:#ff5f57}
+  .winctl .wdot.close::after{content:'\00D7'}   /* × */
+  .winctl .wdot.min{background:#febc2e}
+  .winctl .wdot.min::after{content:'\2212'}     /* − */
+  .winctl .wdot.max{background:#28c840}
+  .winctl .wdot.max::after{content:'\25A1'}     /* □ */
+  .winctl.maxed .wdot.max::after{content:'\2750'} /* ❐ 还原 */
+  .winctl .wdot:hover::after{opacity:1}
+  .winctl .wdot:active{filter:brightness(.88)}
+  /* 窗口失焦：整体变灰、字形隐藏（macOS 行为） */
+  .winctl.dimm .wdot{background:#c8cdd5;border-color:rgba(0,0,0,.06)}
+  .winctl.dimm .wdot::after{opacity:0!important}
+  /* ⋯ 菜单按钮：把原生应用菜单弹回来（无边框窗口没有菜单栏，Alt 呼不出） */
+  .winctl .wmenu{
+    flex:none;width:24px;height:24px;margin-left:6px;padding:0;
+    display:grid;place-items:center;cursor:pointer;border-radius:8px;
+    background:var(--card-2);border:1px solid var(--line);color:var(--sub);
+    -webkit-app-region:no-drag;
+  }
+  .winctl .wmenu:hover{color:var(--text);background:var(--fill)}
 
   /* 设备互联面板 */
   .dc{display:flex;flex-direction:column;gap:18px;padding-bottom:2px}
@@ -2775,7 +2808,7 @@
     if (m) m.setAttribute('content', meta.meta);
     if (persist !== false) localStorage.setItem('xm.theme', meta.key);
     $('themeBtn').innerHTML = ICONTRAST;
-    if (typeof syncThemeBar === 'function') syncThemeBar();  // Windows overlay 按钮条跟着换色
+    // 自绘红绿灯是普通 DOM，颜色天然跟随主题变量，不用额外同步
   }
   (function initTheme() {
     var saved = localStorage.getItem('xm.theme');
@@ -3018,25 +3051,52 @@
       var html = document.documentElement;
       html.classList.add('desktop');
       if (api.insetTitlebar) html.classList.add('desktop-mac');
-      if (api.platform === 'win32') html.classList.add('desktop-win');
+      if (api.winControls) { html.classList.add('desktop-win'); setupWinControls(); }
       var btn = document.getElementById('linkBtn');
       if (btn) { btn.hidden = false; btn.innerHTML = ILINK; }
-      syncThemeBar();
     }
 
     /**
-     * Windows 沉浸式：overlay 按钮条的颜色跟着主题走。
-     * 三主题各给一组（strip 在系统层画，只能是实色，取各主题顶栏的视觉底色）。
+     * Windows 无边框：自绘 macOS 同款红绿灯（关/最小/最大化）+ ⋯ 菜单按钮。
+     * fixed 挂在 body 根上、z-index 拉满 —— 弹窗/遮罩全开着也点得到（mac 红绿灯同款行为）；
+     * 颜色是普通 DOM，天然跟随主题变量，不用向主进程同步。
      */
-    var THEME_BAR = {
-      light: { bg: '#fafbfc', fg: '#5a6473' },
-      dark:  { bg: '#0e1116', fg: '#a3aec1' },
-      glass: { bg: '#eef1f7', fg: '#5a6473' },
-    };
-    function syncThemeBar() {
-      if (!api || !api.setThemeBar || api.platform !== 'win32') return;
-      var c = THEME_BAR[currentTheme()] || THEME_BAR.light;
-      api.setThemeBar(c);
+    function setupWinControls() {
+      if (document.getElementById('winctl')) return;
+      var bar = document.createElement('div');
+      bar.id = 'winctl';
+      bar.className = 'winctl';
+      function dot(kind, title, act) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'wdot ' + kind;
+        b.title = title;
+        b.setAttribute('aria-label', title);
+        b.onclick = function () { api.winAction(act); };
+        return b;
+      }
+      bar.appendChild(dot('close', '关闭窗口', 'close'));
+      bar.appendChild(dot('min', '最小化', 'min'));
+      var max = dot('max', '最大化', 'max');
+      bar.appendChild(max);
+      var menu = document.createElement('button');
+      menu.type = 'button';
+      menu.className = 'wmenu';
+      menu.title = '应用菜单';
+      menu.setAttribute('aria-label', '应用菜单');
+      menu.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="19" cy="12" r="1.9"/></svg>';
+      menu.onclick = function () { api.appMenu(); };
+      bar.appendChild(menu);
+      document.body.appendChild(bar);
+      // 最大化状态由主进程推（双击/Win+方向键/贴靠这几种页面收不到事件）
+      if (api.onWinState) api.onWinState(function (st) {
+        var m = !!(st && st.maximized);
+        max.title = m ? '还原' : '最大化';
+        bar.classList.toggle('maxed', m);
+      });
+      // 失焦时红绿灯变灰、隐藏字形，跟 macOS 一致
+      window.addEventListener('blur', function () { bar.classList.add('dimm'); });
+      window.addEventListener('focus', function () { bar.classList.remove('dimm'); });
     }
 
     /** 一行「地址 + 复制」 */

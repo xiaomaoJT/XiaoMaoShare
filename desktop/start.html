@@ -32,6 +32,33 @@
   #drag { position: fixed; inset: 0 0 auto 0; height: 46px; z-index: 10; -webkit-app-region: drag; }
   html[data-platform="darwin"] #drag { height: 62px; }
 
+  /* Windows 无边框：左上角自绘 macOS 同款红绿灯（跟主界面同一套样式） */
+  .winctl{
+    position:fixed;top:0;left:0;z-index:20;
+    display:flex;align-items:center;gap:8px;height:46px;padding:0 16px;
+    -webkit-app-region:drag;user-select:none;
+  }
+  .winctl .wdot{
+    flex:none;width:12px;height:12px;border-radius:50%;padding:0;position:relative;
+    border:1px solid rgba(0,0,0,.14);cursor:pointer;-webkit-app-region:no-drag;
+  }
+  .winctl .wdot::after{
+    content:'';position:absolute;inset:0;display:grid;place-items:center;
+    font:700 10px/1 'Segoe UI',system-ui,sans-serif;color:rgba(0,0,0,.55);
+    opacity:0;transition:opacity .12s;
+  }
+  .winctl .wdot.close{background:#ff5f57}
+  .winctl .wdot.close::after{content:'\00D7'}
+  .winctl .wdot.min{background:#febc2e}
+  .winctl .wdot.min::after{content:'\2212'}
+  .winctl .wdot.max{background:#28c840}
+  .winctl .wdot.max::after{content:'\25A1'}
+  .winctl.maxed .wdot.max::after{content:'\2750'}
+  .winctl .wdot:hover::after{opacity:1}
+  .winctl .wdot:active{filter:brightness(.88)}
+  .winctl.dimm .wdot{background:#c8cdd5;border-color:rgba(0,0,0,.06)}
+  .winctl.dimm .wdot::after{opacity:0!important}
+
   .center { height: 100%; display: flex; align-items: center; justify-content: center; padding: 28px; }
 
   /* ---------------- 启动动画（默认就是它，避免先亮一下再跳） ---------------- */
@@ -290,6 +317,27 @@
   var curState = null;   // 最近一次 render 的状态，删历史条目后局部重画用
 
   if (api && api.platform) document.documentElement.dataset.platform = api.platform;
+
+  // Windows 无边框：启动页也要有窗口按钮（主界面那套 winctl 的精简版，不带菜单）
+  if (api && api.winControls) {
+    var bar = document.createElement('div');
+    bar.className = 'winctl';
+    [['close', '关闭窗口', 'close'], ['min', '最小化', 'min'], ['max', '最大化', 'max']].forEach(function (d) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'wdot ' + d[0];
+      b.title = d[1];
+      b.setAttribute('aria-label', d[1]);
+      b.onclick = function () { api.winAction(d[2]); };
+      bar.appendChild(b);
+    });
+    document.body.appendChild(bar);
+    if (api.onWinState) api.onWinState(function (st) {
+      bar.classList.toggle('maxed', !!(st && st.maximized));
+    });
+    window.addEventListener('blur', function () { bar.classList.add('dimm'); });
+    window.addEventListener('focus', function () { bar.classList.remove('dimm'); });
+  }
 
   function showBoot(tip) { bootTip.textContent = tip || '正在启动…'; boot.hidden = false; pick.hidden = true; }
   function showPick() { boot.hidden = true; pick.hidden = false; }

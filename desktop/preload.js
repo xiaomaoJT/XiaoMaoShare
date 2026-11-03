@@ -7,7 +7,7 @@
 
 const { contextBridge, ipcRenderer } = require('electron');
 
-const listeners = { links: [], openConnect: [], startError: [], startAskLink: [], notice: [] };
+const listeners = { links: [], openConnect: [], startError: [], startAskLink: [], notice: [], winState: [] };
 
 ipcRenderer.on('desktop:links', (_e, snap) => {
   listeners.links.forEach((fn) => { try { fn(snap); } catch { /* 页面自己的错 */ } });
@@ -30,6 +30,11 @@ ipcRenderer.on('desktop:start-ask-link', () => {
 // 主进程的一句话提示（例如「上次那台连不上，已回到我的主机」）
 ipcRenderer.on('desktop:notice', (_e, text) => {
   listeners.notice.forEach((fn) => { try { fn(text); } catch { /* 同上 */ } });
+});
+
+// Windows 无边框：主进程推最大化状态（双击/贴靠/Win+方向键页面收不到）
+ipcRenderer.on('desktop:win-state', (_e, st) => {
+  listeners.winState.forEach((fn) => { try { fn(st); } catch { /* 同上 */ } });
 });
 
 contextBridge.exposeInMainWorld('xmDesktop', {
@@ -84,10 +89,13 @@ contextBridge.exposeInMainWorld('xmDesktop', {
   copyImage: (dataUrl) => ipcRenderer.invoke('host:copyImage', dataUrl),
 
   /**
-   * Windows 沉浸式：把当前主题的标题栏配色交给主进程去调 overlay 按钮条。
-   * 非 Windows / overlay 未启用时主进程直接忽略，页面不用关心平台差异。
+   * Windows 无边框：页面自绘红绿灯窗口按钮 + ⋯ 菜单按钮。
+   * winControls = 这个平台要不要画窗口按钮；非 Windows 下是 false，页面不用关心。
    */
-  setThemeBar: (colors) => ipcRenderer.send('ui:theme-bar', colors),
+  winControls: process.platform === 'win32',
+  winAction: (act) => ipcRenderer.send('win:action', String(act || '')),
+  appMenu: () => ipcRenderer.send('ui:app-menu'),
+  onWinState: (fn) => { if (typeof fn === 'function') listeners.winState.push(fn); },
 
   onLinks: (fn) => { if (typeof fn === 'function') listeners.links.push(fn); },
   onOpenConnect: (fn) => { if (typeof fn === 'function') listeners.openConnect.push(fn); },

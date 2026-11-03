@@ -334,20 +334,12 @@ function createHostWindow() {
     icon: APP_ICON,
     backgroundColor: '#f4f6f9',
     show: false,
-    // 沉浸式顶栏：mac 红绿灯收进页面顶栏（老做法）；Windows 用系统 overlay 按钮
-    // —— 走 titleBarStyle:'hidden' + titleBarOverlay，不碰 frame:false，
-    // 保留 Win11 贴靠布局/拖边吸附/双击最大化，按钮行为全归系统
-    titleBarStyle: IS_MAC ? 'hiddenInset' : (IS_WIN ? 'hidden' : 'default'),
+    // 沉浸式顶栏：mac 红绿灯收进页面顶栏（hiddenInset）；Windows 去掉系统边框，
+    // 窗口按钮由页面自绘成 macOS 红绿灯样式（跟随主题、不占独立一条），
+    // 菜单功能从顶栏 ⋯ 按钮弹原生菜单回来（无边框窗口里菜单栏永远不显示，Alt 没用）
+    frame: IS_WIN ? false : undefined,
+    titleBarStyle: IS_MAC ? 'hiddenInset' : undefined,
     trafficLightPosition: IS_MAC ? { x: 16, y: 18 } : undefined,
-    titleBarOverlay: IS_WIN
-      ? {
-        color: '#fafbfc',      // 页面会按当前主题再调（ui:theme-bar），这里是首帧兜底
-        symbolColor: '#5a6473',
-        height: 58,            // = 页面 .top-in 的高度（10 + 38 + 10），严丝合缝
-      }
-      : undefined,
-    // 菜单不占窗口一行（Alt 呼出，加速键全保留），顶栏才真正归页面
-    autoHideMenuBar: IS_WIN,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -358,6 +350,16 @@ function createHostWindow() {
 
   if (saved && saved.isMaximized) hostWin.maximize();
   stealAppFocusOn(hostWin);   // mac：点到窗口，菜单栏就得是自己的
+
+  // Windows 自绘红绿灯需要知道最大化状态：双击标题栏、Win+方向键、贴靠吸附
+  // 这几种页面自己收不到事件，只能由主进程推
+  const pushWinState = () => {
+    if (hostWin && !hostWin.isDestroyed()) {
+      hostWin.webContents.send('desktop:win-state', { maximized: hostWin.isMaximized() });
+    }
+  };
+  hostWin.on('maximize', pushWinState);
+  hostWin.on('unmaximize', pushWinState);
 
   // 先显示启动页（不依赖本地服务器，双击后立即有反馈），服务就绪后再换真实页
   if (hostInfo) hostWin.loadURL(hostInfo.hostUrl); // 窗口重建时服务已在跑，直接进真实页，不必闪一下启动页
@@ -843,17 +845,23 @@ ipcMain.handle('host:copyImage', (_e, dataUrl) => {
   }
 });
 
-// Windows 沉浸式：页面换主题时同步调 overlay 按钮条的颜色，不然暗色主题下右上角一条白。
-// 只认主窗口的报告（连接窗口没有 overlay）；overlay 没启用时 setTitleBarOverlay 会抛，吞掉即可
-ipcMain.on('ui:theme-bar', (_e, colors) => {
-  if (!IS_WIN || !hostWin || hostWin.isDestroyed()) return;
-  const c = colors || {};
+// Windows 无边框：页面自绘的红绿灯窗口按钮（最小化/最大化/关闭）。
+// 关闭必须走 win.close() —— 「收进托盘/每次问我」的闸门在 close 事件里
+ipcMain.on('win:action', (_e, act) => {
+  if (!hostWin || hostWin.isDestroyed()) return;
+  if (act === 'min') hostWin.minimize();
+  else if (act === 'max') { if (hostWin.isMaximized()) hostWin.unmaximize(); else hostWin.maximize(); }
+  else if (act === 'close') hostWin.close();
+});
+
+// Windows 无边框：顶栏 ⋯ 按钮把应用菜单在窗口里弹出来。
+// 菜单功能全在这份 application menu 里（加速键也靠它注册，无边框下照常生效）
+ipcMain.on('ui:app-menu', () => {
+  if (!hostWin || hostWin.isDestroyed()) return;
   try {
-    hostWin.setTitleBarOverlay({
-      color: typeof c.bg === 'string' ? c.bg : '#fafbfc',
-      symbolColor: typeof c.fg === 'string' ? c.fg : '#5a6473',
-    });
-  } catch { /* overlay 未启用（如 Linux 走默认边框），忽略 */ }
+    const menu = Menu.getApplicationMenu();
+    if (menu) menu.popup({ window: hostWin });
+  } catch { /* 窗口正在销毁等情况，忽略 */ }
 });
 
 /** 前端点「连接」时想先挑一下最近连过的，这个开关由主进程控制窗口 */
