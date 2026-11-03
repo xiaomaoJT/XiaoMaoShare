@@ -16,6 +16,7 @@ const { app, BrowserWindow, ipcMain, Menu, Tray, shell, clipboard, dialog, nativ
 const path = require('node:path');
 const fs = require('node:fs');
 const crypto = require('node:crypto');
+const https = require('node:https');
 const { Readable } = require('node:stream');
 const { once } = require('node:events');
 
@@ -2316,6 +2317,70 @@ async function readWinCid(win) {
 }
 
 /**
+ * fetch 的局域网 HTTPS 兼容层。
+ *
+ * 全局 fetch（Node/undici）不吃 Chromium 那套「证书例外」，对自签证书一律拒绝 ——
+ * 主机开 HTTPS 后，收消息轮询、快照缓存、悬浮球发东西就全都静默失败了。
+ * 只有「https + 私网地址」才走这里：node:https + rejectUnauthorized:false，
+ * 其余情况（http、公网 https）原样交给全局 fetch，行为不变。
+ * 返回 fetch 同款的 { ok, status, json(), text(), arrayBuffer() }，调用方无感。
+ */
+function xmFetch(url, init) {
+  let u = null;
+  try { u = new URL(url); } catch { return Promise.reject(new Error('bad url')); }
+  if (u.protocol !== 'https:' || !PRIVATE_HOST_RE.test(u.hostname)) return fetch(url, init);
+
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: u.hostname,
+      port: u.port || 443,
+      path: u.pathname + u.search,
+      method: (init && init.method) || 'GET',
+      headers: Object.assign({}, (init && init.headers) || {}),
+      rejectUnauthorized: false,
+    }, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => {
+        const buf = Buffer.concat(chunks);
+        const status = res.statusCode || 0;
+        resolve({
+          ok: status >= 200 && status < 300,
+          status,
+          json: () => new Promise((res2, rej2) => { try { res2(JSON.parse(buf.toString('utf8'))); } catch (e) { rej2(e); } }),
+          text: () => Promise.resolve(buf.toString('utf8')),
+          arrayBuffer: () => Promise.resolve(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)),
+        });
+      });
+    });
+    req.on('error', reject);
+    const body = init && init.body;
+    if (body == null) {
+      req.end();
+    } else if (typeof body === 'string' || Buffer.isBuffer(body) || body instanceof Uint8Array) {
+      req.end(body);
+    } else if (typeof body.pipe === 'function') {
+      body.pipe(req);   // Node 流：悬浮球分片上传传的就是它
+    } else if (typeof body.getReader === 'function') {
+      // Web ReadableStream（Readable.toWeb 的产物）
+      (async () => {
+        const reader = body.getReader();
+        try {
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (!req.write(Buffer.from(value))) await new Promise((r) => req.once('drain', r));
+          }
+          req.end();
+        } catch (e) { req.destroy(e); }
+      })();
+    } else {
+      req.end(String(body));
+    }
+  });
+}
+
+/**
  * 给一个窗口挂上「收消息提醒」。本机页面和别人主机的页面走同一套逻辑，
  * 页面版本不再影响通知能不能弹。
  */
@@ -2351,7 +2416,7 @@ function startNoticeWatch(win) {
 
     let data = null;
     try {
-      const r = await fetch(base + '/api/list?cid=' + encodeURIComponent(st.cid), {
+      const r = await xmFetch(base + '/api/list?cid=' + encodeURIComponent(st.cid), {
         headers: { 'x-xm-cid': st.cid },
       });
       if (!r.ok) return;
@@ -2909,7 +2974,7 @@ const BALL_UPLOAD_CHUNK = 8 * 1024 * 1024;
  */
 async function ballCapsOf(t, cid) {
   try {
-    const r = await fetch(ballUrl(t, '/api/list?cid=' + encodeURIComponent(cid)), {
+    const r = await xmFetch(ballUrl(t, '/api/list?cid=' + encodeURIComponent(cid)), {
       headers: { 'x-xm-cid': cid },
     });
     if (!r.ok) return {};
@@ -3051,7 +3116,7 @@ function registerBallIpc() {
     const t = ballTarget();
     if (!t) return { ok: false, online: false, error: '本机服务没开' };
     try {
-      const r = await fetch(ballUrl(t, '/api/list'), { headers: { 'x-xm-cid': ballCidFor(t) } });
+      const r = await xmFetch(ballUrl(t, '/api/list'), { headers: { 'x-xm-cid': ballCidFor(t) } });
       if (!r.ok) {
         const j = await r.json().catch(() => ({}));
         ballOnline = false;
@@ -3388,7 +3453,7 @@ function registerBallIpc() {
       'content-type': 'application/octet-stream',
       'content-length': String(len),
     });
-    const post = (q, start, end) => fetch(ballUrl(t, q), {
+    const post = (q, start, end) => xmFetch(ballUrl(t, q), {
       method: 'POST',
       body: Readable.toWeb(fs.createReadStream(file, start == null ? undefined : { start, end: end - 1 })),
       duplex: 'half',
@@ -3477,7 +3542,7 @@ function registerBallIpc() {
     // 文字排在最前面：一条消息里先说事，再挂附件
     const all = body ? [{ type: 'text', text: body }, ...parts] : parts;
     try {
-      const r = await fetch(ballUrl(t, '/api/send'), {
+      const r = await xmFetch(ballUrl(t, '/api/send'), {
         method: 'POST',
         headers: { 'x-xm-cid': cid, 'content-type': 'application/json' },
         body: JSON.stringify({ cid, parts: all }),
@@ -3549,6 +3614,30 @@ function ensureWinShortcut() {
     });
   } catch { /* 没权限就算了：安装版不靠这条兜底 */ }
 }
+
+/**
+ * 局域网自签证书放行。
+ *
+ * 主机开了 HTTPS 后，对端拿到的证书是我们自己签发的 —— 浏览器里可以点「继续访问」，
+ * Electron 里没有这个按钮，不做处理就直接加载失败（表现为「连不上」，哪怕是好好的）。
+ * 这里只放行两个条件同时成立的请求：
+ *   1) 目标是本机 / 局域网地址（私网段），公网域名的坏证书照旧拦截；
+ *   2) 证书的 CN 是我们自己签发时用的 XiaoMaoShare。
+ * 知道为什么这么窄就别放宽：一旦无条件放行，连过去的中途被劫持也照样过。
+ */
+const PRIVATE_HOST_RE = /^(localhost|127\.\d+\.\d+\.\d+|::1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|169\.254\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)$/i;
+
+app.on('certificate-error', (event, _webContents, url, _error, certificate, callback) => {
+  let host = '';
+  try { host = new URL(url).hostname; } catch { /* 解析不了就按不放行走 */ }
+  const cn = String(certificate && (certificate.subjectName || '') );
+  if (PRIVATE_HOST_RE.test(host) && /XiaoMaoShare/i.test(cn)) {
+    event.preventDefault();
+    callback(true);
+    return;
+  }
+  callback(false);
+});
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
