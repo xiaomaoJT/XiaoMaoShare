@@ -3752,29 +3752,58 @@ function stopServer() {
  * 生成并持久化自签证书，供 HTTPS 服务使用。
  * 证书存到用户目录（跨平台都写得了），首次生成后用同一份，避免每次重启都换证
  * （换证会让浏览器把「继续访问」的例外清掉，接收端又得点一次警告）。
- * 生成失败（比如环境里没有 openssl）就返回 null，HTTPS 自动降级为不可用，不影响 HTTP。
+ *
+ * 生成有两条路，同样的 PEM 落盘位置，谁先成功用谁：
+ *   1) openssl（mac/Linux 上基本都有，历史上一直用它）
+ *   2) 纯 JS（selfcert.js）—— Windows 默认没有 openssl，PATH 里也未必有，
+ *      只靠第 1 条会直接 ENOENT、HTTPS 整个不可用。第 2 条不依赖任何外部命令。
+ * 两条都失败才返回 null（HTTPS 降级不可用，HTTP 不受影响）。
  */
 function ensureCert() {
+  const dir = path.join(os.homedir(), '.xiaomao-share', 'certs');
+  const keyPath = path.join(dir, 'key.pem');
+  const certPath = path.join(dir, 'cert.pem');
   try {
-    const dir = path.join(os.homedir(), '.xiaomao-share', 'certs');
-    const keyPath = path.join(dir, 'key.pem');
-    const certPath = path.join(dir, 'cert.pem');
     if (fs.existsSync(keyPath) && fs.existsSync(certPath)) {
       return { key: fs.readFileSync(keyPath), cert: fs.readFileSync(certPath) };
     }
-    fs.mkdirSync(dir, { recursive: true });
-    const sans = ['IP:127.0.0.1', 'DNS:localhost'];
-    for (const n of lanAddresses()) if (n.address) sans.push('IP:' + n.address);
+  } catch (e) {
+    // 读不出来就当没有，下面重新生成
+  }
+
+  const sans = ['IP:127.0.0.1', 'DNS:localhost'];
+  const ips = [];
+  for (const n of lanAddresses()) if (n.address) { sans.push('IP:' + n.address); ips.push(n.address); }
+
+  fs.mkdirSync(dir, { recursive: true });
+
+  // 路线 1：openssl
+  try {
     execFileSync('openssl', [
       'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
       '-keyout', keyPath, '-out', certPath, '-days', '3650',
       '-subj', '/CN=XiaoMaoShare', '-addext', 'subjectAltName=' + sans.join(','),
     ], { stdio: 'ignore' });
     return { key: fs.readFileSync(keyPath), cert: fs.readFileSync(certPath) };
-  } catch (e) {
-    httpsError = '自签证书生成失败：' + e.message;
-    console.warn('[https]', httpsError, '（HTTP 不受影响）');
-    return null;
+  } catch (e1) {
+    // 路线 2：纯 JS（Windows 上走的就是这条）
+    try {
+      const made = require('./selfcert').createSelfSignedCert({
+        commonName: 'XiaoMaoShare',
+        days: 3650,
+        sans: [{ type: 'dns', value: 'localhost' }, { type: 'ip', value: '127.0.0.1' }]
+          .concat(ips.map((ip) => ({ type: 'ip', value: ip }))),
+      });
+      fs.writeFileSync(keyPath, made.key);
+      fs.writeFileSync(certPath, made.cert);
+      console.log('[https] openssl 不可用（' + (e1 && e1.code || e1.message) + '），已用内置生成器签发证书');
+      return { key: made.key, cert: made.cert };
+    } catch (e2) {
+      httpsError = '自签证书生成失败：' + ((e1 && (e1.code || e1.message)) || 'openssl 不可用') +
+        ' / ' + ((e2 && e2.message) || '内置生成器失败');
+      console.warn('[https]', httpsError, '（HTTP 不受影响）');
+      return null;
+    }
   }
 }
 

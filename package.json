@@ -38,26 +38,27 @@
     },
     "files": [
       "server.js",
+      "selfcert.js",
       "public/**",
       "desktop/**",
       "package.json"
     ],
-  "mac": {
-    "target": [
-      "dmg",
-      "zip"
-    ],
-    "category": "public.app-category.utilities",
-    "icon": "build/icon-mac.png",
-    "identity": "-",
-    "hardenedRuntime": true,
-    "gatekeeperAssess": false,
-    "entitlements": "build/entitlements.mac.plist",
-    "entitlementsInherit": "build/entitlements.mac.inherit.plist",
-    "extendInfo": {
-      "NSUserNotificationAlertStyle": "alert"
-    }
-  },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.utilities",
+      "icon": "build/icon-mac.png",
+      "identity": "-",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.inherit.plist",
+      "extendInfo": {
+        "NSUserNotificationAlertStyle": "alert"
+      }
+    },
     "win": {
       "target": [
         "nsis",
