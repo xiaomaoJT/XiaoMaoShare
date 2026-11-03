@@ -70,6 +70,7 @@ const server = require('../server.js');
 const fileType = require('../public/filetype.js');
 
 const IS_MAC = process.platform === 'darwin';
+const IS_WIN = process.platform === 'win32';
 const DEFAULT_PORT = 6767;
 
 let hostWin = null;   // 我自己的主机（主控）
@@ -333,9 +334,20 @@ function createHostWindow() {
     icon: APP_ICON,
     backgroundColor: '#f4f6f9',
     show: false,
-    // macOS 去掉系统标题栏，把红绿灯压进页面顶栏，App 感更强
-    titleBarStyle: IS_MAC ? 'hiddenInset' : 'default',
+    // 沉浸式顶栏：mac 红绿灯收进页面顶栏（老做法）；Windows 用系统 overlay 按钮
+    // —— 走 titleBarStyle:'hidden' + titleBarOverlay，不碰 frame:false，
+    // 保留 Win11 贴靠布局/拖边吸附/双击最大化，按钮行为全归系统
+    titleBarStyle: IS_MAC ? 'hiddenInset' : (IS_WIN ? 'hidden' : 'default'),
     trafficLightPosition: IS_MAC ? { x: 16, y: 18 } : undefined,
+    titleBarOverlay: IS_WIN
+      ? {
+        color: '#fafbfc',      // 页面会按当前主题再调（ui:theme-bar），这里是首帧兜底
+        symbolColor: '#5a6473',
+        height: 58,            // = 页面 .top-in 的高度（10 + 38 + 10），严丝合缝
+      }
+      : undefined,
+    // 菜单不占窗口一行（Alt 呼出，加速键全保留），顶栏才真正归页面
+    autoHideMenuBar: IS_WIN,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -350,7 +362,13 @@ function createHostWindow() {
   // 先显示启动页（不依赖本地服务器，双击后立即有反馈），服务就绪后再换真实页
   if (hostInfo) hostWin.loadURL(hostInfo.hostUrl); // 窗口重建时服务已在跑，直接进真实页，不必闪一下启动页
   else hostWin.loadFile(START_PAGE);
-  hostWin.show();
+  // 首帧就绪再上屏，别让人看见白屏闪一下；兜底 2.5s 强制显示 —— 页面卡住也不能对着空窗口
+  hostWin.once('ready-to-show', () => {
+    if (hostWin && !hostWin.isDestroyed() && !hostWin.isVisible()) hostWin.show();
+  });
+  setTimeout(() => {
+    if (hostWin && !hostWin.isDestroyed() && !hostWin.isVisible()) hostWin.show();
+  }, 2500);
   startNoticeWatch(hostWin);   // 收消息提醒由主进程统一负责（页面只负责展示）
   attachContextMenu(hostWin);  // 浏览器同款右键：图片可复制，输入框有剪切/粘贴
 
@@ -823,6 +841,19 @@ ipcMain.handle('host:copyImage', (_e, dataUrl) => {
   } catch (e) {
     return { error: (e && e.message) || '复制失败' };
   }
+});
+
+// Windows 沉浸式：页面换主题时同步调 overlay 按钮条的颜色，不然暗色主题下右上角一条白。
+// 只认主窗口的报告（连接窗口没有 overlay）；overlay 没启用时 setTitleBarOverlay 会抛，吞掉即可
+ipcMain.on('ui:theme-bar', (_e, colors) => {
+  if (!IS_WIN || !hostWin || hostWin.isDestroyed()) return;
+  const c = colors || {};
+  try {
+    hostWin.setTitleBarOverlay({
+      color: typeof c.bg === 'string' ? c.bg : '#fafbfc',
+      symbolColor: typeof c.fg === 'string' ? c.fg : '#5a6473',
+    });
+  } catch { /* overlay 未启用（如 Linux 走默认边框），忽略 */ }
 });
 
 /** 前端点「连接」时想先挑一下最近连过的，这个开关由主进程控制窗口 */

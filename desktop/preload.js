@@ -83,6 +83,12 @@ contextBridge.exposeInMainWorld('xmDesktop', {
   /** 复制图片到系统剪贴板：传 PNG 的 dataURL，聊天软件里直接粘贴（浏览器 http 下没有剪贴板 API，桌面独占） */
   copyImage: (dataUrl) => ipcRenderer.invoke('host:copyImage', dataUrl),
 
+  /**
+   * Windows 沉浸式：把当前主题的标题栏配色交给主进程去调 overlay 按钮条。
+   * 非 Windows / overlay 未启用时主进程直接忽略，页面不用关心平台差异。
+   */
+  setThemeBar: (colors) => ipcRenderer.send('ui:theme-bar', colors),
+
   onLinks: (fn) => { if (typeof fn === 'function') listeners.links.push(fn); },
   onOpenConnect: (fn) => { if (typeof fn === 'function') listeners.openConnect.push(fn); },
   onStartError: (fn) => { if (typeof fn === 'function') listeners.startError.push(fn); },

@@ -2065,12 +2065,19 @@
      桌面壳专属（只有 Electron 里才有 window.xmDesktop）
      ============================================================ */
   /* 顶栏当窗口标题栏用：空白处可拖动窗口，按钮仍然点得动 */
-  html.desktop .top{-webkit-app-region:drag}
+  html.desktop .top{-webkit-app-region:drag;-webkit-user-select:none;user-select:none}
   html.desktop .top button,
   html.desktop .top a,
   html.desktop .top .mark{-webkit-app-region:no-drag}
   /* macOS 的红绿灯压在左上角，窄窗口时别让 logo 被盖住 */
   html.desktop-mac .top-in{padding-left:82px}
+  /* Windows 沉浸式：右上角是系统 overlay 按钮（最小化/最大化/关闭），
+     顶栏内容不许排到它底下 —— 窗口拉到最窄时最明显。
+     env(titlebar-area-width) 只在 overlay 启用时有效；兜底 100vw 算出 0，
+     max() 保证回落到默认 14px 内边距 */
+  html.desktop-win .top-in{
+    padding-right:calc(max(14px, 100vw - env(titlebar-area-width, 100vw) + 10px));
+  }
 
   /* 设备互联面板 */
   .dc{display:flex;flex-direction:column;gap:18px;padding-bottom:2px}
@@ -2768,6 +2775,7 @@
     if (m) m.setAttribute('content', meta.meta);
     if (persist !== false) localStorage.setItem('xm.theme', meta.key);
     $('themeBtn').innerHTML = ICONTRAST;
+    if (typeof syncThemeBar === 'function') syncThemeBar();  // Windows overlay 按钮条跟着换色
   }
   (function initTheme() {
     var saved = localStorage.getItem('xm.theme');
@@ -3010,8 +3018,25 @@
       var html = document.documentElement;
       html.classList.add('desktop');
       if (api.insetTitlebar) html.classList.add('desktop-mac');
+      if (api.platform === 'win32') html.classList.add('desktop-win');
       var btn = document.getElementById('linkBtn');
       if (btn) { btn.hidden = false; btn.innerHTML = ILINK; }
+      syncThemeBar();
+    }
+
+    /**
+     * Windows 沉浸式：overlay 按钮条的颜色跟着主题走。
+     * 三主题各给一组（strip 在系统层画，只能是实色，取各主题顶栏的视觉底色）。
+     */
+    var THEME_BAR = {
+      light: { bg: '#fafbfc', fg: '#5a6473' },
+      dark:  { bg: '#0e1116', fg: '#a3aec1' },
+      glass: { bg: '#eef1f7', fg: '#5a6473' },
+    };
+    function syncThemeBar() {
+      if (!api || !api.setThemeBar || api.platform !== 'win32') return;
+      var c = THEME_BAR[currentTheme()] || THEME_BAR.light;
+      api.setThemeBar(c);
     }
 
     /** 一行「地址 + 复制」 */
