@@ -51,7 +51,7 @@
     --shadow:0 1px 2px rgba(16,24,40,.04), 0 10px 28px -14px rgba(16,24,40,.22);
     --shadow-sm:0 1px 2px rgba(16,24,40,.05);
     --glass:0px;
-    /* 滚动条：细、圆、低调；静止不动 0.9 秒后自动隐去（.scrolling 由脚本挂） */
+    /* 滚动条：细、圆、低调；自绘悬浮条，滚动/贴边浮现，静止 0.9s 后淡出 */
     --sb-thumb:rgba(16,24,40,.24);
     --sb-thumb-hover:rgba(16,24,40,.42);
     /* --tfs：正文字号倍率，外观设置里可调（0.92 / 1 / 1.12 / 1.26） */
@@ -102,20 +102,26 @@
   }
 
   html,body{margin:0;padding:0}
-  /* ---------------- 滚动条：细、圆、随主题，静止 0.9s 后自动隐去 ----------------
-     用 3px 透明边框把滑块「挤细」，两侧留出空气；静止时只把颜色变透明，
-     位置和通道都还在，不会因为消失/出现让内容左右跳一下 */
-  html::-webkit-scrollbar{width:11px;height:11px}
-  html::-webkit-scrollbar-track{background:transparent}
-  html::-webkit-scrollbar-thumb{
-    background-color:var(--sb-thumb);
-    border:3px solid transparent; background-clip:content-box; border-radius:999px;
-    transition:background-color .22s ease;
+  /* ---------------- 滚动条：沉浸式悬浮条 ----------------
+     原生滚动条即使轨道透明，也要在右边占一条 11px 的「空地」，
+     内容到边就断在那儿，背景对不齐、看着不沉浸。
+     干脆把原生滚动条整个藏掉，自绘一条悬浮细圆条：
+     不占布局、没有轨道，滚动 / 贴近右边缘时浮现，停 0.9s 淡出。
+     显隐与画位由脚本维护（搜 flashScrollbar）；可以按住拖动。 */
+  html{scrollbar-width:none;-ms-overflow-style:none}
+  html::-webkit-scrollbar{width:0;height:0;display:none}
+  #xmSb{
+    position:fixed; top:0; right:0; width:12px; height:100vh; z-index:60;
+    pointer-events:none; opacity:0; transition:opacity .22s ease;
   }
-  html::-webkit-scrollbar-thumb:hover,
-  html::-webkit-scrollbar-thumb:active{background-color:var(--sb-thumb-hover)}
-  html:not(.scrolling)::-webkit-scrollbar-thumb{background-color:transparent}
-  html::-webkit-scrollbar-corner{background:transparent}
+  #xmSb.on{opacity:1}
+  #xmSb b{
+    position:absolute; left:3px; top:0; width:6px; height:36px; border-radius:999px;
+    background:var(--sb-thumb); transition:background-color .18s ease;
+    pointer-events:auto; cursor:default; touch-action:none; will-change:transform;
+  }
+  #xmSb:not(.on) b{pointer-events:none}   /* 隐藏时别留下看不见的可点热区 */
+  #xmSb.on b:hover{background:var(--sb-thumb-hover)}
   body{
     min-height:100vh; display:flex; flex-direction:column; overflow-x:hidden;    color:var(--text); background-color:var(--bg); background-image:var(--bg-image);
     background-attachment:fixed; background-repeat:no-repeat;
@@ -2409,6 +2415,9 @@
 <footer class="foot">
   <b>XiaoMao</b><span class="sep">·</span><span>局域网互传</span>
 </footer>
+
+<!-- 沉浸式悬浮滚动条：原生滚动条被整体隐藏（见样式区注释），这条是自绘的 -->
+<div id="xmSb" aria-hidden="true"><b></b></div>
 
 <div class="drop" id="drop"><div class="drop-in">松开即可发送</div></div>
 <div class="read-pop" id="readPop" hidden></div>
@@ -9278,16 +9287,65 @@
   // 直接读计算值（.composer-bar 的 sticky top），平台差异由 CSS 决定，这里不重复硬编码
   var stickAt = 56;
   try { stickAt = parseInt(getComputedStyle(composerBar).top, 10) || 56; } catch (e) { /* 拿不到就退回老值 */ }
-  // 滚动条自动显隐：滚动时给 <html> 挂 .scrolling，停手 0.9s 后摘掉（滑块淡出）。
-  // 只在滚动/贴近右边缘时出现 —— 平时不占视线，又随时找得到
-  var sbTimer = null;
-  function flashScrollbar() {
-    var root = document.documentElement;
-    if (!root.classList.contains('scrolling')) root.classList.add('scrolling');
-    clearTimeout(sbTimer);
-    sbTimer = setTimeout(function () { root.classList.remove('scrolling'); }, 900);
+  // 沉浸式滚动条：滚动/贴近右边缘时浮现，停手 0.9s 淡出；按住滑块可拖
+  var sbEl = $('xmSb'), sbThumb = sbEl ? sbEl.querySelector('b') : null;
+  var sbTimer = null, sbDrag = null;
+  function sbMetrics() {
+    var doc = document.documentElement;
+    var ch = Math.max(doc.scrollHeight, document.body ? document.body.scrollHeight : 0);
+    var vh = window.innerHeight;
+    var max = ch - vh;
+    if (max < 8) return null;            // 不足一屏，没有可滚的东西
+    var h = Math.max(36, Math.round(vh * vh / ch));
+    var track = vh - 8;                  // 上下各留 4px 空气
+    if (h > track) h = track;
+    return { max: max, h: h, span: track - h };
   }
-  window.addEventListener('scroll', flashScrollbar, { passive: true });
+  function sbPaint() {
+    if (!sbEl || !sbThumb) return;
+    var m = sbMetrics();
+    if (!m) { sbEl.style.display = 'none'; sbEl.classList.remove('on'); return; }
+    sbEl.style.display = 'block';
+    var y = window.scrollY || window.pageYOffset || 0;
+    var p = m.max > 0 ? Math.min(1, Math.max(0, y / m.max)) : 0;
+    sbThumb.style.height = m.h + 'px';
+    sbThumb.style.transform = 'translateY(' + (4 + p * m.span).toFixed(1) + 'px)';
+  }
+  function sbShow() {
+    if (!sbEl) return;
+    sbPaint();
+    sbEl.classList.add('on');
+    clearTimeout(sbTimer);
+    sbTimer = setTimeout(function () { if (!sbDrag) sbEl.classList.remove('on'); }, 900);
+  }
+  function flashScrollbar() { sbShow(); }   // 旧名保留：滚动/右边缘入口都走这里
+  if (sbEl && sbThumb) {
+    sbThumb.addEventListener('pointerdown', function (e) {
+      var m = sbMetrics();
+      if (!m) return;
+      e.preventDefault();
+      sbDrag = { startY: e.clientY, startScroll: window.scrollY || 0, m: m };
+      try { sbThumb.setPointerCapture(e.pointerId); } catch (err) {}
+      sbShow();
+    });
+    sbThumb.addEventListener('pointermove', function (e) {
+      if (!sbDrag) return;
+      var m = sbDrag.m;
+      var dy = e.clientY - sbDrag.startY;
+      var sc = sbDrag.startScroll + (m.span > 0 ? dy / m.span * m.max : 0);
+      window.scrollTo(0, Math.max(0, Math.min(m.max, sc)));
+      sbPaint();
+    });
+    ['pointerup', 'pointercancel'].forEach(function (ev) {
+      sbThumb.addEventListener(ev, function () { sbDrag = null; sbShow(); });
+    });
+    // 内容增删 / 图片加载完 / 主题切换都可能改变页面高度，高度变了重画滑块
+    if (window.ResizeObserver) {
+      new ResizeObserver(function () { sbPaint(); }).observe(document.body);
+    }
+    window.addEventListener('resize', sbPaint);
+    sbPaint();
+  }
   window.addEventListener('mousemove', function (e) {
     if (e.clientX >= window.innerWidth - 16) flashScrollbar();
   }, { passive: true });
@@ -9296,6 +9354,7 @@
     var y = window.scrollY || window.pageYOffset || 0;
     if (composerBar) composerBar.classList.toggle('stuck', y > stickAt - 3);
     if (toTop) toTop.hidden = y < 600;
+    sbShow();
   }
   window.addEventListener('scroll', onScroll, { passive: true });
   if (toTop) toTop.addEventListener('click', function () { window.scrollTo({ top: 0, behavior: 'smooth' }); });
@@ -9579,6 +9638,14 @@
     var addr = $('addr');
     addr.textContent = location.host;
 
+    // 从 http 切到 https（横幅「切换到 HTTPS」）：两个 origin 的 localStorage 不通用，
+    // 设备指纹要靠跳转时带过来的 hash 认领，认领完立刻抹掉，免得留在地址栏/历史里
+    var xmHashCid = /(?:^|[#&])xmcid=([A-Za-z0-9_-]{3,64})/.exec(location.hash || '');
+    if (xmHashCid) {
+      try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
+      if (!state.cid) setCid(xmHashCid[1]);
+    }
+
     // 第一次打开就先生成设备指纹，服务端才能把授权绑到这台设备上
     if (!state.cid) setCid(newCid());
 
@@ -9776,7 +9843,14 @@
       b.style.display = 'flex';
       document.getElementById('xmHttpsGo').addEventListener('click', function () {
         var u = 'https://' + location.hostname + ':' + d.port + '/';
-        window.open(u, '_blank');
+        // 同页跳转：桌面壳里会在连接窗口内原地换协议（不能 window.open ——
+        // 新开的窗口会被主进程转交系统浏览器）。http 与 https 是两个 origin，
+        // localStorage 里的设备指纹带不过去，会把「已授权」丢掉 ——
+        // 用 hash 捎一次 cid（hash 不进服务端日志和 Referer，见 boot 里的认领）。
+        var cid = '';
+        try { cid = localStorage.getItem('xm.cid') || ''; } catch (e) {}
+        if (cid) u += '#xmcid=' + encodeURIComponent(cid);
+        location.href = u;
       });
       document.getElementById('xmHttpsClose').addEventListener('click', function () { b.style.display = 'none'; });
     }).catch(function () {});
