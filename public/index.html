@@ -6696,7 +6696,9 @@
 
   function hasContent() {
     return compose.some(function (b) {
-      return b.type === 'text' ? !!b.el.value.trim() : !!b.fid;
+      if (b.type === 'text') return !!b.el.value.trim();
+      // 上传中也算内容：允许先点发送，sendAll 会等上传完成再真正发出
+      return !!b.fid || !!(b.done && !b.error);
     });
   }
 
@@ -6952,8 +6954,12 @@
   async function sendAll() {
     if (sendBtn.disabled) return;
     sendBtn.disabled = true;
+    var waiting = false;
     try {
-      if (compose.some(function (b) { return b.done; })) {
+      if (compose.some(function (b) { return b.type === 'media' && b.done && !b.fid && !b.error; })) {
+        // 还有附件在传：先等它们传完，按钮亮「发送中…」给个反馈
+        waiting = true;
+        sendBtn.textContent = '发送中…';
         await Promise.all(compose.map(function (b) { return b.done || null; }));
       }
       var bad = compose.filter(function (b) { return b.type === 'media' && !b.fid; });
@@ -6980,6 +6986,8 @@
       if (e.tooBig) showLimitNotice(m);
       toast(m);
     } finally {
+      sendBtn.textContent = '发送';
+      waiting = false;
       syncSend();
     }
   }

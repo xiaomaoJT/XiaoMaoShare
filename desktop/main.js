@@ -280,6 +280,43 @@ function stealAppFocusOn(win) {
   win.on('show', () => { if (!quitting) setImmediate(activateApp); });
 }
 
+/**
+ * 给页面补上浏览器自带的那个右键菜单（Electron 没有默认右键菜单，右键是空的）。
+ * 图片上：复制图片 / 复制图片地址；文字上：复制 / 粘贴 / 剪切 / 全选。
+ * 走主进程 copyImageAt，不依赖页面的 navigator.clipboard（http://IP 非安全上下文
+ * 下那个 API 根本不存在），也不依赖对方主机是否升级 HTTPS —— 主窗口、连接窗口通吃。
+ */
+function attachContextMenu(win) {
+  const wc = win.webContents;
+  wc.on('context-menu', (_e, params) => {
+    const items = [];
+    if (params.mediaType === 'image' && params.srcURL) {
+      items.push(
+        {
+          label: '复制图片',
+          click: () => { try { wc.copyImageAt(params.x, params.y); } catch {} },
+        },
+        {
+          label: '复制图片地址',
+          click: () => { clipboard.writeText(params.srcURL); },
+        },
+      );
+    }
+    if (params.isEditable) {
+      if (items.length) items.push({ type: 'separator' });
+      if (params.editFlags.canCut) items.push({ role: 'cut', label: '剪切' });
+      if (params.editFlags.canCopy) items.push({ role: 'copy', label: '复制' });
+      if (params.editFlags.canPaste) items.push({ role: 'paste', label: '粘贴' });
+      items.push({ role: 'selectAll', label: '全选' });
+    } else if (params.editFlags && params.editFlags.canCopy && params.selectionText) {
+      if (items.length) items.push({ type: 'separator' });
+      items.push({ role: 'copy', label: '复制文字' });
+    }
+    if (!items.length) return;   // 空白处右键不弹菜单，跟浏览器上只对图片/文字弹一致
+    Menu.buildFromTemplate(items).popup({ window: win });
+  });
+}
+
 function createHostWindow() {
   // 恢复上次的大小与位置；最大化状态单独记，还原态的几何始终保留一份
   const saved = validWindowBounds(readSettings().windowBounds);
@@ -313,6 +350,7 @@ function createHostWindow() {
   else hostWin.loadFile(START_PAGE);
   hostWin.show();
   startNoticeWatch(hostWin);   // 收消息提醒由主进程统一负责（页面只负责展示）
+  attachContextMenu(hostWin);  // 浏览器同款右键：图片可复制，输入框有剪切/粘贴
 
   // 记住窗口大小与位置：拖动/缩放中只更新内存里的还原态，防抖 400ms 落盘；
   // 最大化、全屏、最小化时的瞬时几何不记录，还原态始终是上一次「正常」的样子
@@ -487,6 +525,7 @@ function openLink(rawUrl) {
     if (/^https?:/i.test(url)) shell.openExternal(url);
     return { action: 'deny' };
   });
+  attachContextMenu(win);   // 连接窗口也要浏览器同款右键（图片复制等）
 
   // 这是最后一个可见窗口时，点关闭 = 整个应用「消失」进托盘 —— 得和主窗口一个待遇：
   // 「每次问我」就问一句，别闷声把界面全收走（用户会以为程序退了，连问都不问）
