@@ -1888,10 +1888,12 @@
        否则它会按内容撑到 480px 宽，overflow-x 永远不触发，右边几页点不到 */
     .set-nav{
       width:auto;max-width:100%;flex-direction:row;gap:6px;overflow-x:auto;scrollbar-width:none;
-      position:sticky;top:0;z-index:3;
-      margin:0;padding:2px 0 8px;
+      position:sticky;top:0;z-index:3;align-items:center;
+      /* 圆角分段条 + 上下对称内边距：原来 2px 0 8px 的不对称 padding 让 tab 偏上，
+         直角白条贴在弹窗上也突兀；底部留白改用 margin，吸顶时不再吃掉内容 */
+      margin:0 0 10px;padding:4px 6px;border-radius:14px;
       background:var(--card);
-      box-shadow:0 10px 14px -14px rgba(16,24,40,.62);
+      box-shadow:var(--shadow-sm);
     }
     .set-nav::-webkit-scrollbar{display:none}
     .set-tab{
@@ -1907,7 +1909,7 @@
     :root[data-theme="glass"] .set-nav{
       background:rgba(255,255,255,.55);
       -webkit-backdrop-filter:blur(14px) saturate(160%);backdrop-filter:blur(14px) saturate(160%);
-      box-shadow:inset 0 1px 0 rgba(255,255,255,.5);
+      box-shadow:var(--shadow-sm), inset 0 1px 0 rgba(255,255,255,.5);
     }
     /* 未选中的 tab 别再各自垫一层白底，让磨砂底透出来；选中的保留淡蓝 */
     :root[data-theme="glass"] .set-tab{background:transparent;border-color:transparent}
