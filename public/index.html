@@ -5979,6 +5979,48 @@
     netFail = 0;
   }
 
+  /* ============================================================ 离线快照（主机停止后刷新保留页面）
+     主机停止时刷新页面，浏览器用强缓存的壳页面直接渲染（不再回源），这里再补两件事：
+     ① 把最近一次 /api/list 的完整响应存进 localStorage，刷新后能立刻还原上次的列表与界面；
+     ② 还原成功后若主机仍连不上，现有断线提示（markOffline）会接管顶部提示条。 */
+  var LIST_CACHE_KEY = 'xm.cache';
+  var VER_CACHE_KEY = 'xm.sv';
+  function saveListCache(d) {
+    if (!d) return;
+    try {
+      localStorage.setItem(LIST_CACHE_KEY, JSON.stringify(d));
+    } catch (e) { /* 隐私模式或超 5MB 配额就跳过，不影响在线使用 */ }
+  }
+  function restoreListCache() {
+    try {
+      var raw = localStorage.getItem(LIST_CACHE_KEY);
+      if (!raw) return false;
+      var d = JSON.parse(raw);
+      if (!d || !Array.isArray(d.items)) return false;
+      applyHello(d);
+      allItems = d.items || [];
+      lastSig = allItems.map(function (x) { return x.id; }).join(',');
+      render(true);
+      return true;
+    } catch (e) { return false; }
+  }
+  /* 版本探针：主机在线时比对服务端版本，发现升级就提示用户硬刷新。
+     因为主页是强缓存，普通刷新不会拉新页面，只能靠这个提示兜底（300s 后也会自动更新）。 */
+  function checkVersion() {
+    try {
+      fetch('/api/version', { cache: 'no-store' }).then(function (r) {
+        return r.ok ? r.json() : null;
+      }).then(function (v) {
+        if (!v || !v.version) return;
+        var prev = localStorage.getItem(VER_CACHE_KEY);
+        if (prev && prev !== v.version) {
+          toast('发现新版本（' + v.version + '），请硬刷新页面（Ctrl+Shift+R）更新');
+        }
+        try { localStorage.setItem(VER_CACHE_KEY, v.version); } catch (e) {}
+      }).catch(function () {});
+    } catch (e) {}
+  }
+
   /* ============================================================ 收到消息的系统通知
      桌面里优先交给主进程弹（Electron 的 Notification 会正常走 macOS 授权、点击能
      把窗口拉回来）；页面内的 HTML5 Notification 只在浏览器/老桌面壳里当兜底 ——
@@ -6078,6 +6120,8 @@
       if (active && pollMs !== 800) { pollMs = 800; startPolling(); }
       else if (!active && pollMs === 800) { pollMs = 1500; startPolling(); }
       allItems = d.items || [];
+      saveListCache(d);          // 主机在线时把最新列表存入 localStorage，供离线刷新还原
+      checkVersion();            // 顺便比对服务端版本，有升级就提示硬刷新
       noticeIncoming(allItems);
       var sig = allItems.map(function (x) { return x.id; }).join(',');
       if (!force && sig === lastSig) { detectEdits(); detectNotes(); tickTimes(); return; }
@@ -9347,6 +9391,7 @@
     Gate.close();
     applyHello(d);
     renderToChip();
+    restoreListCache();   // 主机停止后刷新：先还原上次快照，避免白屏
     poll(true);
     startPolling();
     if (!compose.length) addTextBlock(false);

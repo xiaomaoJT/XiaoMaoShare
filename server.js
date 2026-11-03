@@ -1831,7 +1831,9 @@ const server = http.createServer((req, res) => {
       }
       res.writeHead(200, {
         'Content-Type': 'text/html; charset=utf-8',
-        'Cache-Control': 'no-cache',
+        // 主机停止后刷新：允许浏览器用磁盘缓存的壳页面直接渲染（不再回源验证），
+        // 配合前端 localStorage 快照 + 断线提示，刷新不再白屏。300s 后自动重新验证。
+        'Cache-Control': 'public, max-age=300',
       });
       res.end(buf);
     });
