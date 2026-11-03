@@ -221,8 +221,10 @@ const uploads = new Map(); // id -> { id, name, size, got, at }
 function uploadsPayload() {
   const now = Date.now();
   for (const [id, u] of uploads) {
-    if (now - u.at > 10 * 60e3) {
-      // 兜底：卡死的传输别常驻；分片传到一半就没影的，半截文件也一起清掉
+    // 中断过的分片传输只留 60s 续传窗口（客户端重试都在几秒内），过了就当真断了：
+    // 否则发送方刷新/关页面后，这条进度要在界面上挂满 10 分钟，还删不掉
+    const dead = u.abortedAt && now - u.abortedAt > 60e3;
+    if (dead || now - u.at > 10 * 60e3) {
       uploads.delete(id);
       if (u.file) fs.unlink(path.join(FILES_DIR, u.file), () => {});
     }
@@ -3066,11 +3068,16 @@ const onRequest = (req, res) => {
       if (got > MAX_FILE) return fail(413, '文件过大');
       if (!chunked) hash.update(chunk);
       const u = uploads.get(id);
-      if (u) { u.got = got; u.at = Date.now(); }
+      if (u) { u.got = got; u.at = Date.now(); u.abortedAt = 0; }   // 续上了就撤销「已中断」标记
     });
 
-    // 分片中断不清理：留着让客户端用同一 uid/offset 续传；整包中断才作废
-    req.on('aborted', () => { if (!chunked) fail(499, '已取消'); });
+    // 分片中断不立刻清理：留 60s 给同一 uid 续传（uploadsPayload 负责超时回收）；
+    // 整包中断直接作废
+    req.on('aborted', () => {
+      if (!chunked) { fail(499, '已取消'); return; }
+      const u = uploads.get(id);
+      if (u) u.abortedAt = Date.now();
+    });
     ws.on('error', () => fail(500, '写入失败'));
 
     ws.on('finish', async () => {

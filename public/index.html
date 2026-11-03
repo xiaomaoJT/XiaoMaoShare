@@ -156,6 +156,14 @@
   :root[data-theme="glass"] .mini.ok{
     background:var(--accent);border-color:var(--accent);color:#fff;
   }
+  /* 同一个坑：hover 时整块换成 accent 实色的按钮，特异性 (0,2,0) 输给上面的玻璃
+     覆盖 (0,3,0) —— 背景换不掉、hover 的白字却生效了，白字落在半透明白底上看不清。
+     用同等特异性在玻璃下把 hover 背景抢回来 */
+  :root[data-theme="glass"] .dl:hover{
+    background:var(--accent);border-color:var(--accent);color:#fff;
+  }
+  /* set-tab 的 hover 垫层同样被玻璃覆盖压掉，补一层可感知的 hover 反馈 */
+  :root[data-theme="glass"] .set-tab:hover{background:rgba(255,255,255,.72)}
   /* 顶栏 / 输入条要长期驻留视线里，玻璃强度比普通卡片再高一档 */
   :root[data-theme="glass"] .top,
   :root[data-theme="glass"] .composer-bar{
