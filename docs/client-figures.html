@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-only="">
+<head>
+<meta charset="utf-8">
+<title>XM 互传 · 客户端介绍图（源稿）</title>
+<script>
+  // 渲染脚本用 #arch / #cap / #matrix 单独截一张；直接打开本文件时三张连排便于预览
+  function applyOnly(){ document.documentElement.dataset.only = location.hash.replace(/^#/, ''); }
+  applyOnly();
+  addEventListener('hashchange', applyOnly);
+</script>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --ink:#14171c; --sub:#5b6472; --faint:#8b95a4;
+    --line:#e6e9ef; --line-2:#eef1f6;
+    --card:#ffffff; --bg:#f6f7fa;
+    --brand:#e8562f; --brand-soft:#fff0eb;
+    --accent:#4c6ef5; --accent-soft:#eef2ff;
+    --green:#0f9d76; --green-soft:#e8f8f1;
+    --amber:#c07c09; --amber-soft:#fff6e4;
+    --purple:#7355d9; --purple-soft:#f1edff;
+    --cyan:#0d94a8; --cyan-soft:#e6f7fa;
+    --dark:#151b26; --dark-2:#1e2735;
+  }
+  html,body{margin:0;padding:0;background:var(--bg)}
+  body{
+    width:960px;
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    -webkit-font-smoothing:antialiased; color:var(--ink); font-size:16px; line-height:1.6;
+  }
+  html[data-only]:not([data-only=""]) .fig{display:none}
+  html[data-only="arch"] #fig-arch,
+  html[data-only="cap"] #fig-cap,
+  html[data-only="matrix"] #fig-matrix{display:block}
+
+  .fig{
+    position:relative; width:960px; padding:46px 48px 40px; overflow:hidden;
+    background:var(--bg);
+  }
+  .fig:before{
+    content:'';position:absolute;inset:0;pointer-events:none;
+    background:
+      radial-gradient(620px 300px at 96% -8%, rgba(232,86,47,.10), transparent 62%),
+      radial-gradient(560px 340px at -8% 4%, rgba(76,110,245,.10), transparent 60%),
+      radial-gradient(circle at 1px 1px, rgba(20,23,28,.05) 1px, transparent 0);
+    background-size:auto,auto,22px 22px;
+  }
+  .fig > *{position:relative;z-index:1}
+
+  .eyebrow{display:flex;align-items:center;gap:9px;font-size:12px;font-weight:700;letter-spacing:1.4px;color:var(--brand)}
+  .eyebrow i{width:16px;height:2px;background:var(--brand);display:block;border-radius:2px}
+  .fig h2{font-size:33px;font-weight:750;letter-spacing:-.6px;line-height:1.28;margin-top:11px}
+  .fig h2 em{font-style:normal;color:var(--brand)}
+  .lead{font-size:16px;color:var(--sub);line-height:1.75;margin-top:9px;max-width:800px}
+  .lead b{color:var(--ink);font-weight:600}
+
+  .foot{
+    margin-top:24px;display:flex;gap:10px;flex-wrap:wrap;
+  }
+  .fchip{
+    display:inline-flex;align-items:center;gap:7px;height:31px;padding:0 13px;border-radius:999px;
+    background:rgba(255,255,255,.9);border:1px solid var(--line);color:var(--sub);font-size:13px;font-weight:550;
+  }
+  .fchip i{width:6px;height:6px;border-radius:50%;background:var(--accent);display:block}
+  .fchip.hot i{background:var(--brand)}
+  .fchip.ok i{background:var(--green)}
+
+  /* ================= 图 1 · 架构 ================= */
+  .arch{
+    margin-top:30px;display:grid;grid-template-columns:296px 132px 1fr;gap:0;align-items:stretch;
+  }
+  .side{
+    background:var(--card);border:1px solid var(--line);border-radius:18px;padding:22px 20px 20px;
+    box-shadow:0 18px 40px -32px rgba(16,24,40,.6);
+  }
+  .side .cap{font-size:11px;font-weight:700;letter-spacing:1.1px;color:var(--faint)}
+  .side h3{font-size:20px;font-weight:700;margin-top:4px;letter-spacing:-.2px}
+  .side p.desc{font-size:13.5px;color:var(--faint);line-height:1.7;margin-top:5px}
+  .cli{display:flex;gap:11px;align-items:flex-start;padding:11px 0;border-bottom:1px dashed var(--line-2)}
+  .cli:first-of-type{margin-top:14px}
+  .cli:last-child{border-bottom:0;padding-bottom:2px}
+  .cli .dot{
+    width:30px;height:30px;border-radius:10px;flex:none;display:grid;place-items:center;
+    font-size:14px;font-weight:700;color:#fff;background:var(--accent);
+  }
+  .cli:nth-of-type(2) .dot{background:var(--cyan)}
+  .cli:nth-of-type(3) .dot{background:var(--purple)}
+  .cli:nth-of-type(4) .dot{background:var(--brand)}
+  .cli b{display:block;font-size:14.5px;font-weight:650;line-height:1.45}
+  .cli span{display:block;font-size:12.5px;color:var(--faint);line-height:1.55;margin-top:2px}
+
+  .link{
+    position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:0 8px;
+  }
+  .link .rail{position:absolute;left:50%;top:56px;bottom:56px;width:2px;transform:translateX(-50%);
+    background:repeating-linear-gradient(180deg,var(--accent) 0 7px,transparent 7px 13px);opacity:.4}
+  .lane{
+    position:relative;background:#fff;border:1px solid var(--line);border-radius:10px;
+    padding:7px 9px;text-align:center;width:100%;box-shadow:0 8px 20px -16px rgba(16,24,40,.8);
+  }
+  .lane b{display:block;font-size:13px;font-weight:700;color:var(--accent);letter-spacing:.2px}
+  .lane span{display:block;font-size:11px;color:var(--faint);margin-top:1px;line-height:1.4}
+  .lane.hot b{color:var(--brand)}
+  .link .hub{
+    position:relative;z-index:2;margin:2px 0;
+    background:var(--dark);color:#fff;border-radius:999px;padding:6px 9px;
+    font-size:11.5px;font-weight:650;letter-spacing:.3px;text-align:center;line-height:1.45;
+    box-shadow:0 8px 22px -12px rgba(16,24,40,.9);
+  }
+  .link .hub small{display:block;font-size:10px;opacity:.62;font-weight:500;letter-spacing:0}
+
+  .host{
+    background:var(--dark);border-radius:18px;padding:22px 22px 20px;color:#fff;
+    box-shadow:0 22px 48px -30px rgba(10,16,28,.9);
+  }
+  .host .cap{font-size:11px;font-weight:700;letter-spacing:1.1px;color:#8e9bb0}
+  .host h3{font-size:21px;font-weight:700;margin-top:4px;letter-spacing:-.2px}
+  .host h3 em{font-style:normal;color:#ff9273}
+  .host .desc{font-size:13px;color:#9aa7bb;line-height:1.65;margin-top:5px}
+  .mods{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:17px}
+  .mod{background:var(--dark-2);border:1px solid rgba(255,255,255,.09);border-radius:12px;padding:13px 14px}
+  .mod b{display:block;font-size:13.5px;font-weight:680;color:#fff}
+  .mod b i{display:inline-block;width:6px;height:6px;border-radius:50%;background:#5b8cff;margin-right:7px;vertical-align:2px}
+  .mod.hot b i{background:#ff8a63}
+  .mod.green b i{background:#35c79a}
+  .mod.amber b i{background:#f0b44b}
+  .mod span{display:block;font-size:12px;color:#9aa7bb;line-height:1.6;margin-top:5px}
+  .datarow{
+    margin-top:12px;border-top:1px dashed rgba(255,255,255,.14);padding-top:12px;
+    display:flex;align-items:center;gap:9px;flex-wrap:wrap;
+  }
+  .datarow .k{font-size:12px;font-weight:700;color:#ffb49b;letter-spacing:.4px}
+  .datarow code{
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;
+    color:#c6d2e4;background:rgba(255,255,255,.07);border-radius:6px;padding:3px 7px;
+  }
+
+  /* ================= 图 2 · 能力地图 ================= */
+  .caps{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:28px}
+  .capcard{
+    background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px 18px 19px;
+    box-shadow:0 16px 36px -32px rgba(16,24,40,.65);min-height:216px;
+  }
+  .capcard .n{font-size:11px;font-weight:700;letter-spacing:1.1px;color:var(--faint)}
+  .caphead{display:flex;align-items:center;gap:10px;margin-top:7px}
+  .caphead .badge{
+    width:32px;height:32px;border-radius:11px;flex:none;display:grid;place-items:center;
+    font-size:15px;font-weight:750;color:#fff;background:var(--accent);
+  }
+  .caphead h3{font-size:18px;font-weight:700;letter-spacing:-.2px}
+  .capcard .tagline{font-size:12.5px;color:var(--faint);line-height:1.6;margin-top:9px;min-height:39px}
+  .capcard ul{list-style:none;margin-top:9px}
+  .capcard li{position:relative;padding-left:14px;font-size:13.5px;line-height:1.65;color:var(--sub);margin-top:5px}
+  .capcard li:before{content:'';position:absolute;left:0;top:8px;width:5px;height:5px;border-radius:50%;background:var(--accent)}
+  .capcard li b{color:var(--ink);font-weight:620}
+  .capcard.c2 .badge{background:var(--brand)} .capcard.c2 li:before{background:var(--brand)}
+  .capcard.c3 .badge{background:var(--purple)} .capcard.c3 li:before{background:var(--purple)}
+  .capcard.c4 .badge{background:var(--green)} .capcard.c4 li:before{background:var(--green)}
+  .capcard.c5 .badge{background:var(--cyan)} .capcard.c5 li:before{background:var(--cyan)}
+  .notecard{
+    background:var(--accent-soft);border:1px solid rgba(76,110,245,.18);border-radius:16px;padding:18px 20px;
+    display:flex;flex-direction:column;justify-content:center;
+  }
+  .notecard h3{font-size:17px;font-weight:700;color:#2f3c9e}
+  .notecard p{font-size:13.5px;line-height:1.8;color:#4a568e;margin-top:9px}
+  .notecard code{
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;
+    background:rgba(255,255,255,.75);border-radius:5px;padding:1px 5px;color:#2f3c9e;
+  }
+  .notecard .kicker{font-size:11px;font-weight:700;letter-spacing:1.1px;color:#6d7ad0}
+
+  /* ================= 图 3 · 端形态对照 ================= */
+  .matrix{
+    margin-top:28px;background:var(--card);border:1px solid var(--line);border-radius:18px;overflow:hidden;
+    box-shadow:0 18px 40px -32px rgba(16,24,40,.6);
+  }
+  table{width:100%;border-collapse:collapse;table-layout:fixed}
+  col.c1{width:186px} col.c2{width:96px} col.c3{width:118px} col.c4{width:104px} col.c5{width:120px} col.c6{width:auto}
+  th{
+    background:#f1f3f8;color:var(--sub);font-size:13px;font-weight:650;text-align:left;
+    padding:13px 14px;border-bottom:1px solid var(--line);line-height:1.4;
+  }
+  td{
+    padding:14px 14px;border-bottom:1px solid var(--line-2);font-size:13.5px;color:var(--sub);
+    line-height:1.55;vertical-align:middle;
+  }
+  tr:last-child td{border-bottom:0}
+  tbody tr:nth-child(even){background:#fbfcfe}
+  td small{display:block;font-weight:500;font-size:11.5px;color:var(--faint);margin-top:2px;line-height:1.4}
+  td.name{color:var(--ink);font-weight:650;font-size:14.5px}
+  td.name small{font-size:12px;line-height:1.45}
+  .yes{display:inline-flex;align-items:center;gap:5px;color:var(--green);font-weight:650;font-size:13px}
+  .yes:before{content:'✓';display:grid;place-items:center;width:17px;height:17px;border-radius:50%;background:var(--green-soft);font-size:11px}
+  .no{display:inline-flex;align-items:center;gap:5px;color:var(--faint);font-weight:600;font-size:13px}
+  .no:before{content:'—';display:grid;place-items:center;width:17px;height:17px;border-radius:50%;background:#f1f3f7;font-size:11px}
+  .mid{display:inline-block;background:var(--amber-soft);color:var(--amber);border-radius:6px;padding:2px 7px;font-size:12px;font-weight:650}
+  .pill{display:inline-block;background:var(--accent-soft);color:#3a49a8;border-radius:6px;padding:2px 7px;font-size:12px;font-weight:600}
+  .pill.warm{background:var(--brand-soft);color:#b8411f}
+  .matrix-note{
+    margin-top:16px;display:grid;grid-template-columns:1fr 1fr;gap:12px;
+  }
+  .mnote{background:#fff;border:1px solid var(--line);border-radius:13px;padding:14px 16px}
+  .mnote b{display:block;font-size:13.5px;font-weight:680;color:var(--ink)}
+  .mnote span{display:block;font-size:12.5px;color:var(--sub);line-height:1.7;margin-top:4px}
+</style>
+</head>
+<body>
+
+<!-- ==================== 图 1：整体架构 ==================== -->
+<section class="fig" id="fig-arch">
+  <div class="eyebrow"><i></i>ARCHITECTURE · 01</div>
+  <h2>一台<em>主机</em>，多台<em>客户端</em></h2>
+  <p class="lead">主机是跑 <b>server.js</b> 的那台机器：页面由它下发、权限由它判定、文件由它落盘。客户端只连不跑服务，<b>数据不出局域网</b>。</p>
+
+  <div class="arch">
+    <div class="side">
+      <div class="cap">CLIENT SIDE</div>
+      <h3>客户端 · 只连不跑服务</h3>
+      <p class="desc">同一 Wi-Fi 下，扫码即加入</p>
+
+      <div class="cli"><div class="dot">▤</div><div><b>手机 / 平板浏览器</b><span>相机扫码即开，不用装 App</span></div></div>
+      <div class="cli"><div class="dot">◇</div><div><b>另一台电脑浏览器</b><span>含 PWA「添加到主屏幕」</span></div></div>
+      <div class="cli"><div class="dot">⬡</div><div><b>桌面版 · 连接窗口</b><span>独立窗口，普通客户端身份</span></div></div>
+      <div class="cli"><div class="dot">○</div><div><b>Android 壳 / iOS 主屏幕</b><span>原生观感，内核仍是同一份页面</span></div></div>
+    </div>
+
+    <div class="link">
+      <div class="rail"></div>
+      <div class="lane"><b>HTTP :6767</b><span>页面 / 接口 / 准入</span></div>
+      <div class="hub">同一 Wi-Fi<small>直连 · 不经云端</small></div>
+      <div class="lane hot"><b>HTTPS :6768</b><span>勾选才启用</span></div>
+      <div class="lane"><b>/api/*</b><span>收发 / 列表 / 心跳</span></div>
+    </div>
+
+    <div class="host">
+      <div class="cap">HOST SIDE</div>
+      <h3>主机 · 跑 <em>server.js</em> 的那台</h3>
+      <p class="desc">Node.js ≥ 18 · 零依赖 · 桌面版把同一份服务拉进进程里</p>
+      <div class="mods">
+        <div class="mod"><b><i></i>页面下发</b><span>index.html + sw.js 由主机提供，升级主机即所有客户端生效</span></div>
+        <div class="mod hot"><b><i></i>HTTPS 可选</b><span>勾选才起；证书 SAN 覆盖当前 LAN IP，换网自动重签</span></div>
+        <div class="mod green"><b><i></i>权限闸门</b><span>接入许可（设备指纹）× 账户角色，caps 随每次响应下发</span></div>
+        <div class="mod amber"><b><i></i>本地存储</b><span>文件流式落盘，去重 / 引用计数 / 过期清理都在本机</span></div>
+      </div>
+      <div class="datarow">
+        <span class="k">data/</span>
+        <code>index.json</code><code>files/</code><code>devices.json</code><code>accounts.json</code><code>settings.json</code>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <span class="fchip ok"><i></i>所有数据只存主机本机，不上传第三方</span>
+    <span class="fchip"><i></i>页面由主机下发 · 客户端无需安装即可用</span>
+    <span class="fchip hot"><i></i>桌面版兼具主机与客户端两种身份</span>
+  </div>
+</section>
+
+<!-- ==================== 图 2：能力地图 ==================== -->
+<section class="fig" id="fig-cap">
+  <div class="eyebrow"><i></i>CAPABILITIES · 02</div>
+  <h2>客户端<em>能力地图</em></h2>
+  <p class="lead">从「连进来」到「收得到」，按使用顺序分成五组。多数能力在<b>网页端</b>就有，桌面壳再叠加窗口级增强。</p>
+
+  <div class="caps">
+    <div class="capcard c1">
+      <div class="n">01 / ACCESS</div>
+      <div class="caphead"><div class="badge">⌁</div><h3>接入与身份</h3></div>
+      <div class="tagline">进门认设备不认 IP，登录后认人</div>
+      <ul>
+        <li><b>扫码 / 输地址 / 接入历史</b>一键回连</li>
+        <li>接入密码 + 主机同意，隐藏密码免确认，<b>账户密码也可直接进</b></li>
+        <li><b>设备指纹 cid</b> 授权，与 IP 无关</li>
+        <li>可选账户登录，跨设备算同一个人；<b>专属密码临时提权</b></li>
+        <li>应用内切换 HTTPS，<b>不需重新授权</b></li>
+      </ul>
+    </div>
+
+    <div class="capcard c2">
+      <div class="n">02 / TRANSFER</div>
+      <div class="caphead"><div class="badge">⇅</div><h3>收发与文件</h3></div>
+      <div class="tagline">一条消息里文字、图片、文件任意混排</div>
+      <ul>
+        <li><b>合并发送 · 图文混排</b>，Markdown 直接排版</li>
+        <li>一键<b>存成 .md</b>，图片内联、下载即可编辑</li>
+        <li>拖拽 / 粘贴 / 并行上传，进度只增不减</li>
+        <li><b>&gt;8MB 自动 8MB 分片续传</b>，断一下只重发当前片</li>
+        <li>SHA-256 <b>去重秒传</b>、在线预览、ZIP 打包下载</li>
+      </ul>
+    </div>
+
+    <div class="capcard c3">
+      <div class="n">03 / WORKSPACE</div>
+      <div class="caphead"><div class="badge">☷</div><h3>浏览与协作</h3></div>
+      <div class="tagline">内容攒多了，列表本身也是个工具</div>
+      <ul>
+        <li>实时搜索 + <b>分类 / 发送人 / 日期</b>筛选</li>
+        <li>分页懒加载、断线自感知、切回前台自动补同步</li>
+        <li><b>已读回执</b>、编辑与修订历史、引用、追加补充</li>
+        <li><b>指定可见（私聊）</b>，发出后还能改范围</li>
+        <li>三套主题 / 四档字号 / 头像昵称，各自设备独立记</li>
+      </ul>
+    </div>
+
+    <div class="capcard c4">
+      <div class="n">04 / OFFLINE &amp; ALERT</div>
+      <div class="caphead"><div class="badge">◔</div><h3>离线与提醒</h3></div>
+      <div class="tagline">主机不在了，也不至于对着空白页</div>
+      <ul>
+        <li><b>HTTPS + Service Worker</b> 缓存页面外壳</li>
+        <li>主机停机后仍能刷新，靠 <b>localStorage 快照</b>还原内容</li>
+        <li>桌面端<b>系统通知</b>由主进程统一发，连别人主机也提醒</li>
+        <li><b>悬浮球</b>：拖文件即发，跟随最近在用的窗口</li>
+      </ul>
+    </div>
+
+    <div class="capcard c5">
+      <div class="n">05 / DESKTOP SHELL</div>
+      <div class="caphead"><div class="badge">▣</div><h3>桌面窗口体验</h3></div>
+      <div class="tagline">只在使用 Electron 客户端时叠加</div>
+      <ul>
+        <li>Windows <b>沉浸标题栏 + 自绘红绿灯</b>，Win11 系统圆角</li>
+        <li>关窗收进<b>托盘</b>，服务不停，手机照样能传</li>
+        <li>吸顶输入条、<b>沉浸式悬浮滚动条</b></li>
+        <li>连接窗口与主机窗口地址不同、身份互不干扰</li>
+      </ul>
+    </div>
+
+    <div class="notecard">
+      <div class="kicker">WHO DECIDES</div>
+      <h3>能力由服务端说了算</h3>
+      <p>页面只负责呈现。真正的闸门在主机：<code>/api/list</code> 每次回传 <code>caps</code> 与 <code>limits</code>，前端照着显示按钮。分片能力由 <code>caps.chunked</code> 协商，连到未升级的老主机自动回退整包上传。</p>
+    </div>
+  </div>
+
+  <div class="foot">
+    <span class="fchip ok"><i></i>网页端能力由主机下发，升级主机即全端生效</span>
+    <span class="fchip"><i></i>桌面端增强需更新客户端 App</span>
+    <span class="fchip hot"><i></i>权限 = 接入许可 × 账户角色 × 逐台设备开关</span>
+  </div>
+</section>
+
+<!-- ==================== 图 3：端形态对照 ==================== -->
+<section class="fig" id="fig-matrix">
+  <div class="eyebrow"><i></i>WHICH ONE · 03</div>
+  <h2>端形态对照 · <em>我该用哪个</em></h2>
+  <p class="lead">所有端打开的<b>是同一份页面</b>，差别只在「壳」：要不要装、能不能常驻、有没有系统级通知与悬浮球。</p>
+
+  <div class="matrix">
+    <table>
+      <colgroup><col class="c1"><col class="c2"><col class="c3"><col class="c4"><col class="c5"><col class="c6"></colgroup>
+      <thead><tr>
+        <th>形态</th><th>要不要装</th><th>能当主机</th><th>离线刷新</th><th>新消息提醒</th><th>专属优势</th>
+      </tr></thead>
+      <tbody>
+        <tr>
+          <td class="name">手机 / 电脑浏览器<small>扫码或输地址，即开即用</small></td>
+          <td><span class="yes">不用</span></td>
+          <td><span class="no">不能</span></td>
+          <td><span class="pill">HTTPS 下</span></td>
+          <td>页面通知<small style="color:#8b95a4">需授权</small></td>
+          <td>零安装，临时用最省事</td>
+        </tr>
+        <tr>
+          <td class="name">PWA · 添加到主屏幕<small>iOS 推荐，Android 亦可用</small></td>
+          <td><span class="yes">不用</span></td>
+          <td><span class="no">不能</span></td>
+          <td><span class="pill">HTTPS 下</span></td>
+          <td>页面通知<small style="color:#8b95a4">需授权</small></td>
+          <td>全屏无地址栏，像原生 App</td>
+        </tr>
+        <tr>
+          <td class="name">桌面版 · 连接窗口<small>macOS / Windows 安装包</small></td>
+          <td><span class="mid">需安装</span></td>
+          <td><span class="mid">可切换</span></td>
+          <td><span class="yes">支持</span></td>
+          <td><span class="pill warm">系统通知</span></td>
+          <td>托盘常驻 / 悬浮球 / 圆角标题栏</td>
+        </tr>
+        <tr>
+          <td class="name">Android APK<small>WebView 薄壳</small></td>
+          <td><span class="mid">需安装</span></td>
+          <td><span class="no">不能</span></td>
+          <td><span class="yes">支持</span></td>
+          <td>系统通知</td>
+          <td>地址预填 192.168.，文件上传友好</td>
+        </tr>
+        <tr>
+          <td class="name">iOS · Safari 主屏幕<small>WKWebView 壳为预留</small></td>
+          <td><span class="yes">不用</span></td>
+          <td><span class="no">不能</span></td>
+          <td><span class="yes">支持</span></td>
+          <td>页面通知<small style="color:#8b95a4">需授权</small></td>
+          <td>不用签名，加到主屏幕即可</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="matrix-note">
+    <div class="mnote"><b>「能当主机」是什么意思</b><span>主机 = 在本机跑起服务、让别人连进来。浏览器与手机壳没有这份能力；桌面版用同一个 App 在「我的主机」和「连接别人」之间切换，两边窗口地址不同、互不干扰。</span></div>
+    <div class="mnote"><b>离线刷新与通知的两个前提</b><span>离线刷新依赖 HTTPS（Service Worker 只在安全上下文注册）；系统通知只在桌面版由主进程统一投递，网页端走浏览器通知、需要授权。桌面端通知不看窗口在前台还是托盘，所有新消息都推。</span></div>
+  </div>
+
+  <div class="foot">
+    <span class="fchip ok"><i></i>页面由主机下发 · 升级主机即所有接入端生效</span>
+    <span class="fchip hot"><i></i>连别人主机时：双方都升级，桌面端通知才完整</span>
+  </div>
+</section>
+
+</body>
+</html>
