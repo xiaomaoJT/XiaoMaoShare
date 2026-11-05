@@ -1230,12 +1230,15 @@ function askPort(current) {
 /** 换端口：停服 → 用新端口起 → 存偏好 → 主窗口跟着换地址 */
 async function restartWithPort(p) {
   const old = server.serverInfo().port;
+  // 换端口不该顺手改协议：把用户的 HTTPS 偏好原样带过去，
+  // 否则之前开着 HTTPS 的主机换完端口会静默退回 http。
+  const httpsOn = readSettings().https === true;
   await server.stopServer();
   try {
-    hostInfo = await server.startServer({ port: p });
+    hostInfo = await server.startServer({ port: p, https: httpsOn });
   } catch (err) {
     // 新端口没起来就把旧的拉回来，别让服务悬空
-    if (old) { try { hostInfo = await server.startServer({ port: old }); } catch { /* 尽力而为 */ } }
+    if (old) { try { hostInfo = await server.startServer({ port: old, https: httpsOn }); } catch { /* 尽力而为 */ } }
     throw err;
   }
   writePortPref(hostInfo.port);

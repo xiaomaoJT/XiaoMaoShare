@@ -1935,7 +1935,10 @@ const onRequest = (req, res) => {
 
   // HTTPS 是否可用 + 端口：前端据此决定是否提示「切到 HTTPS 安全访问」
   if (method === 'GET' && pathname === '/api/https') {
-    json(res, 200, { enabled: !!httpsServer, port: httpsPort });
+    // 必须看「真的在 listen」：httpsServer 只是模块变量，stopServer 后或换端口
+    // 重启时还可能挂着旧对象。只看 !!httpsServer 会让没起 HTTPS 的主机也收到
+    // 「可切换」的提示，点过去必然连不上。这里跟 serverInfo()/二维码保持同一口径。
+    json(res, 200, { enabled: !!(httpsServer && httpsServer.listening), port: httpsPort });
     return;
   }
 
@@ -3685,6 +3688,10 @@ function listenOnce(port) {
 async function startServer(opts = {}) {
   if (server.listening) return serverInfo();
 
+  // 每次真正「开张」都从干净的协议状态开始：上一次的 https 句柄不能带进来，
+  // 否则本次没要求 HTTPS、/api/https 却仍报可用（换端口/重启后都能复现）。
+  httpsServer = null; httpsPort = 0; httpsError = '';
+
   const base = Number(opts.port) || BASE_PORT;
   const tries = Number.isInteger(opts.tries) ? opts.tries : 20;
   let lastErr = null;
@@ -3733,18 +3740,21 @@ async function startServer(opts = {}) {
 /** 关掉服务。先断掉 keep-alive 长连接，否则 close 会一直等着它们超时 */
 function stopServer() {
   return new Promise((resolve) => {
+    // 停完就把句柄一起清掉：httpsServer 留着旧对象（已 close 但非 null），
+    // 下一次以 http 启动时 /api/https 会误报「HTTPS 还开着」，客户端就白跳一次。
+    const finish = () => { httpsServer = null; httpsPort = 0; resolve(); };
     const targets = [];
     if (server.listening) targets.push(server);
     if (httpsServer && httpsServer.listening) targets.push(httpsServer);
-    if (!targets.length) return resolve();
+    if (!targets.length) return finish();
     let pending = targets.length;
-    const done = () => { if (--pending <= 0) resolve(); };
+    const done = () => { if (--pending <= 0) finish(); };
     for (const srv of targets) {
       if (typeof srv.closeAllConnections === 'function') srv.closeAllConnections();
       srv.close(done);
       setTimeout(done, 1500).unref(); // 兜底，别让宿主退出时卡住
     }
-    setTimeout(resolve, 1600).unref();
+    setTimeout(finish, 1600).unref();
   });
 }
 
