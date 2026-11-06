@@ -649,6 +649,19 @@
     padding:12px 14px;box-shadow:var(--shadow-sm); animation:in .28s cubic-bezier(.2,.8,.3,1);
   }
   @keyframes in{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+  /* ==== XM_FLOWER_CSS_START ==== */
+  /* 文字选区开花：卡片底色不透明，所以 Canvas 不能像独立 demo 那样铺在整页最底。
+     这里给「当前正在开花」的卡片临时开一个局部层叠上下文，Canvas 用负层级
+     夹在「卡片底色」与「正文文字」之间：绿色选区与黑字在上面完整遮住花，
+     花只能从选区边缘后面钻出来。Canvas 由 JS 按需插入，收完花即移除。 */
+  .card.xm-flower-card{isolation:isolate}
+  .xm-flower-cv{
+    position:absolute;z-index:-1;pointer-events:none;
+    user-select:none;-webkit-user-select:none;
+  }
+  /* 选区必须是不透明实色，否则半透明高亮会透出下层花、根部藏不住 */
+  html.xm-flower-on #feed ::selection{background:#2fca4e;color:#fff}
+  /* ==== XM_FLOWER_CSS_END ==== */
   .meta{display:flex;align-items:center;gap:8px;font-size:calc(11.5px * var(--tfs));color:var(--faint);margin-bottom:8px;flex-wrap:wrap;row-gap:4px}
   .ava{
     width:20px;height:20px;border-radius:7px;flex:none;display:grid;place-items:center;
@@ -8315,6 +8328,32 @@
     demo.innerHTML = '局域网互传，随手一发就到。<i>文字、图片、文件都能带上这一条。</i>';
     wrap.appendChild(demo);
 
+    // 文字选区开花：装饰效果，给一个随手能关的出口。引擎不加载/被禁用时就不显示这一行。
+    if (window.XMFlower) {
+      var head3 = document.createElement('div');
+      head3.className = 'dev-head';
+      head3.style.marginTop = '18px';
+      head3.innerHTML = '<span>文字选区效果</span>';
+      wrap.appendChild(head3);
+
+      var lab = document.createElement('label');
+      lab.className = 'sw';
+      var cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = !!window.XMFlower.isEnabled();
+      var track = document.createElement('span');
+      track.className = 'track';
+      var txt = document.createElement('span');
+      txt.className = 'txt';
+      txt.textContent = '拖选文字时开花';
+      var small = document.createElement('small');
+      small.textContent = '只在内容区拖选时生长，松手沿原路收回；不影响复制';
+      txt.appendChild(small);
+      cb.onchange = function () { window.XMFlower.setEnabled(cb.checked); };
+      lab.appendChild(cb); lab.appendChild(track); lab.appendChild(txt);
+      wrap.appendChild(lab);
+    }
+
     var tip = document.createElement('div');
     tip.className = 'dev-hint';
     tip.textContent = '外观和字号只记在这台设备上，不影响其他设备。';
@@ -9864,6 +9903,517 @@ if (window.isSecureContext && 'serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js').catch(function () { /* 离线能力不可用不影响主流程 */ });
   });
 }
+</script>
+
+<script id="xm-flower">
+/* 文字选区开花（内容区）。与独立组件同源，但按本项目的真实结构重做 layering：
+   - 卡片底色不透明 → 每张卡片按需插入一张负层级 Canvas，夹在底色与正文之间；
+     正文仍是真实文字节点，绿色 ::selection 与黑字在上面完整遮住花。
+   - 消息卡片会动态增删/编辑 → 文本节点每次现算，用 WeakMap 给节点发稳定 id，
+     「session:节点id:字符偏移」作稳定键；是否种花由该键的散列决定，
+     与选区长度无关，扩展选区时绝不会整体换一批花。
+   - 坐标用 1:1 CSS 像素、相对各自 Canvas 左上角，滚动时无需重算。
+   - Canvas 只在有花的卡片上存在，收回结束即移除；离屏/隐藏暂停，减少动态效果即时成花。
+   零依赖、无远程素材、无外部字体。 */
+(function () {
+  'use strict';
+  var KEY = 'xm.flower';
+  var feed = document.getElementById('feed');
+  if (!feed) return;
+
+  var PAD_X = 20, PAD_Y = 28;      // 只留一圈余量；花的方向会按卡片边界收敛，不飘到卡片外
+  var MAX_PLANTS = 160;
+  var DENSITY = 0.34;              // 正文字号 14.5px，比 demo 稀疏些才不糊成一片
+  var K = 0.62;                    // 花型整体缩放（demo 是 21.5px 正文，这里字号只有 14.5px）
+  var SHOW_TEXT = 4;
+  var PALETTE = ['#f21b3f', '#ffb35b', '#f4d64c', '#9bc9ec', '#a47bdf', '#f1afd0', '#fff7db'];
+  var CENTRES = ['#f6d65d', '#f8b54c', '#f5b4c8'];
+
+  var clamp = function (v) { return v < 0 ? 0 : v > 1 ? 1 : v; };
+  var doc = document;
+  var win = window;
+  var mq = win.matchMedia ? win.matchMedia('(prefers-reduced-motion: reduce)') : { matches: false };
+  var reduced = function () { return !!mq.matches; };
+
+  var plants = new Map();          // key -> plant
+  var surfaces = new Map();        // card -> { cv, ctx, w, h }
+  var nodeIds = new WeakMap();     // Text -> 稳定序号
+  var nextNodeId = 1;
+  var listeners = [];
+  var frames = new Set();
+  var timers = new Set();
+
+  var enabled = false, active = false, dead = false;
+  var seed = 1, session = 0, rafId = 0, syncId = 0, frameLast = 0;
+  var touch = null;
+
+  function on(target, type, fn, opts) {
+    target.addEventListener(type, fn, opts);
+    listeners.push([target, type, fn, opts]);
+  }
+  function raf(fn) {
+    if (dead) return 0;
+    var id = win.requestAnimationFrame(function (t) {
+      frames.delete(id);
+      if (!dead && !doc.hidden) fn(t);
+    });
+    frames.add(id);
+    return id;
+  }
+  function cancelRaf(id) {
+    if (!id) return;
+    win.cancelAnimationFrame(id);
+    frames.delete(id);
+  }
+  function later(fn, ms) {
+    var id = win.setTimeout(function () { timers.delete(id); if (!dead) fn(); }, ms);
+    timers.add(id);
+    return id;
+  }
+  function stopTimers() {
+    timers.forEach(function (id) { win.clearTimeout(id); });
+    timers.clear();
+  }
+  function cancelAll() {
+    frames.forEach(function (id) { win.cancelAnimationFrame(id); });
+    frames.clear();
+    cancelRaf(rafId); rafId = 0;
+    cancelRaf(syncId); syncId = 0;
+    frameLast = 0;
+    stopTimers();
+  }
+
+  function nodeId(node) {
+    var id = nodeIds.get(node);
+    if (!id) { id = nextNodeId++; nodeIds.set(node, id); }
+    return id;
+  }
+  function textBody(node) {
+    var el = node && (node.nodeType === 1 ? node : node.parentElement);
+    if (!el || !el.closest) return null;
+    var body = el.closest('.text-body');
+    return body && feed.contains(body) ? body : null;
+  }
+  function owned(range) {
+    return !!range && !range.collapsed && textBody(range.startContainer) && textBody(range.endContainer);
+  }
+  function currentRange() {
+    var sel = doc.getSelection();
+    if (!sel || !sel.rangeCount || sel.isCollapsed) return null;
+    var r = sel.getRangeAt(0);
+    return owned(r) ? r : null;
+  }
+
+  /** 给命中的卡片临时挂一张 Canvas；没有花的卡片一张都不建。 */
+  function ensureSurface(card) {
+    var s = surfaces.get(card);
+    if (s) return s;
+    var r = card.getBoundingClientRect();
+    var w = Math.ceil(r.width) + PAD_X * 2;
+    var h = Math.ceil(r.height) + PAD_Y * 2;
+    var cv = doc.createElement('canvas');
+    cv.className = 'xm-flower-cv';
+    cv.setAttribute('aria-hidden', 'true');
+    cv.style.left = -PAD_X + 'px';
+    cv.style.top = -PAD_Y + 'px';
+    cv.style.width = w + 'px';
+    cv.style.height = h + 'px';
+    var dpr = Math.min(win.devicePixelRatio || 1, 2);
+    cv.width = Math.round(w * dpr);
+    cv.height = Math.round(h * dpr);
+    var ctx = cv.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    card.classList.add('xm-flower-card');
+    card.insertBefore(cv, card.firstChild);
+    // 记下卡片边界在 Canvas 局部坐标里的位置，用来约束花往哪边长、茎能长多长
+    var cr = cv.getBoundingClientRect(), cdr = card.getBoundingClientRect();
+    s = {
+      card: card, cv: cv, ctx: ctx, w: w, h: h,
+      cardTop: cdr.top - cr.top, cardBottom: cdr.bottom - cr.top
+    };
+    surfaces.set(card, s);
+    return s;
+  }
+  function clearSurfaces() {
+    surfaces.forEach(function (s) {
+      try { s.cv.remove(); } catch (e) {}
+      try { s.card.classList.remove('xm-flower-card'); } catch (e) {}
+    });
+    surfaces.clear();
+  }
+
+  /** xorshift32：每次手势一个 32 位种子，每株用节点 id 与字符偏移散列独立初始化。 */
+  function randomFor(value) {
+    var x = (value >>> 0) || 1;
+    return function () {
+      x ^= x << 13; x ^= x >>> 17; x ^= x << 5;
+      return (x >>> 0) / 4294967296;
+    };
+  }
+
+  // ---- 绘制：二次曲线茎、尖头叶、先含苞再逐瓣打开的花头 ----
+  function point(p, t) {
+    var inv = 1 - t;
+    return {
+      x: inv * inv * p.x + 2 * inv * t * p.cx + t * t * p.ex,
+      y: inv * inv * p.y + 2 * inv * t * p.cy + t * t * p.ey
+    };
+  }
+  function drawStem(ctx, p, s) {
+    if (s <= 0) return;
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y);
+    for (var i = 1; i <= 28; i++) {
+      var q = point(p, s * i / 28);
+      ctx.lineTo(q.x, q.y);
+    }
+    ctx.lineWidth = 2.4 * K; ctx.strokeStyle = '#24482c'; ctx.stroke();
+    ctx.lineWidth = 1.1 * K; ctx.strokeStyle = '#67b868'; ctx.stroke();
+  }
+  function drawLeaf(ctx, p, at, side, progress) {
+    if (progress <= 0) return;
+    var q = point(p, at), size = p.leaf * progress;
+    var dx = side * size, dy = p.direction * size * 0.48;
+    ctx.beginPath();
+    ctx.moveTo(q.x, q.y);
+    ctx.quadraticCurveTo(q.x + dx * 0.1, q.y + dy * 1.8, q.x + dx, q.y + dy);
+    ctx.quadraticCurveTo(q.x + dx * 0.85, q.y - dy * 0.18, q.x, q.y);
+    ctx.closePath();
+    ctx.fillStyle = '#6fbe72'; ctx.fill();
+    ctx.lineWidth = Math.max(0.7, 1 * K); ctx.strokeStyle = '#243725'; ctx.stroke();
+  }
+  function drawHead(ctx, p, g, now) {
+    if (g <= 0) return;
+    var q = point(p, clamp(g / 0.62));
+    // 微摆只在活跃拖选时启用，约 1.5Hz；收回与减少动态效果时禁用
+    var sway = active && !reduced()
+      ? Math.sin(now * 9e-3 + p.rotation) * 1.25 * K * clamp((g - 0.5) * 2)
+      : 0;
+    ctx.save();
+    ctx.translate(q.x + sway, q.y);
+    ctx.rotate(p.rotation);
+    ctx.lineWidth = Math.max(0.8, 1.15 * K);
+    ctx.strokeStyle = '#20241b';
+
+    var bud = clamp((g - 0.25) / 0.22) * Math.min(p.radius * 0.24, 3.5 * K);
+    if (bud > 0.05) {
+      ctx.beginPath();
+      ctx.ellipse(0, 0, bud, bud * 1.25, 0, 0, Math.PI * 2);
+      ctx.fillStyle = p.colour; ctx.fill(); ctx.stroke();
+    }
+    for (var k = 0; k < p.petals; k++) {
+      var t = clamp((g - 0.42 - k * 0.027) / 0.32);
+      if (!t) continue;
+      var a = t - 1;                       // easeOutBack(c1 = 1.1)
+      var open = 1 + 2.1 * a * a * a + 1.1 * a * a;
+      ctx.save();
+      ctx.rotate(2 * Math.PI * k / p.petals);
+      ctx.beginPath();
+      ctx.ellipse(p.radius * 0.6 * open, 0,
+        Math.max(0.05, p.radius * 0.64 * open),
+        Math.max(0.05, p.radius * p.petalWidth * open), 0, 0, Math.PI * 2);
+      ctx.fillStyle = p.colour; ctx.fill(); ctx.stroke();
+      ctx.restore();
+    }
+    if (p.petals) {
+      var core = clamp((g - 0.54) / 0.3) * p.radius * 0.25;
+      if (core > 0.05) {
+        ctx.beginPath();
+        ctx.arc(0, 0, core, 0, Math.PI * 2);
+        ctx.fillStyle = p.centre; ctx.fill(); ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+
+  function paint(now) {
+    surfaces.forEach(function (s) { s.ctx.clearRect(0, 0, s.w, s.h); });
+    plants.forEach(function (p) {
+      var ctx = p.surface.ctx, g = p.progress;
+      drawStem(ctx, p, clamp(g / 0.62));
+      if (p.leaves[0]) drawLeaf(ctx, p, 0.42, p.side, clamp((g - 0.22) / 0.34));
+      if (p.leaves[1]) drawLeaf(ctx, p, 0.7, -p.side, clamp((g - 0.34) / 0.34));
+      drawHead(ctx, p, g, now || 0);
+    });
+  }
+  function request() {
+    if (!rafId && !dead && !doc.hidden && plants.size && !reduced()) {
+      rafId = raf(tick);
+    }
+  }
+  function tick(now) {
+    rafId = 0;
+    if (dead || doc.hidden) return;
+    var dt = Math.min(frameLast ? (now - frameLast) / 1000 : 1 / 60, 0.04);
+    frameLast = now;
+    plants.forEach(function (p, key) {
+      p.progress = clamp(p.progress + (p.target ? 3.3 : -2.7) * dt);
+      // 收回结束才移除；全程不透明，绝不拿淡出冒充反向生长
+      if (!p.target && p.progress === 0) plants.delete(key);
+    });
+    // 卡片被 render() 摘掉时，别把它的 Canvas 留在 Map 里
+    surfaces.forEach(function (s, card) {
+      if (!card.isConnected) {
+        try { s.card.classList.remove('xm-flower-card'); } catch (e) {}
+        surfaces.delete(card);
+      }
+    });
+    paint(now);
+    if (!plants.size) { clearSurfaces(); return; }
+    request();
+  }
+
+  // ---- 状态迁移 ----
+  function begin() {
+    stopTimers();
+    active = true;
+    seed = (Math.random() * 4294967296) >>> 0;
+    session++;
+    // 上一批保留对象，改为反向生长；新拖选可以中断收回
+    plants.forEach(function (p) { p.target = 0; });
+  }
+  function release() {
+    active = false;
+    stopTimers();
+    plants.forEach(function (p) { p.target = 0; });
+    // 绿色浏览器选区按系统行为保留，这里不 removeAllRanges
+    if (reduced()) {
+      plants.clear(); paint(0); clearSurfaces();
+    } else {
+      request();
+    }
+  }
+
+  /** 依据当前 Range 同步植株集合；只在 active 时工作，别处的选择不会动这里的花。 */
+  function sync() {
+    syncId = 0;
+    if (dead || !enabled || !active) return;
+    var range = currentRange();
+    if (!range) {
+      plants.forEach(function (p) { p.target = 0; });
+      request();
+      return;
+    }
+
+    // 每次现算：卡片会动态增删、文字会被编辑，不能像静态文章那样缓存节点表。
+    // 纯空白文本节点（HTML 缩进）必须过滤，否则字符序号会被带偏。
+    var nodes = [], walker = doc.createTreeWalker(feed, SHOW_TEXT), n;
+    while ((n = walker.nextNode())) {
+      if (!/\S/.test(n.data)) continue;
+      if (textBody(n)) nodes.push(n);
+    }
+    var rects = new Map();
+    function canvasRect(s) {
+      var r = rects.get(s);
+      if (!r) { r = s.cv.getBoundingClientRect(); rects.set(s, r); }
+      return r;
+    }
+
+    var wanted = new Set();
+    for (var ni = 0; ni < nodes.length; ni++) {
+      var text = nodes[ni];
+      if (!range.intersectsNode(text)) continue;
+      var from = text === range.startContainer ? range.startOffset : 0;
+      var to = text === range.endContainer ? range.endOffset : text.data.length;
+      var lo = Math.max(0, Math.min(from, to));
+      var hi = Math.min(text.data.length, Math.max(from, to));
+      for (var i = lo; i < hi; i++) {
+        if (/\s/.test(text.data[i])) continue;
+        var nid = nodeId(text);
+        var key = session + ':' + nid + ':' + i;
+        var rng = randomFor(seed ^ Math.imul(nid + 1, 73856093) ^ Math.imul(i + 1, 19349663));
+        // 是否种花只由这个键决定，与选区长度无关 —— 扩展选区时原有植株身份不变
+        if (rng() > DENSITY) continue;
+        wanted.add(key);
+        var existing = plants.get(key);
+        if (existing) { existing.target = 1; continue; }  // 再次经过：从当前进度接回
+        if (plants.size >= MAX_PLANTS) continue;
+
+        var card = text.parentElement && text.parentElement.closest('.card');
+        if (!card || !card.isConnected) continue;
+        var cr = doc.createRange();
+        cr.setStart(text, i); cr.setEnd(text, i + 1);
+        var r = cr.getBoundingClientRect();
+        if (!r.width || !r.height) continue;
+
+        var s = ensureSurface(card);
+        var cvr = canvasRect(s);
+        var x = r.left + r.width / 2 - cvr.left;
+        var y = r.top + r.height / 2 - cvr.top;
+        var length = (16 + rng() * 40) * K;
+        var bend = (rng() - 0.5) * 60 * K;
+        var family = Math.floor(rng() * 5);
+        var petals = [5, 6, 8, 4, 0][family];
+        var sizeRoll = rng();
+        var radius = (family === 4 ? 4 + rng() * 2
+          : sizeRoll < 0.35 ? 5 + rng() * 5
+          : sizeRoll < 0.8 ? 10 + rng() * 7
+          : 18 + rng() * 5) * K;
+        var curve = (rng() - 0.5) * 24 * K;
+
+        // 卡片是有圆角、有阴影的独立块，花飘到卡片外会显得脱层。
+        // 按锚点离上下边的余量收敛方向：不够就翻向另一边，两边都窄就缩短茎。
+        var down = rng() < 0.38;
+        var head = radius * 1.25;
+        var roomUp = y - s.cardTop, roomDown = s.cardBottom - y;
+        if (down && roomDown < length + head && roomUp >= length + head) down = false;
+        else if (!down && roomUp < length + head && roomDown >= length + head) down = true;
+        else if (roomUp < length + head && roomDown < length + head) {
+          length = Math.max(3, Math.max(roomUp, roomDown) - head - 2);
+          down = roomDown >= roomUp;
+        }
+        var direction = down ? 1 : -1;
+
+        plants.set(key, {
+          surface: s, x: x, y: y,
+          cx: x + bend * 0.35 + curve, cy: y + direction * length * 0.48,
+          ex: x + bend, ey: y + direction * length,
+          direction: direction,
+          petals: petals, radius: radius,
+          petalWidth: family === 2 ? 0.28 : 0.46,
+          leaf: (7 + rng() * 8) * K,
+          leaves: [rng() < 0.65, rng() < 0.35],
+          side: rng() < 0.5 ? -1 : 1,
+          rotation: rng() * Math.PI * 2,
+          colour: PALETTE[Math.floor(rng() * PALETTE.length)],
+          centre: CENTRES[Math.floor(rng() * CENTRES.length)],
+          progress: reduced() ? 1 : 0,
+          target: 1
+        });
+      }
+    }
+
+    plants.forEach(function (p, key) { if (!wanted.has(key)) p.target = 0; });
+    if (reduced()) {
+      plants.forEach(function (p, key) {
+        if (!p.target) plants.delete(key);
+        else p.progress = 1;
+      });
+    }
+    paint(win.performance ? win.performance.now() : 0);
+    request();
+  }
+
+  function onSelectionChange() {
+    if (dead || !enabled || !active) return;
+    if (!syncId) syncId = raf(function () { syncId = 0; sync(); });
+  }
+  function dropAll() {
+    active = false;
+    stopTimers();
+    plants.clear();
+    paint(0);
+    clearSurfaces();
+    cancelAll();
+    active = false;
+  }
+
+  // ---- 输入事件 ----
+  on(feed, 'pointerdown', function (e) {
+    if (!enabled || e.button !== 0) return;
+    // 复制/删除/展开等操作按钮上按下不该开启拖选手势
+    if (e.target.closest && e.target.closest('button, a, input, textarea, select, [contenteditable], .thumb, .file, .pick-dot')) return;
+    if (e.pointerType === 'touch') {
+      // 触屏延迟开启：垂直滚动不该收回已有的花
+      touch = { x: e.clientX, y: e.clientY };
+      return;
+    }
+    begin();
+  });
+  on(win, 'pointerup', function (e) {
+    if (touch) {
+      var t = touch; touch = null;
+      var dy = e.clientY - t.y, dx = e.clientX - t.x;
+      if (Math.abs(dy) > 9 && Math.abs(dy) > Math.abs(dx)) return; // 垂直滑动
+      if (currentRange()) { begin(); sync(); later(release, 1300); }
+      return;
+    }
+    if (!active) return;
+    sync();
+    release();
+  });
+  on(win, 'pointercancel', function () { touch = null; if (active || plants.size) release(); });
+  on(win, 'blur', function () { touch = null; if (active || plants.size) release(); });
+  on(doc, 'selectionchange', onSelectionChange);
+  on(doc, 'visibilitychange', function () {
+    // 隐藏只暂停 RAF，不改 target：切后台回来花还在，不误触发收回
+    if (doc.hidden) { cancelRaf(rafId); rafId = 0; frameLast = 0; }
+    else { frameLast = 0; request(); }
+  });
+  on(win, 'resize', function () {
+    // 卡片宽度变了文字会重排，旧的锚点就不准了 —— 直接收掉，比画错位强
+    if (plants.size || surfaces.size) dropAll();
+  });
+  if (mq.addEventListener) {
+    on(mq, 'change', function () {
+      if (reduced()) {
+        cancelRaf(rafId); rafId = 0;
+        plants.forEach(function (p, key) { if (!p.target) plants.delete(key); else p.progress = 1; });
+        paint(0);
+        if (!plants.size) clearSurfaces();
+      } else { frameLast = 0; request(); }
+    });
+  }
+
+  function isEnabled() {
+    try { return localStorage.getItem(KEY) !== '0'; } catch (e) { return true; }
+  }
+  function setEnabled(v) {
+    var next = !!v;
+    try { localStorage.setItem(KEY, next ? '1' : '0'); } catch (e) {}
+    if (next === enabled && !dead) return;
+    enabled = next;
+    doc.documentElement.classList.toggle('xm-flower-on', next);
+    if (!next) dropAll();
+  }
+
+  enabled = isEnabled();
+  doc.documentElement.classList.toggle('xm-flower-on', enabled);
+
+  // 只读诊断 / 像素验收辅助，不参与正常渲染
+  win.XMFlower = {
+    isEnabled: isEnabled,
+    setEnabled: setEnabled,
+    inspect: function () {
+      var rows = [];
+      plants.forEach(function (p, key) {
+        rows.push({ key: key, x: p.x, y: p.y, progress: p.progress, target: p.target, petals: p.petals, radius: p.radius });
+      });
+      return {
+        enabled: enabled, active: active, plants: plants.size, surfaces: surfaces.size,
+        canvases: feed.querySelectorAll('.xm-flower-cv').length,
+        growing: rows.filter(function (r) { return r.target === 1; }).length,
+        retracting: rows.filter(function (r) { return r.target === 0; }).length,
+        seed: seed, session: session, reduced: reduced(),
+        framePending: rafId !== 0, destroyed: dead, rows: rows
+      };
+    },
+    /** 擦掉落在选区矩形内的 Canvas 像素，供逐像素遮挡对比；不隐藏 Canvas 元素 */
+    eraseSelectionPixels: function () {
+      var range = currentRange();
+      if (!range) return 0;
+      var rects = range.getClientRects(), count = 0;
+      surfaces.forEach(function (s) {
+        var cvr = s.cv.getBoundingClientRect();
+        for (var i = 0; i < rects.length; i++) {
+          var r = rects[i];
+          s.ctx.clearRect(r.left - cvr.left, r.top - cvr.top, r.width, r.height);
+        }
+      });
+      count = rects.length;
+      return count;
+    },
+    destroy: function () {
+      if (dead) return;
+      dropAll();
+      dead = true;
+      listeners.forEach(function (l) { l[0].removeEventListener(l[1], l[2], l[3]); });
+      listeners.length = 0;
+      doc.documentElement.classList.remove('xm-flower-on');
+      delete win.XMFlower;
+    }
+  };
+})();
 </script>
 </body>
 </html>
