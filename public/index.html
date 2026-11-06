@@ -9921,6 +9921,11 @@ if (window.isSecureContext && 'serviceWorker' in navigator) {
   var feed = document.getElementById('feed');
   if (!feed) return;
 
+  /* 可开花的文字区：正文、追加补充、附件文件名（补充说明里的附件同样算）。
+     只认这些容器里的真实文本节点 —— 昵称/时间/文件大小/按钮/输入框一律不参与，
+     免得选个时间也长花。这三处都在 .card 内，共用同一张卡片画布。 */
+  var FLOWER_ZONE = '.text-body, .note-text, .fname';
+
   var PAD_X = 20, PAD_Y = 28;      // 只留一圈余量；花的方向会按卡片边界收敛，不飘到卡片外
   var MAX_PLANTS = 160;
   var DENSITY = 0.34;              // 正文字号 14.5px，比 demo 稀疏些才不糊成一片
@@ -10017,14 +10022,27 @@ if (window.isSecureContext && 'serviceWorker' in navigator) {
     if (!id) { id = nextNodeId++; nodeIds.set(node, id); }
     return id;
   }
-  function textBody(node) {
+  /** 文本节点（或元素）落在哪个可开花容器里；不在 feed 内一律不算。 */
+  function flowerZone(node) {
     var el = node && (node.nodeType === 1 ? node : node.parentElement);
     if (!el || !el.closest) return null;
-    var body = el.closest('.text-body');
-    return body && feed.contains(body) ? body : null;
+    var zone = el.closest(FLOWER_ZONE);
+    return zone && feed.contains(zone) ? zone : null;
   }
   function owned(range) {
-    return !!range && !range.collapsed && textBody(range.startContainer) && textBody(range.endContainer);
+    if (!range || range.collapsed) return false;
+    // 两端都在可开花文字里：最常见的情况，直接放行
+    if (flowerZone(range.startContainer) && flowerZone(range.endContainer)) return true;
+    /* 跨区域拖选：从正文一路拉到补充或文件名，起止可能落在昵称、图标、
+       空白这些「不该开花」的节点上。只要选区确实盖住某个可开花容器就算数，
+       具体哪些字符种花仍由 sync() 按容器逐个过滤。 */
+    var common = range.commonAncestorContainer;
+    var root = common && (common.nodeType === 1 ? common : common.parentElement);
+    if (!root || !feed.contains(root)) return false;
+    if (root.matches && root.matches(FLOWER_ZONE)) return true;
+    var zones = root.querySelectorAll ? root.querySelectorAll(FLOWER_ZONE) : [];
+    for (var i = 0; i < zones.length; i++) if (intersects(range, zones[i])) return true;
+    return false;
   }
   /** intersectsNode 在个别老 WebKit 上缺失或抛错，用 compareBoundaryPoints 兜底。 */
   function intersects(range, node) {
@@ -10243,7 +10261,7 @@ if (window.isSecureContext && 'serviceWorker' in navigator) {
     var nodes = [], walker = doc.createTreeWalker(feed, SHOW_TEXT), n;
     while ((n = walker.nextNode())) {
       if (!/\S/.test(n.data)) continue;
-      if (textBody(n)) nodes.push(n);
+      if (flowerZone(n)) nodes.push(n);   // 正文 / 补充 / 文件名
     }
     var rects = new Map();
     function canvasRect(s) {
@@ -10252,16 +10270,45 @@ if (window.isSecureContext && 'serviceWorker' in navigator) {
       return r;
     }
 
-    /* 选区行带：getClientRects 会把一行切成好几块，按 top 合并成「行」。
-       按卡片分别算 —— 拖选横跨多张卡片时，每张卡片都有自己的上下轮廓，
-       不能把整页当成一个大选区，否则中间的卡片一朵花都不长。 */
+    /* 轮廓分组：同一张卡片里的「同类文字」算一个整体（多个正文段落 / 多条补充 /
+       多个文件名分别合并），不同种类、不同卡片各自独立。
+       - 跨正文→补充→文件名拖选：三处都有自己的上下轮廓，谁也不会被当成中间行；
+       - 跨 4 个正文段落拖选：仍只沿最上 / 最下轮廓开花，中间段落保持干净；
+       - 跨多张卡片：每张卡片各自算，不会出现中间的卡片一朵花都没有。 */
+    var groupList = [], groupByCard = new Map(), zoneGroup = new Map();
+    var allZones = feed.querySelectorAll(FLOWER_ZONE);
+    for (var zi = 0; zi < allZones.length; zi++) {
+      var z = allZones[zi];
+      var gcard = z.closest('.card') || feed;
+      var kind = z.classList.contains('fname') ? 'f'
+        : z.classList.contains('note-text') ? 'n' : 'b';
+      var by = groupByCard.get(gcard);
+      if (!by) { by = {}; groupByCard.set(gcard, by); }
+      var g = by[kind];
+      if (!g) { g = { zones: [], rect: null }; by[kind] = g; groupList.push(g); }
+      g.zones.push(z);
+      zoneGroup.set(z, g);
+    }
+    for (var gi = 0; gi < groupList.length; gi++) {
+      var grp = groupList[gi], l = Infinity, t = Infinity, rr = -Infinity, bb = -Infinity;
+      for (var zj = 0; zj < grp.zones.length; zj++) {
+        var zr = grp.zones[zj].getBoundingClientRect();
+        if (!zr.width && !zr.height) continue;
+        l = Math.min(l, zr.left); t = Math.min(t, zr.top);
+        rr = Math.max(rr, zr.right); bb = Math.max(bb, zr.bottom);
+      }
+      grp.rect = l === Infinity ? null : { top: t, bottom: bb, left: l, right: rr };
+    }
+
+    /* 选区行带：getClientRects 会把一行切成好几块，按 top 合并成「行」，
+       只取落在当前分组矩形里的那些块。 */
     var clientRects = range.getClientRects ? range.getClientRects() : [];
     var bandCache = new Map();
-    function bandsFor(card) {
-      var cached = bandCache.get(card);
+    function bandsFor(group) {
+      var cached = bandCache.get(group);
       if (cached) return cached;
-      var cr = card.getBoundingClientRect(), list = [];
-      for (var q = 0; q < clientRects.length; q++) {
+      var cr = group && group.rect, list = [];
+      if (cr) for (var q = 0; q < clientRects.length; q++) {
         var br = clientRects[q];
         if (!br.width || !br.height) continue;
         if (br.bottom < cr.top - 2 || br.top > cr.bottom + 2) continue;
@@ -10278,7 +10325,7 @@ if (window.isSecureContext && 'serviceWorker' in navigator) {
         }
       }
       list.sort(function (a, b) { return a.top - b.top; });
-      bandCache.set(card, list);
+      bandCache.set(group, list);
       return list;
     }
 
@@ -10294,8 +10341,9 @@ if (window.isSecureContext && 'serviceWorker' in navigator) {
         if (/\s/.test(text.data[i])) continue;
         var card = text.parentElement && text.parentElement.closest('.card');
         if (!card || !card.isConnected) continue;
+        var zone = flowerZone(text);       // 兼作行带分组与验收标记
 
-        var bands = bandsFor(card), many = bands.length > 1;
+        var bands = bandsFor(zone ? zoneGroup.get(zone) : null), many = bands.length > 1;
         var nid = nodeId(text);
         var key = session + ':' + nid + ':' + i;
         var rng = randomFor(seed ^ Math.imul(nid + 1, 73856093) ^ Math.imul(i + 1, 19349663));
@@ -10373,7 +10421,7 @@ if (window.isSecureContext && 'serviceWorker' in navigator) {
         var direction = down ? 1 : -1;
 
         plants.set(key, {
-          surface: s, x: x, y: y,
+          surface: s, zone: zone, x: x, y: y,
           cx: x + bend * 0.35 + curve, cy: y + direction * length * 0.48,
           ex: x + bend, ey: y + direction * length,
           direction: direction,
@@ -10421,8 +10469,10 @@ if (window.isSecureContext && 'serviceWorker' in navigator) {
   // ---- 输入事件 ----
   on(feed, 'pointerdown', function (e) {
     if (!enabled || e.button !== 0) return;
-    // 复制/删除/展开等操作按钮上按下不该开启拖选手势
-    if (e.target.closest && e.target.closest('button, a, input, textarea, select, [contenteditable], .thumb, .file, .pick-dot')) return;
+    // 复制/删除/展开等操作按钮上按下不该开启拖选手势。
+    // 文件名现在也要能拖选开花，所以不再整行排除 .file，只挡真正的交互件
+    // （下载链接、预览按钮、类型图标、缩略图、取色点…）。
+    if (e.target.closest && e.target.closest('button, a, input, textarea, select, [contenteditable], .thumb, .fico, .dl, .pick-dot')) return;
     if (e.pointerType === 'touch') {
       // 触屏延迟开启：垂直滚动不该收回已有的花
       touch = { x: e.clientX, y: e.clientY };
@@ -10487,7 +10537,14 @@ if (window.isSecureContext && 'serviceWorker' in navigator) {
     inspect: function () {
       var rows = [];
       plants.forEach(function (p, key) {
-        rows.push({ key: key, x: p.x, y: p.y, progress: p.progress, target: p.target, petals: p.petals, radius: p.radius });
+        var z = p.zone;
+        rows.push({
+          key: key, x: p.x, y: p.y, progress: p.progress, target: p.target,
+          petals: p.petals, radius: p.radius,
+          zone: z ? (z.dataset && z.dataset.zone ? z.dataset.zone : z.className) : '',
+          ax: p.x + p.surface.cv.getBoundingClientRect().left,
+          ay: p.y + p.surface.cv.getBoundingClientRect().top
+        });
       });
       return {
         enabled: enabled, active: active, plants: plants.size, surfaces: surfaces.size,
