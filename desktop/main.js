@@ -321,7 +321,14 @@ function attachContextMenu(win) {
   });
 }
 
-function createHostWindow() {
+function createHostWindow(opts = {}) {
+  // 冷启动按记忆「直接连别人」时，这张启动页不该上屏。以前是先无条件 show、
+  // 再靠 applyStartChoice 事后 hide：两者有时序竞争（中间隔着 probeHost 网络探测），
+  // 且 ready-to-show / 2.5s 兜底常常在 hide 之后触发，又把窗口亮出来 —— 用户看到
+  // 的就是「连接窗口 + 选择页」两个窗口。改由调用方在冷启动这一次显式关掉自动上屏。
+  // 只影响本次创建的窗口：后续任何重建仍保持「建好就显示」的默认行为。
+  const autoShow = opts.autoShow !== false;
+
   // 恢复上次的大小与位置；最大化状态单独记，还原态的几何始终保留一份
   const saved = validWindowBounds(readSettings().windowBounds);
   const bounds = saved ? { x: saved.x, y: saved.y, width: saved.width, height: saved.height }
@@ -368,12 +375,13 @@ function createHostWindow() {
   // 先显示启动页（不依赖本地服务器，双击后立即有反馈），服务就绪后再换真实页
   if (hostInfo) hostWin.loadURL(hostInfo.hostUrl); // 窗口重建时服务已在跑，直接进真实页，不必闪一下启动页
   else hostWin.loadFile(START_PAGE);
-  // 首帧就绪再上屏，别让人看见白屏闪一下；兜底 2.5s 强制显示 —— 页面卡住也不能对着空窗口
+  // 需要上屏时：首帧就绪再 show，别让人看见白屏闪一下；兜底 2.5s 强制显示 ——
+  // 页面卡住也不能对着空窗口。autoShow=false 时两个入口都不亮，窗口只是不上屏
   hostWin.once('ready-to-show', () => {
-    if (hostWin && !hostWin.isDestroyed() && !hostWin.isVisible()) hostWin.show();
+    if (autoShow && hostWin && !hostWin.isDestroyed() && !hostWin.isVisible()) hostWin.show();
   });
   setTimeout(() => {
-    if (hostWin && !hostWin.isDestroyed() && !hostWin.isVisible()) hostWin.show();
+    if (autoShow && hostWin && !hostWin.isDestroyed() && !hostWin.isVisible()) hostWin.show();
   }, 2500);
   startNoticeWatch(hostWin);   // 收消息提醒由主进程统一负责（页面只负责展示）
   attachContextMenu(hostWin);  // 浏览器同款右键：图片可复制，输入框有剪切/粘贴
@@ -443,6 +451,7 @@ async function ensureHostWindow() {
     if (u.startsWith('file:')) {
       const inf = server.serverInfo();
       let nav = null;
+      let handedOff = false;
       if (inf.running) {
         // 服务在跑：直接进真实界面，别让用户看到一张过期的启动页
         hostInfo = inf;
@@ -451,6 +460,7 @@ async function ensureHostWindow() {
         // 服务没跑：记过启动方式就按记忆重新走一遍（连上次那台 / 起本机服务），
         // 只有「每次问我」才亮选择页 —— 记了「直接连」还天天被问，等于没记
         if (runStartPref()) {
+          handedOff = true;
           // 按记忆走了：目的地多半不是这张启动页 —— 先藏好再换装，
           // 不然就是「闪一下选择页、再跳进主界面」的毛躁体验。
           // 走失败了 applyStartChoice / startPageError 会自己把窗口亮出来
@@ -469,6 +479,10 @@ async function ensureHostWindow() {
         });
         return hostWin;
       }
+      // 已经交给 applyStartChoice 接管（点 Dock / 托盘时也会走到这）：
+      // 它会开连接窗口或进本机界面，连不上则自己把这张选择页亮出来。
+      // 这里不能再 show，否则那张启动页又被顶到屏幕上，跟冷启动是同一个毛病。
+      if (handedOff) return hostWin;
     }
     if (hostWin.isMinimized()) hostWin.restore();
     hostWin.show();
@@ -2008,6 +2022,9 @@ function runStartPref() {
     action: pref.mode === 'link' ? 'link' : 'host',
     url: pref.lastLinkUrl,
     keepHost: pref.keepHost,
+    // 必须把偏好原样带过去：applyStartChoice 开头会按 c.https 落盘，
+    // 漏传就等于每次冷启动把用户勾的 HTTPS 悄悄清成 false。
+    https: pref.https,
     remember: false,
   }).catch((e) => startPageError('启动失败：' + ((e && e.message) || '未知错误')));
   return true;
@@ -3673,7 +3690,16 @@ if (!app.requestSingleInstanceLock()) {
     buildTray();          // 托盘尽早建：关闭按钮的三种结局都依赖它在不在
     syncBallMetrics();    // 球的尺寸先算好，后面布局都靠它
     registerBallIpc();    // 悬浮球的请求通道先打通，窗口起来就能用
-    createHostWindow();   // 窗口与启动页立刻出现 —— 双击就有反馈，不用干等任何东西
+    // 默认（首次 / 每次问我）：窗口与启动页立刻出现，双击就有反馈。
+    // 但记了「直接连上次那台」且本机没在提供服务时，只建窗口、不上屏：
+    // 目的地是对方的连接窗口，亮一张自己的选择页纯属多余（还会和 hide 打架）。
+    // 窗口对象仍保留 —— 菜单、托盘、悬浮球、通知、错误回显都依赖它；
+    // 对方连不上时 applyStartChoice 会主动 show 这张选择页让人重选。
+    const bootPref = readStartPref();
+    const bootLink = bootPref.mode === 'link' ? normalizeLink(bootPref.lastLinkUrl || '') : null;
+    const linkOnly = !!(bootLink && !bootLink.error && !isSelf(bootLink.url)) &&
+      !server.serverInfo().running;
+    createHostWindow({ autoShow: !linkOnly });
     // 上次是开着球退出的：这次自动把球带上（手动关过才会是 false）
     if (readSettings().ballEnabled) setBallEnabled(true);
 
