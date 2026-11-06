@@ -9924,6 +9924,8 @@ if (window.isSecureContext && 'serviceWorker' in navigator) {
   var PAD_X = 20, PAD_Y = 28;      // 只留一圈余量；花的方向会按卡片边界收敛，不飘到卡片外
   var MAX_PLANTS = 160;
   var DENSITY = 0.34;              // 正文字号 14.5px，比 demo 稀疏些才不糊成一片
+  var DENSITY_EDGE = 0.48;         // 多行选区只剩两条边，密度补回来才不显稀
+  var EDGE = 26;                   // 每行左右端点多少像素内允许开花（阶梯形选区的侧边）
   var K = 0.62;                    // 花型整体缩放（demo 是 21.5px 正文，这里字号只有 14.5px）
   var SHOW_TEXT = 4;
   var PALETTE = ['#f21b3f', '#ffb35b', '#f4d64c', '#9bc9ec', '#a47bdf', '#f1afd0', '#fff7db'];
@@ -9944,7 +9946,8 @@ if (window.isSecureContext && 'serviceWorker' in navigator) {
   var timers = new Set();
 
   var enabled = false, active = false, dead = false;
-  var seed = 1, session = 0, rafId = 0, syncId = 0, frameLast = 0;
+  var seed = 1, session = 0, rafId = 0, frameLast = 0;
+  var syncTimer = 0, pollId = 0;
   var touch = null;
 
   function on(target, type, fn, opts) {
@@ -9974,11 +9977,37 @@ if (window.isSecureContext && 'serviceWorker' in navigator) {
     timers.forEach(function (id) { win.clearTimeout(id); });
     timers.clear();
   }
+
+  /* Safari / WebKit 在拖选过程中常常只在松手那一刻才发一次 selectionchange，
+     把「边拖边长」全押在它身上就会整段看不到花。手势期间用定时器主动轮询，
+     selectionchange 只当加速通道。两条路都不走 RAF —— 离屏 / 后台时 RAF 会被
+     节流甚至完全停发，那样连一株花都同步不出来。 */
+  function cancelSyncTimer() {
+    if (syncTimer) { win.clearTimeout(syncTimer); syncTimer = 0; }
+  }
+  function queueSync() {
+    if (dead || !enabled || !active || syncTimer) return;
+    syncTimer = win.setTimeout(function () { syncTimer = 0; sync(); }, 24);
+  }
+  function stopPolling() {
+    if (pollId) { win.clearTimeout(pollId); pollId = 0; }
+  }
+  function startPolling() {
+    if (pollId || dead || !active) return;
+    var step = function () {
+      pollId = 0;
+      if (dead || !active || !enabled) return;
+      sync();
+      if (active) pollId = win.setTimeout(step, 55);
+    };
+    pollId = win.setTimeout(step, 55);
+  }
   function cancelAll() {
     frames.forEach(function (id) { win.cancelAnimationFrame(id); });
     frames.clear();
     cancelRaf(rafId); rafId = 0;
-    cancelRaf(syncId); syncId = 0;
+    cancelSyncTimer();
+    stopPolling();
     frameLast = 0;
     stopTimers();
   }
@@ -9996,6 +10025,18 @@ if (window.isSecureContext && 'serviceWorker' in navigator) {
   }
   function owned(range) {
     return !!range && !range.collapsed && textBody(range.startContainer) && textBody(range.endContainer);
+  }
+  /** intersectsNode 在个别老 WebKit 上缺失或抛错，用 compareBoundaryPoints 兜底。 */
+  function intersects(range, node) {
+    if (range.intersectsNode) {
+      try { return range.intersectsNode(node); } catch (e) {}
+    }
+    try {
+      var nr = doc.createRange(); nr.selectNode(node);
+      // 实测真值表（Chrome / WebKit 同）：相交 ⇔ START_TO_END > 0 且 END_TO_START < 0
+      return range.compareBoundaryPoints(win.Range.START_TO_END, nr) > 0 &&
+             range.compareBoundaryPoints(win.Range.END_TO_START, nr) < 0;
+    } catch (e) { return true; }   // 拿不到边界就交给下面的字符循环自己裁
   }
   function currentRange() {
     var sel = doc.getSelection();
@@ -10171,10 +10212,13 @@ if (window.isSecureContext && 'serviceWorker' in navigator) {
     session++;
     // 上一批保留对象，改为反向生长；新拖选可以中断收回
     plants.forEach(function (p) { p.target = 0; });
+    startPolling();
   }
   function release() {
     active = false;
     stopTimers();
+    stopPolling();
+    cancelSyncTimer();
     plants.forEach(function (p) { p.target = 0; });
     // 绿色浏览器选区按系统行为保留，这里不 removeAllRanges
     if (reduced()) {
@@ -10186,7 +10230,6 @@ if (window.isSecureContext && 'serviceWorker' in navigator) {
 
   /** 依据当前 Range 同步植株集合；只在 active 时工作，别处的选择不会动这里的花。 */
   function sync() {
-    syncId = 0;
     if (dead || !enabled || !active) return;
     var range = currentRange();
     if (!range) {
@@ -10209,37 +10252,90 @@ if (window.isSecureContext && 'serviceWorker' in navigator) {
       return r;
     }
 
+    /* 选区行带：getClientRects 会把一行切成好几块，按 top 合并成「行」。
+       按卡片分别算 —— 拖选横跨多张卡片时，每张卡片都有自己的上下轮廓，
+       不能把整页当成一个大选区，否则中间的卡片一朵花都不长。 */
+    var clientRects = range.getClientRects ? range.getClientRects() : [];
+    var bandCache = new Map();
+    function bandsFor(card) {
+      var cached = bandCache.get(card);
+      if (cached) return cached;
+      var cr = card.getBoundingClientRect(), list = [];
+      for (var q = 0; q < clientRects.length; q++) {
+        var br = clientRects[q];
+        if (!br.width || !br.height) continue;
+        if (br.bottom < cr.top - 2 || br.top > cr.bottom + 2) continue;
+        var hit = null;
+        for (var bj = 0; bj < list.length; bj++) {
+          if (Math.abs(list[bj].top - br.top) < 4) { hit = list[bj]; break; }
+        }
+        if (hit) {
+          hit.left = Math.min(hit.left, br.left);
+          hit.right = Math.max(hit.right, br.right);
+          hit.bottom = Math.max(hit.bottom, br.bottom);
+        } else {
+          list.push({ top: br.top, bottom: br.bottom, left: br.left, right: br.right });
+        }
+      }
+      list.sort(function (a, b) { return a.top - b.top; });
+      bandCache.set(card, list);
+      return list;
+    }
+
     var wanted = new Set();
     for (var ni = 0; ni < nodes.length; ni++) {
       var text = nodes[ni];
-      if (!range.intersectsNode(text)) continue;
+      if (!intersects(range, text)) continue;
       var from = text === range.startContainer ? range.startOffset : 0;
       var to = text === range.endContainer ? range.endOffset : text.data.length;
       var lo = Math.max(0, Math.min(from, to));
       var hi = Math.min(text.data.length, Math.max(from, to));
       for (var i = lo; i < hi; i++) {
         if (/\s/.test(text.data[i])) continue;
+        var card = text.parentElement && text.parentElement.closest('.card');
+        if (!card || !card.isConnected) continue;
+
+        var bands = bandsFor(card), many = bands.length > 1;
         var nid = nodeId(text);
         var key = session + ':' + nid + ':' + i;
         var rng = randomFor(seed ^ Math.imul(nid + 1, 73856093) ^ Math.imul(i + 1, 19349663));
         // 是否种花只由这个键决定，与选区长度无关 —— 扩展选区时原有植株身份不变
-        if (rng() > DENSITY) continue;
-        wanted.add(key);
+        if (rng() > (many ? DENSITY_EDGE : DENSITY)) continue;
         var existing = plants.get(key);
-        if (existing) { existing.target = 1; continue; }  // 再次经过：从当前进度接回
-        if (plants.size >= MAX_PLANTS) continue;
 
-        var card = text.parentElement && text.parentElement.closest('.card');
-        if (!card || !card.isConnected) continue;
         var cr = doc.createRange();
         cr.setStart(text, i); cr.setEnd(text, i + 1);
         var r = cr.getBoundingClientRect();
         if (!r.width || !r.height) continue;
 
+        /* ★ 多行选区只沿轮廓开花：最上一行向上、最下一行向下，中间行只允许
+           左右端点各一小段（阶梯形选区的侧边）。落在选区内部的字符一律跳过，
+           否则花会糊在绿色高亮里，把「选区是地面」的层次感彻底毁掉。 */
+        // 端点距离一律用「锚点中心」量，跟验收口径一致，别用字符矩形的左边缘
+        var cx0 = r.left + r.width / 2, cy = r.top + r.height / 2;
+        var band = null, bidx = -1, edge = 0;
+        for (var bk = 0; bk < bands.length; bk++) {
+          if (cy >= bands[bk].top - 4 && cy <= bands[bk].bottom + 4) {
+            band = bands[bk]; bidx = bk; break;
+          }
+        }
+        var first = bands.length > 0 && bidx === 0;
+        var last = bands.length > 0 && bidx === bands.length - 1;
+        if (bands.length && !band) continue;          // 取不到行带就别乱种
+        if (many && !first && !last) {
+          if (cx0 - band.left < EDGE) edge = -1;
+          else if (band.right - cx0 < EDGE) edge = 1;
+          else continue;                              // 中间：不种
+        }
+
+        wanted.add(key);
+        if (existing) { existing.target = 1; continue; }  // 再次经过：从当前进度接回
+        if (plants.size >= MAX_PLANTS) continue;
+
         var s = ensureSurface(card);
         var cvr = canvasRect(s);
-        var x = r.left + r.width / 2 - cvr.left;
-        var y = r.top + r.height / 2 - cvr.top;
+        var x = cx0 - cvr.left;
+        var y = cy - cvr.top;
         var length = (16 + rng() * 40) * K;
         var bend = (rng() - 0.5) * 60 * K;
         var family = Math.floor(rng() * 5);
@@ -10251,16 +10347,28 @@ if (window.isSecureContext && 'serviceWorker' in navigator) {
           : 18 + rng() * 5) * K;
         var curve = (rng() - 0.5) * 24 * K;
 
+        // 端点花要横向钻出行带，否则会被相邻行的绿色高亮盖住
+        if (edge) {
+          bend = edge * (46 + Math.abs(bend) * 0.8);
+          length *= 0.72;
+        }
+
         // 卡片是有圆角、有阴影的独立块，花飘到卡片外会显得脱层。
         // 按锚点离上下边的余量收敛方向：不够就翻向另一边，两边都窄就缩短茎。
+        // 轮廓行的方向锁死朝外，余量不够只缩茎、绝不翻进选区里。
+        var lockDir = many && first !== last;
         var down = rng() < 0.38;
+        if (many) {
+          if (first && !last) down = false;      // 最上行只往上长
+          else if (last && !first) down = true;  // 最下行只往下长
+        }
         var head = radius * 1.25;
         var roomUp = y - s.cardTop, roomDown = s.cardBottom - y;
-        if (down && roomDown < length + head && roomUp >= length + head) down = false;
-        else if (!down && roomUp < length + head && roomDown >= length + head) down = true;
+        if (!lockDir && down && roomDown < length + head && roomUp >= length + head) down = false;
+        else if (!lockDir && !down && roomUp < length + head && roomDown >= length + head) down = true;
         else if (roomUp < length + head && roomDown < length + head) {
           length = Math.max(3, Math.max(roomUp, roomDown) - head - 2);
-          down = roomDown >= roomUp;
+          if (!lockDir) down = roomDown >= roomUp;
         }
         var direction = down ? 1 : -1;
 
@@ -10296,11 +10404,13 @@ if (window.isSecureContext && 'serviceWorker' in navigator) {
 
   function onSelectionChange() {
     if (dead || !enabled || !active) return;
-    if (!syncId) syncId = raf(function () { syncId = 0; sync(); });
+    queueSync();
   }
   function dropAll() {
     active = false;
     stopTimers();
+    stopPolling();
+    cancelSyncTimer();
     plants.clear();
     paint(0);
     clearSurfaces();
@@ -10336,9 +10446,9 @@ if (window.isSecureContext && 'serviceWorker' in navigator) {
   on(win, 'blur', function () { touch = null; if (active || plants.size) release(); });
   on(doc, 'selectionchange', onSelectionChange);
   on(doc, 'visibilitychange', function () {
-    // 隐藏只暂停 RAF，不改 target：切后台回来花还在，不误触发收回
-    if (doc.hidden) { cancelRaf(rafId); rafId = 0; frameLast = 0; }
-    else { frameLast = 0; request(); }
+    // 隐藏只暂停 RAF 与轮询，不改 target：切后台回来花还在，不误触发收回
+    if (doc.hidden) { cancelRaf(rafId); rafId = 0; frameLast = 0; stopPolling(); }
+    else { frameLast = 0; if (active) startPolling(); request(); }
   });
   on(win, 'resize', function () {
     // 卡片宽度变了文字会重排，旧的锚点就不准了 —— 直接收掉，比画错位强

@@ -235,19 +235,41 @@ function validWindowBounds(b) {
  * 对照实验（同机实测）：只开球窗=regular；+floating=regular；+全空间(无选项)=regular；
  * +visibleOnFullScreen=**accessory**；再 setActivationPolicy('regular') 立刻回到 regular，
  * 且球的 isVisibleOnAllWorkspaces 仍为 true（全屏可见没丢）。所以每次动完球的层级都补一刀。
+ *
+ * 2026-11-06 追加（mac 抢前台的根因）：setActivationPolicy('regular') / dock.show() 在
+ * macOS 上会顺带把 App 激活、把窗口抬到前台。以前这里「每次调用都真干活」，而悬浮球
+ * 层级补丁、托盘刷新、窗口 show/focus 都会调到它 —— 用户切到 Safari、开个新标签，
+ * 互传窗口就自己弹回第一层。改成**幂等**：只有真被 visibleOnFullScreen 打脏
+ * （markPolicyDirty）时才动手。
  */
-function ensureRegularApp() {
+let policyDirty = true;
+function markPolicyDirty() { policyDirty = true; }
+function ensureRegularApp(force) {
   if (!IS_MAC || quitting) return;
+  if (!policyDirty && !force) return;
   try { app.setActivationPolicy('regular'); } catch { /* 老版本没有这个 API */ }
   try { if (app.dock && !app.dock.isVisible()) app.dock.show(); } catch { /* 没 Dock 的环境 */ }
+  policyDirty = false;
+}
+
+/** app.focus({steal:true}) = 从当前活跃应用手里硬夺前台，只让用户主动动作触发。 */
+let lastStealAt = 0;
+function stealFocus() {
+  if (!IS_MAC || quitting) return;
+  const now = Date.now();
+  if (now - lastStealAt < 120) return;   // 防止 ensureFront 的循环把前台反复抢回来
+  lastStealAt = now;
+  try { app.focus({ steal: true }); } catch { /* 老版本不收参数 */ }
 }
 
 /** mac：窗口是程序里 show 出来的（悬浮球按钮 / 托盘 / 菜单），系统经常不顺带激活 app ——
- *  菜单栏不切、窗口沉在别的应用下面。所有「把窗口叫起来」的地方都补一脚。 */
+ *  菜单栏不切、窗口沉在别的应用下面。所有「把窗口叫起来」的地方都补一脚；
+ *  但自己已经有窗口在前台时别再抢，那会去抢 Safari 的前台。 */
 function activateApp() {
   if (!IS_MAC || quitting) return;
   ensureRegularApp();   // accessory 状态下激活是白搭：先确保自己是常规应用
-  try { app.focus({ steal: true }); } catch { /* 老版本不收参数 */ }
+  if (BrowserWindow.getFocusedWindow()) return;
+  stealFocus();
 }
 
 /**
@@ -267,21 +289,27 @@ function ensureFront(win, ms = 1400) {
     if (!win || win.isDestroyed()) return;
     ensureRegularApp();   // 期间若有代码把 policy 打成 accessory（球的层级调用），这里补回来
     if (win.isVisible()) {
-      try { app.focus({ steal: true }); } catch { /* 无所谓 */ }
       try { if (ballWin && !ballWin.isDestroyed() && ballWin.isFocused()) ballWin.blur(); } catch { /* 同上 */ }
+      // 目标已经拿到焦点就收手：别继续每 120ms 抢一次前台，用户此时切到别的 App 会被拽回来
+      if (win.isFocused()) return;
+      stealFocus();
     }
     if (Date.now() - t0 < ms) setTimeout(tick, 120);
   };
   setTimeout(tick, 40);
 }
 
+/**
+ * 用户点到窗口 / 窗口被系统亮起时，macOS 本来就会激活 App、菜单栏自然跟着切过来。
+ * 这里只做一件事：把可能被悬浮球打坏的 activationPolicy 修回 regular。
+ * 绝不能再调 activateApp()/app.focus({steal:true}) —— 那是从当前前台应用（Safari）
+ * 手里硬夺焦点，表现就是「一开 Safari 新标签，互传窗口自动弹到最前，只有最小化
+ * 或收入托盘才好」。
+ */
 function stealAppFocusOn(win) {
   if (!IS_MAC) return;
-  // focus 事件里同步调会被吞，推迟到下一轮
-  win.on('focus', () => { if (!quitting) setImmediate(activateApp); });
-  // 「先创建、稍后才上屏」的窗口可能压根不发 focus —— show 也补一脚。
-  // 否则菜单栏会一直挂在别的应用名下，直到用户再点一次窗口。
-  win.on('show', () => { if (!quitting) setImmediate(activateApp); });
+  win.on('focus', () => { if (!quitting) setImmediate(ensureRegularApp); });
+  win.on('show',  () => { if (!quitting) setImmediate(ensureRegularApp); });
 }
 
 /**
@@ -515,6 +543,54 @@ async function openMyHost() {
   hostWin.loadURL(info.hostUrl);
 }
 
+/* ------------------------------------------------- 选区开花：由本地壳下发 */
+/**
+ * 「连到别人」窗口加载的是**对方主机下发的页面**。对方还跑旧版时，那张页面里
+ * 压根没有开花代码 —— 这就是「明明打包了新版本、桌面端却没效果」的原因：
+ * 本机主窗口（自己 serve 的 public/index.html）是好的，连接窗口不是。
+ *
+ * 跟「收到消息由主进程弹通知」同一个思路：装饰层也由本地壳兜底。从随包自带的
+ * public/index.html 里原样抽出开花的 CSS / JS 注入连接窗口 —— 单一来源、不复制
+ * 第二份引擎，也不要求对方主机跟着升级。#feed 存在才注入、已经有 XMFlower 就跳过。
+ */
+const FLOWER_PAGE = path.join(__dirname, '..', 'public', 'index.html');
+let flowerAssets;
+function readFlowerAssets() {
+  if (flowerAssets !== undefined) return flowerAssets;
+  flowerAssets = null;
+  try {
+    const html = fs.readFileSync(FLOWER_PAGE, 'utf8');
+    const css = (html.match(/\/\* ==== XM_FLOWER_CSS_START ==== \*\/([\s\S]*?)\/\* ==== XM_FLOWER_CSS_END ==== \*\//) || [])[1];
+    const js = (html.match(/<script id="xm-flower">([\s\S]*?)<\/script>/) || [])[1];
+    if (css && js) flowerAssets = { css, js };
+  } catch { /* 包里没带就跳过，不影响连接功能 */ }
+  return flowerAssets;
+}
+
+function injectFlower(win) {
+  const a = readFlowerAssets();
+  if (!a || !win || win.isDestroyed()) return;
+  try {
+    const u = new URL(win.webContents.getURL());
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return; // 启动页 / 断线页不注入
+  } catch { return; }
+  // 用 <script> 而不是 eval：避免被对方页面的 CSP 当成 unsafe-eval 拦掉
+  const code = `(function(){try{
+    if (window.XMFlower || !document.getElementById('feed')) return;
+    if (!document.getElementById('xm-flower-inject-style')) {
+      var st=document.createElement('style');
+      st.id='xm-flower-inject-style';
+      st.textContent=${JSON.stringify(a.css)};
+      (document.head||document.documentElement).appendChild(st);
+    }
+    var sc=document.createElement('script');
+    sc.id='xm-flower-inject';
+    sc.textContent=${JSON.stringify(a.js)};
+    (document.body||document.documentElement).appendChild(sc);
+  }catch(e){}})()`;
+  win.webContents.executeJavaScript(code).catch(() => { /* 对方页面 CSP 拦了就算了 */ });
+}
+
 /**
  * 开一个「连到别人」的窗口。
  * 这个窗口不挂 preload：对面是别人的服务，不需要（也不该）拿到桌面 API。
@@ -625,6 +701,7 @@ function openLink(rawUrl) {
   // 这里读出来记在 rec 上（只进主进程内存，不回传给对方页面）。
   // 缺了这一步，球只能用自己兜底的陌生 cid，对方会判成「设备未授权」。
   win.webContents.on('did-finish-load', () => {
+    injectFlower(win);   // 对方页面是旧版时，本地壳把开花效果补上
     win.webContents.executeJavaScript("localStorage.getItem('xm.cid')||''", true)
       .then((cid) => {
         cid = String(cid || '');
@@ -2096,13 +2173,13 @@ function buildTray() {
 
 /** 托盘菜单跟着服务状态走：端口、能不能复制地址、关闭策略的单选，都要是当下的事实 */
 /** mac：窗口全收进托盘后 Dock 图标偶尔会被系统弄丢（Electron 的老毛病）。
- *  只要进程活着（没真退出），Dock 里就该一直坐着 —— 丢了就扶回来。 */
+ *  只要进程活着（没真退出），Dock 里就该一直坐着 —— 丢了就扶回来。
+ *  但 dock.show() 会激活 App、把窗口抬到前台，所以交给幂等的 ensureRegularApp：
+ *  只有 activationPolicy 真被打脏时才动手，别让每次 refreshTray 都抢一次前台。 */
 function ensureDockIcon() {
   if (!IS_MAC || !app.dock || quitting) return;
-  try {
-    if (!app.dock.isVisible()) app.dock.show();
-    app.dock.setIcon(APP_ICON);
-  } catch { /* Dock 不可用的环境就算了 */ }
+  ensureRegularApp();
+  try { app.dock.setIcon(APP_ICON); } catch { /* 图标重设失败不影响主流程 */ }
 }
 
 function refreshTray() {
@@ -2676,7 +2753,10 @@ function createBallWindow() {
   // 拖拽会话不往窗口路由 —— 文件拖影子都画在球下面、dragenter 一个都不来；
   // floating（3）仍压得住普通窗口，全屏可见交给上面的 visibleOnFullScreen。
   if (IS_MAC) {
-    try { ballWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch { /* 老系统 */ }
+    try {
+      ballWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+      markPolicyDirty();
+    } catch { /* 老系统 */ }
   }
   ballWin.setAlwaysOnTop(true, 'floating');
   ballWin.moveTop();
@@ -2717,7 +2797,12 @@ function hardenBallLevel() {
   if (!IS_MAC || !ballWin || ballWin.isDestroyed()) return;
   // 「全空间可见」只在真的丢了时才重设：这个调用会把 App 打成 accessory（见 ensureRegularApp 注释），
   // 而 hardenBallLevel 在拖动/改尺寸时会反复调 —— 每次都重设的话 Dock 图标会跟着反复跳。
-  try { if (!ballWin.isVisibleOnAllWorkspaces()) ballWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch { /* 老系统 */ }
+  try {
+    if (!ballWin.isVisibleOnAllWorkspaces()) {
+      ballWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+      markPolicyDirty();
+    }
+  } catch { /* 老系统 */ }
   try { ballWin.setAlwaysOnTop(true, 'floating'); } catch { /* 同上 */ }
   ballWin.moveTop();
   ensureRegularApp();   // 万一上面那句刚把 App 打成 accessory（无菜单栏），立刻拉回 regular
@@ -2756,7 +2841,12 @@ function ballMenuBounds() {
 /** 菜单窗的层级补丁（跟球窗一样：先 setVisibleOnAllWorkspaces 再 setAlwaysOnTop） */
 function hardenMenuLevel() {
   if (!IS_MAC || !ballMenuWin || ballMenuWin.isDestroyed()) return;
-  try { if (!ballMenuWin.isVisibleOnAllWorkspaces()) ballMenuWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch { /* 老系统 */ }
+  try {
+    if (!ballMenuWin.isVisibleOnAllWorkspaces()) {
+      ballMenuWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+      markPolicyDirty();
+    }
+  } catch { /* 老系统 */ }
   try { ballMenuWin.setAlwaysOnTop(true, 'floating'); } catch { /* 同上 */ }
   ballMenuWin.moveTop();
   ensureRegularApp();   // 同球窗：visibleOnFullScreen 会把 App 打成 accessory，菜单栏就没了
@@ -2781,7 +2871,10 @@ function ensureBallMenuWindow() {
     },
   });
   if (IS_MAC) {
-    try { ballMenuWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch { /* 老系统 */ }
+    try {
+      ballMenuWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+      markPolicyDirty();
+    } catch { /* 老系统 */ }
   }
   ballMenuWin.setAlwaysOnTop(true, 'floating');
   ballMenuWin.loadFile(BALL_MENU_PAGE);
