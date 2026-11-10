@@ -1545,7 +1545,8 @@
     -webkit-backdrop-filter:blur(10px) saturate(160%);backdrop-filter:blur(10px) saturate(160%);
     cursor:pointer;white-space:nowrap;
   }
-  .notes-wrap.notes-collapsible .notes-more{display:inline-flex}
+  /* 用块级 flex 独占一行，避免和下面的「继续补充」挤在同一行 */
+  .notes-wrap.notes-collapsible .notes-more{display:flex;width:max-content;max-width:100%}
   .notes-wrap.notes-collapsed .note-list .note-row:nth-child(n+2){display:none}
   .notes-wrap.notes-collapsed .note-list .note-text{
     max-height:3.4em;overflow:hidden;
@@ -6509,6 +6510,9 @@
     if (!on && !masonryRO) return;
     masonrySyncing = true;
     try {
+      // 先清掉上一轮的列位置：3 列切 2 列时残留的 grid-column-start:3 会建隐式列，
+      // 不止卡片错位，连 gridTemplateColumns 读出来的列数都会变成 3。
+      if (on) Array.prototype.forEach.call(feed.children, clearMasonryPos);
       var cs = getComputedStyle(feed);
       var cols = on ? (cs.gridTemplateColumns.trim().match(/\S+/g) || ['1']).length : 1;
       if (typeof ResizeObserver !== 'undefined') {
