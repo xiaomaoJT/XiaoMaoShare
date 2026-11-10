@@ -45,9 +45,9 @@
   }
   #ball:hover .disc { transform: scale(1.05); box-shadow: 0 9px 22px -8px rgba(16, 24, 40, .52); }
   #ball.dragging .disc { transform: scale(.94); }
-  /* 抠底动画 WebP 是 256×256 圆形羽化 alpha：球外全透明、球内是玻璃质感，
-     直接铺满圆盘即可贴住桌面。旧 logo.gif 是不透明方底，才需要缩到 88% 藏白边。 */
-  #ball img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+  /* 抠底动画 WebP 已沿球缘收紧（256×256 真 alpha，没有浅灰背景环）。
+     94% 留一点透明边，避免球的暗边贴死窗口圆边；旧 logo.gif 是不透明方底，才需要缩到 88% 藏白边。 */
+  #ball img { width: 94%; height: 94%; object-fit: contain; display: block; pointer-events: none; }
   /* 万一某台机器不支持动画 WebP，退回旧的骑车动图，并恢复白圆盘 + 88% 的摆法 */
   #ball .disc.fallback { background: #fff; }
   #ball img.fallback { width: 88%; height: 88%; object-fit: contain; }
