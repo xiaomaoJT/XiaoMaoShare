@@ -1534,6 +1534,27 @@
   .note-btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
   @media (hover:none){ .note-btn{opacity:.7} }
 
+  /* 补充说明独立收起：长补充默认只露第一条，点小胶囊再全放开；四种布局通用 */
+  .note-list{display:block}
+  .notes-more{
+    display:none;align-items:center;gap:3px;margin:7px 0 2px;
+    padding:3px 9px;border:1px solid rgba(255,255,255,.6);border-radius:999px;
+    background:rgba(255,255,255,.42);color:var(--sub);
+    font-family:inherit;font-size:10px;font-weight:600;letter-spacing:.1px;line-height:1.45;
+    box-shadow:0 2px 10px rgba(18,26,40,.10), inset 0 1px 0 rgba(255,255,255,.55);
+    -webkit-backdrop-filter:blur(10px) saturate(160%);backdrop-filter:blur(10px) saturate(160%);
+    cursor:pointer;white-space:nowrap;
+  }
+  .notes-wrap.notes-collapsible .notes-more{display:inline-flex}
+  .notes-wrap.notes-collapsed .note-list .note-row:nth-child(n+2){display:none}
+  .notes-wrap.notes-collapsed .note-list .note-text{
+    max-height:3.4em;overflow:hidden;
+    -webkit-mask-image:linear-gradient(to bottom,#000 70%,transparent);
+    mask-image:linear-gradient(to bottom,#000 70%,transparent);
+  }
+  .notes-wrap.notes-collapsed .note-list .note-shots .thumb:nth-child(n+2){display:none}
+  .notes-more:hover{background:rgba(255,255,255,.68);color:var(--text)}
+
   /* 删除确认气泡：破坏性操作统一走这里，二次确认不打断上下文 */
   .cfm-pop{
     position:fixed;z-index:170;display:none;align-items:center;gap:7px;
@@ -1905,13 +1926,16 @@
   .feed.lay-compact .notes-wrap.has-notes{margin-top:7px;padding-top:7px}
   .feed.lay-compact .note-row{padding:3px 0}
 
-  /* ② 双列交错：CSS 多列天然瀑布流，卡片按内容分大 / 中 / 小三档 */
-  .feed.lay-masonry{display:block;column-count:2;column-gap:10px}
-  .feed.lay-masonry > .card{
-    display:inline-block;width:100%;margin:0 0 10px;vertical-align:top;
-    break-inside:avoid;-webkit-column-break-inside:avoid;page-break-inside:avoid;
+  /* ② 双列交错：按发送时间从左到右、从上到下逐行铺开（不是先排满一列再排下一列）。
+     细粒度行网格 + 脚本写每张卡的实际高度跨度，保留大/中/小卡错落的水波感。 */
+  .feed.lay-masonry{
+    display:grid;grid-template-columns:repeat(2,minmax(0,1fr));
+    grid-auto-flow:row;grid-auto-rows:1px;row-gap:0;column-gap:10px;align-items:start;
   }
-  .feed.lay-masonry > .more-row,.feed.lay-masonry > .empty,.feed.lay-masonry > .search-empty{column-span:all}
+  .feed.lay-masonry > .card{width:100%;min-width:0;margin:0 0 10px}
+  .feed.lay-masonry > .more-row,
+  .feed.lay-masonry > .empty,
+  .feed.lay-masonry > .search-empty{grid-column:1/-1;margin:0 0 10px}
   .feed.lay-masonry .meta{margin-bottom:6px}
   .feed.lay-masonry .text-body,.feed.lay-masonry .text-body.clamp{overflow:hidden;-webkit-mask-image:none;mask-image:none}
   .feed.lay-masonry .card.sz-l .text-body,.feed.lay-masonry .card.sz-l .text-body.clamp{max-height:5em}
@@ -1940,10 +1964,10 @@
   .feed.lay-masonry .notes-wrap.has-notes{margin-top:8px;padding-top:8px}
   @media (max-width:640px){
     /* 手机上两列太挤，退回单列但保留大卡的满幅封面 */
-    .feed.lay-masonry{column-count:1}
+    .feed.lay-masonry{grid-template-columns:minmax(0,1fr)}
   }
   /* 三列交错：复用上面全部卡片规则，只收紧列距和文字，窄屏逐级降列 */
-  .feed.lay-masonry.cols-3{column-count:3;column-gap:8px}
+  .feed.lay-masonry.cols-3{grid-template-columns:repeat(3,minmax(0,1fr));column-gap:8px}
   .feed.lay-masonry.cols-3 > .card{margin-bottom:8px}
   .feed.lay-masonry.cols-3 .meta{font-size:11px}
   .feed.lay-masonry.cols-3 .card.sz-l{padding:9px 9px 11px}
@@ -1957,8 +1981,8 @@
   .feed.lay-masonry.cols-3 .card.sz-s .text-body,
   .feed.lay-masonry.cols-3 .card.sz-s .text-body.clamp{font-size:13px;line-height:1.5;max-height:4.5em}
   .feed.lay-masonry.cols-3 .fico{width:28px;height:28px;border-radius:8px}
-  @media (max-width:720px){ .feed.lay-masonry.cols-3{column-count:2} }
-  @media (max-width:520px){ .feed.lay-masonry.cols-3{column-count:1} }
+  @media (max-width:720px){ .feed.lay-masonry.cols-3{grid-template-columns:repeat(2,minmax(0,1fr))} }
+  @media (max-width:520px){ .feed.lay-masonry.cols-3{grid-template-columns:minmax(0,1fr)} }
 
   /* 非默认视图：只有底部胶囊按钮能展开 / 收起，卡片其它地方不响应（框选文字不误触） */
   .feed:not(.lay-default) .card{cursor:default}
@@ -1971,18 +1995,21 @@
   .expand-tip{
     display:none;position:absolute;left:50%;bottom:8px;transform:translateX(-50%);
     z-index:3;white-space:nowrap;
-    padding:3px 8px;border:0;border-radius:999px;
-    background:rgba(15,18,24,.42);color:rgba(255,255,255,.85);
-    font-family:inherit;font-size:10px;font-weight:500;letter-spacing:0;line-height:1.5;
-    box-shadow:0 2px 8px rgba(0,0,0,.08);
-    -webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);cursor:pointer;
+    padding:3px 9px;border:1px solid rgba(255,255,255,.6);border-radius:999px;
+    background:rgba(255,255,255,.42);color:var(--sub);
+    font-family:inherit;font-size:10px;font-weight:600;letter-spacing:.1px;line-height:1.45;
+    box-shadow:0 2px 10px rgba(18,26,40,.10), inset 0 1px 0 rgba(255,255,255,.55);
+    -webkit-backdrop-filter:blur(10px) saturate(160%);backdrop-filter:blur(10px) saturate(160%);cursor:pointer;
   }
   .feed:not(.lay-default) .card.can-expand > .expand-tip{display:inline-block}
   /* 展开后胶囊变成收起入口，压得更淡 */
   .feed:not(.lay-default) .card.expanded > .expand-tip{
-    display:inline-block;background:rgba(15,18,24,.24);
+    display:inline-block;background:rgba(255,255,255,.24);
+    border-color:rgba(255,255,255,.42);
   }
-  .expand-tip:hover{background:rgba(15,18,24,.55);color:#fff}
+  .expand-tip:hover{background:rgba(255,255,255,.68);color:var(--text)}
+  /* 卡片级「还有内容」和补充区胶囊同时出现时，给补充胶囊让位，别让两颗胶囊叠在一起 */
+  .feed:not(.lay-default) .card.can-expand .notes-more{margin-bottom:26px}
   body.picking .expand-tip{display:none!important}
   .feed:not(.lay-default) .card.can-expand .text-body{
     -webkit-mask-image:linear-gradient(to bottom,#000 72%,transparent)!important;
@@ -3631,15 +3658,15 @@
       icon: '<path d="M4 6h16M4 12h16M4 18h11"/>'
     },
     {
-      id: 'compact', name: '简略详情视图', desc: '小封面 + 两行摘要，快速扫',
+      id: 'compact', name: '简略视图', desc: '小封面 + 两行摘要，快速扫',
       icon: '<rect x="3.5" y="4.5" width="17" height="5" rx="2"/><rect x="3.5" y="12" width="17" height="3" rx="1.5"/><rect x="3.5" y="17.5" width="12" height="3" rx="1.5"/>'
     },
     {
-      id: 'masonry', name: '双列交错视图', desc: '大卡 / 中卡 / 小卡错落排布',
+      id: 'masonry', name: '双列视图', desc: '大卡 / 中卡 / 小卡错落排布',
       icon: '<rect x="3.5" y="4" width="7" height="10" rx="2"/><rect x="13.5" y="4" width="7" height="6" rx="2"/><rect x="3.5" y="16" width="7" height="5" rx="2"/><rect x="13.5" y="12" width="7" height="9" rx="2"/>'
     },
     {
-      id: 'masonry3', name: '三列交错视图', desc: '更密的大 / 中 / 小卡错落排布',
+      id: 'masonry3', name: '三列视图', desc: '更密的大 / 中 / 小卡错落排布',
       icon: '<rect x="2.5" y="4" width="5.5" height="9" rx="1.8"/><rect x="9.2" y="4" width="5.5" height="6" rx="1.8"/><rect x="15.9" y="4" width="5.5" height="10" rx="1.8"/><rect x="2.5" y="15" width="5.5" height="5" rx="1.8"/><rect x="9.2" y="12" width="5.5" height="8" rx="1.8"/><rect x="15.9" y="16" width="5.5" height="4" rx="1.8"/>'
     }
   ];
@@ -5604,8 +5631,16 @@
     return row;
   }
 
+  function noteTextLen(n) {
+    return notePartsOf(n).reduce(function (sum, p) {
+      return sum + (p.kind === 'text' ? String(p.text || '').length : 0);
+    }, 0);
+  }
+
   function buildNotes(el, it) {
     var wrap = el._notes;
+    // 补充区重建时保留用户手动展开的状态，轮询来了新补充也不会把它又折回去
+    var wasOpen = wrap && wrap._notesOpen === true;
     if (!wrap) {
       wrap = document.createElement('div');
       wrap.className = 'notes-wrap';
@@ -5623,7 +5658,43 @@
       head.className = 'notes-head';
       head.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5H4l2-3.2A8.5 8.5 0 1 1 21 11.5z"/></svg><span>补充 ' + notes.length + '</span>';
       wrap.appendChild(head);
-      notes.forEach(function (n) { wrap.appendChild(noteRow(el, it, n)); });
+      var list = document.createElement('div');
+      list.className = 'note-list';
+      notes.forEach(function (n) { list.appendChild(noteRow(el, it, n)); });
+      wrap.appendChild(list);
+
+      // 多条补充、或单条长文，都默认只露第一条；独立胶囊控制，和卡片展开互不影响
+      var long = notes.length > 1 || notes.some(function (n) {
+        var parts = notePartsOf(n);
+        var nAttach = parts.filter(function (p) { return p.kind !== 'text'; }).length;
+        return noteTextLen(n) > 100 || nAttach > 1;
+      });
+      var opened = wasOpen || !long;
+      wrap._notesOpen = opened;
+      wrap.classList.toggle('notes-collapsible', long);
+      wrap.classList.toggle('notes-collapsed', !opened);
+      if (long) {
+        var more = document.createElement('button');
+        more.type = 'button';
+        more.className = 'notes-more';
+        function refreshMoreLabel() {
+          more.textContent = wrap._notesOpen
+            ? '▴ 收起补充'
+            : '▾ 展开全部 ' + notes.length + ' 条补充';
+        }
+        refreshMoreLabel();
+        more.onclick = function (e) {
+          e.stopPropagation();
+          wrap._notesOpen = !wrap._notesOpen;
+          wrap.classList.toggle('notes-collapsed', !wrap._notesOpen);
+          refreshMoreLabel();
+          syncMasonry();
+        };
+        wrap.appendChild(more);
+      }
+    } else {
+      wrap._notesOpen = false;
+      wrap.classList.remove('notes-collapsible', 'notes-collapsed');
     }
     // noteComposer 自己会把「继续补充」入口挂到 wrap 上
     noteComposer(el, it, notes.length);
@@ -5883,6 +5954,17 @@
         var toggleTxt = wrap.querySelector('.note-toggle span');
         if (toggleTxt) toggleTxt.textContent = left ? '继续补充' : '补充说明';
         if (left) wrap.classList.add('has-notes'); else wrap.classList.remove('has-notes');
+        var more = wrap.querySelector('.notes-more');
+        if (more) {
+          if (left > 1) {
+            more.textContent = wrap._notesOpen ? '▴ 收起补充' : '▾ 展开全部 ' + left + ' 条补充';
+          } else {
+            more.remove();
+            wrap._notesOpen = false;
+            wrap.classList.remove('notes-collapsible', 'notes-collapsed');
+          }
+        }
+        syncMasonry();
       }
       toast('已删除补充');
       poll(true);
@@ -5900,6 +5982,7 @@
         // 正在写补充（或已挂了待发附件）时先别重建，免得打断输入
         if (el2._notes && el2._notes._dirty) return;
         buildNotes(el2, it);
+        syncMasonry();
       }
     });
   }
@@ -6411,6 +6494,57 @@
     }
   }
 
+  /** 交错视图用 1px 细行网格做瀑布流：卡片按发送时间轮流落到第 1/2/3 列，
+      再用各自实际高度算出起始行，保证「从左往右、从上到下」而不是先竖着排满一列。 */
+  var masonryRO = null, masonrySyncing = false;
+  function clearMasonryPos(el) {
+    el.style.gridColumnStart = '';
+    el.style.gridColumnEnd = '';
+    el.style.gridRowStart = '';
+    el.style.gridRowEnd = '';
+  }
+  function syncMasonry() {
+    if (masonrySyncing) return;
+    var on = feed.classList.contains('lay-masonry');
+    if (!on && !masonryRO) return;
+    masonrySyncing = true;
+    try {
+      var cs = getComputedStyle(feed);
+      var cols = on ? (cs.gridTemplateColumns.trim().match(/\S+/g) || ['1']).length : 1;
+      if (typeof ResizeObserver !== 'undefined') {
+        if (!masonryRO) masonryRO = new ResizeObserver(function () { syncMasonry(); });
+        masonryRO.disconnect();
+      }
+      var ends = [];
+      for (var c = 0; c < cols; c++) ends[c] = 0;
+      var cardIdx = 0;
+      Array.prototype.forEach.call(feed.children, function (el) {
+        if (!on) { clearMasonryPos(el); return; }
+        if (masonryRO) masonryRO.observe(el);
+        if (getComputedStyle(el).display === 'none') { clearMasonryPos(el); return; }
+        var mb = parseFloat(getComputedStyle(el).marginBottom) || 0;
+        var span = Math.max(1, Math.ceil(el.offsetHeight + mb));
+        if (el.classList.contains('card')) {
+          var col = cardIdx++ % cols;
+          el.style.gridColumnStart = String(col + 1);
+          el.style.gridColumnEnd = '';
+          el.style.gridRowStart = String(ends[col] + 1);
+          el.style.gridRowEnd = 'span ' + span;
+          ends[col] += span;
+        } else {
+          var top = Math.max.apply(null, ends) + 1;
+          el.style.gridColumnStart = '1';
+          el.style.gridColumnEnd = '-1';
+          el.style.gridRowStart = String(top);
+          el.style.gridRowEnd = 'span ' + span;
+          for (var k = 0; k < cols; k++) ends[k] = top + span - 1;
+        }
+      });
+    } finally {
+      masonrySyncing = false;
+    }
+  }
+
   /** 把当前布局套到列表和每张卡上。卡片 DOM 是复用的，所以每次渲染都刷一遍尺寸档。 */
   function applyLayoutClasses() {
     feed.classList.remove('lay-default', 'lay-compact', 'lay-masonry', 'lay-masonry3', 'cols-3');
@@ -6511,6 +6645,7 @@
       }
     }
     renderMore(list.length, shown.length);
+    syncMasonry();
   }
 
   function setFilter(f) {
