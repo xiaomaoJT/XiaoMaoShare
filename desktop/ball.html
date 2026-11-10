@@ -43,13 +43,14 @@
     display: grid; place-items: center;
     transition: transform .16s cubic-bezier(.2,.8,.3,1);
   }
-  /* hover 只提亮球本身：不再加投影/位移，避免透明窗口出现圆角矩形灰底 */
-  #ball:hover .disc { box-shadow: none; }
-  #ball:hover img { filter: brightness(1.08); }
+  /* 提亮作为常态：玻璃球在桌面上更通透显眼（原来的 hover 效果转正） */
+  /* hover 改成轻微放大 + 再提亮一档；不再用投影/tooltip，透明窗口上会露圆角矩形灰底 */
+  #ball:hover .disc { transform: scale(1.07); }
+  #ball:hover img { filter: brightness(1.18) saturate(1.06); }
   #ball.dragging .disc { transform: scale(.94); }
   /* 抠底动画 WebP 已沿球缘收紧（256×256 真 alpha，没有浅灰背景环）。
      94% 留一点透明边，避免球的暗边贴死窗口圆边；旧 logo.gif 是不透明方底，才需要缩到 88% 藏白边。 */
-  #ball img { width: 94%; height: 94%; object-fit: contain; display: block; pointer-events: none; }
+  #ball img { width: 94%; height: 94%; object-fit: contain; display: block; pointer-events: none; filter: brightness(1.08); transition: filter .16s; }
   /* 万一某台机器不支持动画 WebP，退回旧的骑车动图，并恢复白圆盘 + 88% 的摆法 */
   #ball .disc.fallback { background: #fff; }
   #ball img.fallback { width: 88%; height: 88%; object-fit: contain; }
