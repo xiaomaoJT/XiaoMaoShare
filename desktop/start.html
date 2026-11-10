@@ -63,12 +63,11 @@
   /* ---------------- 启动动画（默认就是它，避免先亮一下再跳） ---------------- */
   #boot { display: flex; flex-direction: column; align-items: center; gap: 16px; }
   #boot[hidden] { display: none; }
-  /* 应用图标（构建用的是同一张，见 build/icon.png）是深色琉璃圆角方图、四角透明。
-     这里不能再垫白底，否则四角会露出白角；圆角半径按图标本身的 22.5% 走，
-     再补一圈极淡的描边把它从浅灰页面里托起来 */
+  /* 应用内 logo 用独立的 logo-start.png，保持原来的白底方图；
+     系统图标（icon.png / build/icon.png）换成深海琉璃，不影响这里 */
   .mark {
     width: 72px; height: 72px; border-radius: 17px;
-    object-fit: cover; background: transparent;
+    object-fit: cover; background: #fff;
     box-shadow: 0 8px 22px -12px rgba(20,23,28,.5), 0 0 0 1px rgba(20,23,28,.07);
   }
   .brand { font-size: 17px; font-weight: 700; letter-spacing: .5px; }
@@ -215,7 +214,7 @@
 <div class="center">
   <!-- 启动动画 / 执行中 -->
   <div id="boot">
-    <img class="mark" src="../public/icon.png" alt="XiaoMao 互传">
+    <img class="mark" src="../public/logo-start.png" alt="XiaoMao 互传">
     <div class="brand">XiaoMao 互传</div>
     <div class="spin"></div>
     <div class="boot-tip" id="bootTip">正在启动…</div>
@@ -224,7 +223,7 @@
   <!-- 选择页 -->
   <div id="pick" hidden>
     <div class="head">
-      <img class="mark" src="../public/icon.png" alt="XiaoMao 互传">
+      <img class="mark" src="../public/logo-start.png" alt="XiaoMao 互传">
       <div class="brand">XiaoMao 互传</div>
     </div>
     <h1>这次要做什么？</h1>

@@ -37,13 +37,15 @@
   #ball .disc {
     width: var(--disc); height: var(--disc); border-radius: 50%;
     background: transparent;             /* 玻璃球自带立体边缘，不再垫白圆盘 */
-    box-shadow: 0 6px 16px -7px rgba(16, 24, 40, .38);
+    box-shadow: none;                    /* 透明窗口上任何 CSS 投影都会露出方框，球的落影已在素材里 */
     overflow: hidden;
     position: relative;
     display: grid; place-items: center;
-    transition: transform .16s cubic-bezier(.2,.8,.3,1), box-shadow .16s;
+    transition: transform .16s cubic-bezier(.2,.8,.3,1);
   }
-  #ball:hover .disc { transform: scale(1.05); box-shadow: 0 9px 22px -8px rgba(16, 24, 40, .52); }
+  /* hover 只提亮球本身：不再加投影/位移，避免透明窗口出现圆角矩形灰底 */
+  #ball:hover .disc { box-shadow: none; }
+  #ball:hover img { filter: brightness(1.08); }
   #ball.dragging .disc { transform: scale(.94); }
   /* 抠底动画 WebP 已沿球缘收紧（256×256 真 alpha，没有浅灰背景环）。
      94% 留一点透明边，避免球的暗边贴死窗口圆边；旧 logo.gif 是不透明方底，才需要缩到 88% 藏白边。 */
@@ -213,7 +215,7 @@
 </style>
 </head>
 <body>
-  <div id="ball" title="点一下展开；拖文件进来直接发送；右键弹快捷菜单（⌘/Ctrl + 滚轮调大小）">
+  <div id="ball">
     <div class="disc"><img id="logo" alt=""></div>
     <span id="badge" hidden>0</span>
   </div>

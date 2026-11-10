@@ -2842,7 +2842,14 @@ function createBallWindow() {
   try { fs.appendFileSync('/tmp/xm-ball-drag.log', new Date().toISOString() + ' ball-created level=floating\n'); } catch { /* 日志而已 */ }
 
   ballWin.loadFile(BALL_PAGE);
-  ballWin.once('ready-to-show', () => { if (ballWin && !ballWin.isDestroyed()) ballWin.showInactive(); });
+  ballWin.once('ready-to-show', () => {
+    if (ballWin && !ballWin.isDestroyed()) {
+      // 透明浮件：mac 上窗口一旦被点亮，系统仍可能按矩形补一层灰底/圆角阴影，
+      // 在 show 之前再压一次，避免鼠标移入时露出方块。
+      try { ballWin.setHasShadow(false); ballWin.setBackgroundColor('#00000000'); } catch { /* 老版本忽略 */ }
+      ballWin.showInactive();
+    }
+  });
   ballWin.webContents.on('did-finish-load', () => applyBallGeometry());
   ballWin.on('closed', () => { ballWin = null; ballOpen = false; ballGeo = null; closeBallMenu(); });
   // 球被藏起来（收进托盘 / 关球）时菜单不能留在屏幕上
