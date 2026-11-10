@@ -1870,8 +1870,8 @@
   .card > .file{margin-top:10px}
   .img-broken{font-size:12px;color:var(--faint);padding:10px 2px}
 
-  /* ---- 信息流布局：当前 / 简略详情 / 双列交错 ---- */
-  /* 多图右上角的 +N：只在简略视图和瀑布流里出现，当前视图保持原样 */
+  /* ---- 信息流布局：默认 / 简略详情 / 双列交错 / 三列交错 ---- */
+  /* 多图右上角的 +N：只在简略视图和瀑布流里出现，默认视图保持原样 */
   .shots{position:relative}
   .shot-more{display:none}
   .feed.lay-compact .shot-more,.feed.lay-masonry .shot-more{
@@ -1957,6 +1957,49 @@
   .feed.lay-masonry.cols-3 .fico{width:28px;height:28px;border-radius:8px}
   @media (max-width:720px){ .feed.lay-masonry.cols-3{column-count:2} }
   @media (max-width:520px){ .feed.lay-masonry.cols-3{column-count:1} }
+
+  /* 非默认视图：点卡片就地完整展开，再点收起；只放开这一张，其它卡片照旧 */
+  .feed:not(.lay-default) .card{cursor:pointer}
+  .feed:not(.lay-default) .card.expanded{cursor:default}
+  .feed:not(.lay-default) .card.expanded{
+    padding:13px 14px 14px!important;border-radius:14px!important;
+    box-shadow:0 12px 32px rgba(0,0,0,.13);
+  }
+  .feed:not(.lay-default) .card.expanded .meta{margin-bottom:8px!important}
+  .feed:not(.lay-default) .card.expanded .text-body,
+  .feed:not(.lay-default) .card.expanded .text-body.clamp{
+    max-height:none!important;overflow:visible!important;
+    -webkit-mask-image:none!important;mask-image:none!important;
+    font-size:calc(14.5px * var(--tfs))!important;line-height:1.62!important;
+  }
+  .feed:not(.lay-default) .card.expanded .more,
+  .feed:not(.lay-default) .card.expanded .collapsed-note{display:none!important}
+  .feed:not(.lay-default) .card.expanded .shots{
+    margin:9px 0 0!important;grid-template-columns:repeat(2,1fr)!important;
+  }
+  .feed:not(.lay-default) .card.expanded .shots.n1{grid-template-columns:1fr!important}
+  .feed:not(.lay-default) .card.expanded .shots.n3{grid-template-columns:repeat(3,1fr)!important}
+  .feed:not(.lay-default) .card.expanded .shots .thumb:nth-child(n+2){display:block!important}
+  .feed:not(.lay-default) .card.expanded .shots .thumb{
+    width:100%!important;height:auto!important;max-height:none!important;
+    aspect-ratio:auto!important;object-fit:cover!important;
+    border:0!important;border-radius:10px!important;margin:0!important;
+  }
+  .feed:not(.lay-default) .card.expanded .shots.n2 .thumb,
+  .feed:not(.lay-default) .card.expanded .shots.n3 .thumb{aspect-ratio:1/1!important;height:100%!important}
+  .feed:not(.lay-default) .card.expanded .shots.n1 .thumb{
+    width:auto!important;max-width:100%;height:auto!important;max-height:320px!important;
+    justify-self:start;object-fit:fill!important;
+  }
+  .feed:not(.lay-default) .card.expanded .shot-more{display:none!important}
+  .feed:not(.lay-default) .card.expanded .file{gap:10px!important}
+  .feed:not(.lay-default) .card.expanded .fico{width:34px!important;height:34px!important;border-radius:10px!important}
+  .feed:not(.lay-default) .card.expanded .fsize{display:inline!important}
+  .feed:not(.lay-default) .card.expanded .dl{height:32px!important;padding:0 11px!important}
+  .feed:not(.lay-default) .card.expanded .notes-wrap.has-notes{
+    margin:11px 0 2px!important;padding:11px 0 1px!important;
+  }
+  .feed:not(.lay-default) .card.expanded .note-row{padding:5px 0!important}
 
   /* 通用提示条 */
   .note-box{
@@ -3544,7 +3587,7 @@
      只影响呈现，不改数据结构和任何操作，随时能切回来。 */
   var LAYOUTS = [
     {
-      id: 'default', name: '当前视图', desc: '完整卡片，逐条细看',
+      id: 'default', name: '默认视图', desc: '完整卡片，逐条细看',
       icon: '<path d="M4 6h16M4 12h16M4 18h11"/>'
     },
     {
@@ -4722,6 +4765,12 @@
       if (e.target.closest && e.target.closest('.icon, a, button, img')) return;
       togglePick(it.id);
     });
+    // 非默认视图：点卡片空白处就地展开 / 收起；按钮、链接、图片仍走各自的老逻辑
+    el.addEventListener('click', function (e) {
+      if (state.pickMode || view.layout === 'default') return;
+      if (e.target.closest && e.target.closest('a, button, input, textarea, select, img, .icon')) return;
+      toggleCardExpand(el);
+    });
 
     el._it = it;
     refreshEditedBadge(el, it);
@@ -4751,6 +4800,19 @@
     var el = nodes.get(id);
     if (el) el.classList.toggle('sel', state.picked.has(id));
     updateSelBar();
+  }
+  /** 简略 / 交错视图：点卡片就地完整展开（正文、多图、文件、补充全放开），再点收起 */
+  function toggleCardExpand(el) {
+    if (!el || state.pickMode || view.layout === 'default') return;
+    var on = !el.classList.contains('expanded');
+    el.classList.toggle('expanded', on);
+    if (on) {
+      el._expandWasCollapsed = el.classList.contains('collapsed');
+      if (el._expandWasCollapsed) el.classList.remove('collapsed');
+    } else if (el._expandWasCollapsed) {
+      el.classList.add('collapsed');
+      el._expandWasCollapsed = false;
+    }
   }
   function updateSelBar() {
     var n = state.picked.size;
@@ -6178,7 +6240,11 @@
     view.layout = l.id;
     try { localStorage.setItem('xm.layout', l.id); } catch (e) {}
     updateLayoutBtn();
-    // 换布局后卡片宽度变了，长文本重新量一遍折叠高度
+    // 换布局后清掉上一视图的就地展开态，宽度变了也重新量一遍折叠高度
+    nodes.forEach(function (el) {
+      el.classList.remove('expanded');
+      el._expandWasCollapsed = false;
+    });
     nodes.forEach(resetClamp);
     render(true);
     nodes.forEach(maybeClamp);
