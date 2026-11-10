@@ -460,8 +460,8 @@
   .toolbar{display:flex;flex-direction:column;gap:8px;margin:6px 2px 10px}
   .tb-row{display:flex;align-items:center;gap:8px;min-width:0}
   .tb-top{justify-content:space-between}
-  /* 左侧「条数 + 布局切换」成组，筛选 tag 依旧整体靠右 */
-  .tb-left{display:flex;align-items:center;gap:8px;min-width:0}
+  /* 条数靠左；布局按钮 + 筛选 tag 成组靠右，布局按钮紧贴 tag 左侧 */
+  .tb-filter{display:flex;align-items:center;gap:6px;margin-left:auto;min-width:0}
   .tb-bot{justify-content:flex-start}
   .count{font-size:12.5px;color:var(--sub);font-weight:500;flex:none;white-space:nowrap}
 
@@ -578,6 +578,10 @@
   .fbtn:active{transform:scale(.96)}
   .fbtn:focus-visible{outline:2px solid rgba(var(--t,76,110,245),.85);outline-offset:2px}
   .fbtn .fbtn-txt{max-width:112px;overflow:hidden;text-overflow:ellipsis}
+  /* 布局切换：小图标胶囊，与筛选 tag 同排靠右 */
+  .fbtn.layout-btn{height:25px;width:25px;padding:0;justify-content:center;gap:0;flex:none}
+  .fbtn.layout-btn svg{width:13px;height:13px}
+  .fbtn.layout-btn .fbtn-txt{display:none}
 
   /* 小屏：筛选 tag 可横向滚动；第二行允许换行，图标按钮只留图标 */
   @media (max-width:720px){
@@ -1936,6 +1940,23 @@
     /* 手机上两列太挤，退回单列但保留大卡的满幅封面 */
     .feed.lay-masonry{column-count:1}
   }
+  /* 三列交错：复用上面全部卡片规则，只收紧列距和文字，窄屏逐级降列 */
+  .feed.lay-masonry.cols-3{column-count:3;column-gap:8px}
+  .feed.lay-masonry.cols-3 > .card{margin-bottom:8px}
+  .feed.lay-masonry.cols-3 .meta{font-size:11px}
+  .feed.lay-masonry.cols-3 .card.sz-l{padding:9px 9px 11px}
+  .feed.lay-masonry.cols-3 .card.sz-l .shots{margin:4px -9px 0}
+  .feed.lay-masonry.cols-3 .card.sz-l .text-body,
+  .feed.lay-masonry.cols-3 .card.sz-l .text-body.clamp{max-height:4.5em}
+  .feed.lay-masonry.cols-3 .card.sz-m{padding:9px 10px}
+  .feed.lay-masonry.cols-3 .card.sz-m .text-body,
+  .feed.lay-masonry.cols-3 .card.sz-m .text-body.clamp{max-height:6em}
+  .feed.lay-masonry.cols-3 .card.sz-s{padding:8px 9px;border-radius:12px}
+  .feed.lay-masonry.cols-3 .card.sz-s .text-body,
+  .feed.lay-masonry.cols-3 .card.sz-s .text-body.clamp{font-size:13px;line-height:1.5;max-height:4.5em}
+  .feed.lay-masonry.cols-3 .fico{width:28px;height:28px;border-radius:8px}
+  @media (max-width:720px){ .feed.lay-masonry.cols-3{column-count:2} }
+  @media (max-width:520px){ .feed.lay-masonry.cols-3{column-count:1} }
 
   /* 通用提示条 */
   .note-box{
@@ -2472,19 +2493,19 @@
   </div>
   <div class="toolbar">
     <div class="tb-row tb-top">
-      <div class="tb-left">
-        <span class="count" id="count">载入中…</span>
-        <button class="fbtn t-slate" id="layoutBtn" type="button" aria-haspopup="dialog" aria-expanded="false" title="切换内容布局">
+      <span class="count" id="count">载入中…</span>
+      <div class="tb-filter">
+        <button class="fbtn t-slate layout-btn" id="layoutBtn" type="button" aria-haspopup="dialog" aria-expanded="false" title="切换内容布局">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/></svg>
           <span class="fbtn-txt">布局</span>
         </button>
-      </div>
-      <div class="filters" id="filters" role="tablist" aria-label="内容筛选">
-        <button class="fchip t-indigo on" data-f="all" type="button">全部</button>
-        <button class="fchip t-sky" data-f="text" type="button">文字</button>
-        <button class="fchip t-violet" data-f="image" type="button">图片</button>
-        <button class="fchip t-amber" data-f="file" type="button">文件</button>
-        <button class="fchip t-pink" data-f="private" type="button">私聊</button>
+        <div class="filters" id="filters" role="tablist" aria-label="内容筛选">
+          <button class="fchip t-indigo on" data-f="all" type="button">全部</button>
+          <button class="fchip t-sky" data-f="text" type="button">文字</button>
+          <button class="fchip t-violet" data-f="image" type="button">图片</button>
+          <button class="fchip t-amber" data-f="file" type="button">文件</button>
+          <button class="fchip t-pink" data-f="private" type="button">私聊</button>
+        </div>
       </div>
     </div>
     <div class="tb-row tb-bot">
@@ -3519,7 +3540,7 @@
   /* 列表筛选 / 分页：内容攒多了不能一次性全铺到 DOM 里 */
   var allItems = [];
   var pageLimit = 20;          // 当前渲染多少条，滚到底再 +20
-  /* 信息流布局：默认（现在的单列卡片）/ 简略详情 / 双列交错。
+  /* 信息流布局：默认（现在的单列卡片）/ 简略详情 / 双列交错 / 三列交错。
      只影响呈现，不改数据结构和任何操作，随时能切回来。 */
   var LAYOUTS = [
     {
@@ -3533,6 +3554,10 @@
     {
       id: 'masonry', name: '双列交错视图', desc: '大卡 / 中卡 / 小卡错落排布',
       icon: '<rect x="3.5" y="4" width="7" height="10" rx="2"/><rect x="13.5" y="4" width="7" height="6" rx="2"/><rect x="3.5" y="16" width="7" height="5" rx="2"/><rect x="13.5" y="12" width="7" height="9" rx="2"/>'
+    },
+    {
+      id: 'masonry3', name: '三列交错视图', desc: '更密的大 / 中 / 小卡错落排布',
+      icon: '<rect x="2.5" y="4" width="5.5" height="9" rx="1.8"/><rect x="9.2" y="4" width="5.5" height="6" rx="1.8"/><rect x="15.9" y="4" width="5.5" height="10" rx="1.8"/><rect x="2.5" y="15" width="5.5" height="5" rx="1.8"/><rect x="9.2" y="12" width="5.5" height="8" rx="1.8"/><rect x="15.9" y="16" width="5.5" height="4" rx="1.8"/>'
     }
   ];
   function readLayout() {
@@ -6214,11 +6239,14 @@
 
   /** 把当前布局套到列表和每张卡上。卡片 DOM 是复用的，所以每次渲染都刷一遍尺寸档。 */
   function applyLayoutClasses() {
-    feed.classList.remove('lay-default', 'lay-compact', 'lay-masonry');
+    feed.classList.remove('lay-default', 'lay-compact', 'lay-masonry', 'lay-masonry3', 'cols-3');
     feed.classList.add('lay-' + view.layout);
+    var masonry = view.layout === 'masonry' || view.layout === 'masonry3';
+    // 三列复用交错视图的全部卡片规则，只多挂一个列数修饰类
+    if (view.layout === 'masonry3') feed.classList.add('lay-masonry', 'cols-3');
     nodes.forEach(function (el) {
       el.classList.remove('sz-l', 'sz-m', 'sz-s');
-      if (view.layout !== 'masonry') return;
+      if (!masonry) return;
       var it = el._it || {};
       var parts = Array.isArray(it.parts) && it.parts.length
         ? it.parts : (it.text ? [{ kind: 'text', text: it.text }] : []);
