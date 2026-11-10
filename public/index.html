@@ -2029,6 +2029,16 @@
     margin:11px 0 2px!important;padding:11px 0 1px!important;
   }
   .feed:not(.lay-default) .card.expanded .note-row{padding:5px 0!important}
+  /* 简略 / 双列 / 三列卡片比默认窄很多：补充输入区必须收在卡片内，不能横向溢出。
+     做法是让 na-box 严格贴住内容宽、工具条允许折行、辅助提示让位给「补充」按钮。 */
+  .feed:not(.lay-default) .na-box{min-width:0;width:100%}
+  .feed:not(.lay-default) .note-input{width:100%;min-width:0}
+  .feed:not(.lay-default) .na-chips{min-width:0}
+  .feed:not(.lay-default) .na-chip{max-width:100%}
+  .feed:not(.lay-default) .na-chip-n{max-width:none;flex:1 1 auto;min-width:0}
+  .feed:not(.lay-default) .na-bar{flex-wrap:wrap;row-gap:4px;min-width:0}
+  .feed:not(.lay-default) .na-hint{display:none}
+  .feed:not(.lay-default) .note-send{margin-left:auto}
 
   /* 通用提示条 */
   .note-box{
@@ -4743,6 +4753,8 @@
       // 收起 / 展开都把长文本打回「默认折叠」，免得展开后突然铺满一屏
       resetClamp(el);
       el.classList.toggle('collapsed');
+      // 补充说明是异步追加的，收起这一刻按当前实际内容重写提示，条数才不会过期
+      if (el.classList.contains('collapsed')) updateCollapsedNoteLabel(el);
       updateExpandHints();
     });
     meta.appendChild(ava); meta.appendChild(who);
@@ -4855,6 +4867,30 @@
     }
     if (!on) updateExpandHints();
   }
+  /** 收起态提示按当前实际内容重写（补充说明会异步追加，不能在建卡时写死） */
+  function updateCollapsedNoteLabel(el) {
+    var note = el.querySelector('.collapsed-note');
+    if (!note) return;
+    var span = note.querySelector('span');
+    if (!span) return;
+    var it = el._it || {};
+    var parts = it.parts || [];
+    var nImg = 0, nFile = 0, nText = 0;
+    parts.forEach(function (p) {
+      if (p.kind === 'text') nText++;
+      else if (p.kind === 'image') nImg++;
+      else nFile++;
+    });
+    // 补充说明优先取实时 DOM（条数最准），拿不到再退回数据层
+    var noteRows = el.querySelectorAll('.note-row').length;
+    var nNote = noteRows || ((it.notes && it.notes.length) || 0);
+    var bits = [];
+    if (nText) bits.push('文字');
+    if (nImg) bits.push(nImg + ' 张图片');
+    if (nFile) bits.push(nFile + ' 个文件');
+    if (nNote) bits.push(nNote + ' 条说明');
+    span.textContent = '已收起' + (bits.length ? '（' + bits.join('、') + '）' : '') + ' · 点击展开';
+  }
   /** 检测非默认视图里真正被裁掉的卡片，给它们挂上「还有内容」提示 */
   function updateExpandHints() {
     if (view.layout === 'default') return;
@@ -4940,6 +4976,9 @@
       // 布局切换会重算折叠：先撤掉上一轮的「展开全文」，否则每切一次多一个按钮
       var prev = body.nextElementSibling;
       if (prev && prev.classList && prev.classList.contains('more')) prev.remove();
+      // 先撤掉旧折叠态再量高度：否则布局切换后卡片变宽，上一轮留下的 clamp
+      // 会把 scrollHeight 压到阈值以下，导致「文字渐隐却没有展开按钮」的死角。
+      body.classList.remove('clamp');
       if (body.scrollHeight <= 180) return;
       body.classList.add('clamp');
       var btn = document.createElement('button');
@@ -5047,10 +5086,12 @@
     var nImg = 0, nFile = 0;
     parts.forEach(function (p) { if (p.kind === 'image') nImg++; else if (p.kind !== 'text') nFile++; });
     var texts = parts.filter(function (p) { return p.kind === 'text'; });
+    var nNote = (it.notes && it.notes.length) || 0;
     var bits = [];
     if (texts.length) bits.push('文字');
     if (nImg) bits.push(nImg + ' 张图片');
     if (nFile) bits.push(nFile + ' 个文件');
+    if (nNote) bits.push(nNote + ' 条说明');
     var note = document.createElement('button');
     note.type = 'button';
     note.className = 'collapsed-note bnode';
