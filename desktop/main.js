@@ -86,6 +86,7 @@ let closeAsking = false;  // 关闭确认框只允许存在一个，连点红叉
 let trayHintShown = false; // 「已收进托盘」的气泡只在第一次提示，之后不再打扰
 
 let ballWin = null;       // 悬浮球窗口
+const interactWins = new Set(); // Windows 托盘闪动用：只有这些「互传窗口」算「界面已打开」
 let ballOpen = false;     // 面板是否展开（展开时窗口变大）
 let ballAnchor = null;    // 球的屏幕位置（收起时就是窗口位置，展开时是窗口内的球位换算出来的）
 let ballGeo = null;       // 上一次算出来的展开布局，拖动时用它把窗口位移换算回球位
@@ -449,6 +450,7 @@ function createHostWindow(opts = {}) {
 
   // 悬浮球「跟随最近用的窗口」靠这个：点过哪个窗口，球就发给谁
   hostWin.on('focus', () => noteBallFocus('host'));
+  watchTrayFlashStop(hostWin);   // Windows：主窗口亮出来就停掉托盘闪动
 
   return hostWin;
 }
@@ -642,6 +644,7 @@ function openLink(rawUrl) {
     return { action: 'deny' };
   });
   attachContextMenu(win);   // 连接窗口也要浏览器同款右键（图片复制等）
+  watchTrayFlashStop(win);  // Windows：连接窗口亮出来同样算「打开了互传」
 
   // 这是最后一个可见窗口时，点关闭 = 整个应用「消失」进托盘 —— 得和主窗口一个待遇：
   // 「每次问我」就问一句，别闷声把界面全收走（用户会以为程序退了，连问都不问）
@@ -2138,15 +2141,74 @@ function quitIfNoVisibleWindow() {
 /* ------------------------------------------------------------ 托盘 */
 
 /**
- * 托盘图标：Windows 用 ico（系统按 DPI 自己挑 16/24/32/48），
- * mac / Linux 用 png。都在 desktop/ 里 —— 构建的 files 只收 server.js、
+ * 托盘图标三平台各走各的路，都在 desktop/ 里 —— 构建的 files 只收 server.js、
  * public/、desktop/，放别处（比如 build/）打包后就读不到了。
- * 图是从应用图标重采样的圆角透明版：16~32px 的托盘格子里，
- * 白底方图会变成一块死白，圆角挖空才像个图标。
+ *  - mac：trayTemplate.png（22×24 纯黑+alpha）+ 同目录 trayTemplate@2x.png，
+ *    建 Tray 前设 setTemplateImage(true)，系统按菜单栏明暗自动反色；
+ *  - Windows：tray-color.ico（立体陶瓷人物，16/20/24/32/40/48/64/256 多尺寸，
+ *    系统按 DPI 自己挑）+ tray-blank.ico（同尺寸空帧），来消息时两帧交替闪动；
+ *  - Linux：沿用原来的 tray.png。
  */
-const TRAY_ICON = path.join(__dirname, process.platform === 'win32' ? 'tray.ico' : 'tray.png');
+const TRAY_ICON = IS_MAC
+  ? path.join(__dirname, 'trayTemplate.png')
+  : IS_WIN
+    ? path.join(__dirname, 'tray-color.ico')
+    : path.join(__dirname, 'tray.png');
+
+/* ------------------------------------------- Windows：来消息闪动托盘图标
+
+   Windows 的任务栏不会像 mac 那样给通知留一个醒目的角标，消息到了人不看就
+   过去了。这里在「有消息进来、而互传窗口全都收在托盘」时，让托盘图标在
+   彩色 / 空白之间交替；窗口一亮出来（show / focus）就立刻停并恢复常驻图标。
+
+   闪 / 不闪只看「互传窗口」在不在，不看有没有聚焦：窗口已经开着还闪，是打扰。
+   悬浮球、球菜单、端口选择 / 数据目录 / 检查更新这些辅助窗都不算「打开互传」，
+   否则一个更新提示弹出来就把提醒吞了。 */
+let trayBaseImage = null;    // 常态彩色图标（tray-color.ico）
+let trayBlankImage = null;   // 同尺寸近全透明 ico，作为「灭」的那一拍
+let trayFlashTimer = null;
+let trayFlashing = false;
+let trayFlashOn = true;
+
+function anyInteractWindowVisible() {
+  for (const w of interactWins) {
+    if (!w.isDestroyed() && w.isVisible()) return true;
+  }
+  return false;
+}
+
+function startTrayFlash() {
+  if (!IS_WIN || !tray || !trayBaseImage || !trayBlankImage) return;
+  if (anyInteractWindowVisible()) return; // 窗口开着就不用「叫人回来」
+  if (trayFlashing) return;              // 已经在闪，别叠第二张表
+  trayFlashing = true;
+  trayFlashOn = true;
+  try { tray.setImage(trayBaseImage); } catch { /* 托盘可能刚被销毁 */ }
+  trayFlashTimer = setInterval(() => {
+    if (!tray) { stopTrayFlash(); return; }
+    trayFlashOn = !trayFlashOn;
+    try { tray.setImage(trayFlashOn ? trayBaseImage : trayBlankImage); } catch { stopTrayFlash(); }
+  }, 420);
+}
+
+function stopTrayFlash() {
+  if (!trayFlashing) return;
+  trayFlashing = false;
+  if (trayFlashTimer) { clearInterval(trayFlashTimer); trayFlashTimer = null; }
+  if (tray && trayBaseImage) { try { tray.setImage(trayBaseImage); } catch { /* 同上 */ } }
+}
+
+/** 主窗口 / 连接窗口一亮出来或被点到就止闪。悬浮球不挂这个。 */
+function watchTrayFlashStop(win) {
+  if (!IS_WIN || !win) return;
+  interactWins.add(win);
+  win.on('show', stopTrayFlash);
+  win.on('focus', stopTrayFlash);
+  win.on('closed', () => interactWins.delete(win));
+}
 
 function buildTray() {
+  stopTrayFlash(); // 重建托盘前先收掉闪动表，别让旧 timer 往新 tray 上画
   if (tray) {
     try { tray.destroy(); } catch { /* 已经不在了 */ }
     tray = null;
@@ -2154,7 +2216,17 @@ function buildTray() {
 
   let img = nativeImage.createFromPath(TRAY_ICON);
   if (img.isEmpty()) return; // 图标缺失就干脆不建，别在任务栏留一个空白格子
-  if (IS_MAC) img = img.resize({ width: 18, height: 18 });
+  if (IS_MAC) {
+    // 不再 resize 到 18×18：那会把 22×24 的剪影压变形、也丢掉 @2x 表示。
+    // Template Image 只认纯黑+alpha，深浅菜单栏由系统自动反色。
+    img.setTemplateImage(true);
+  }
+  if (IS_WIN) {
+    trayBaseImage = img;
+    // 用与 tray-color.ico 完全相同的多尺寸 ico，Windows 换帧时不会重挑尺寸、托盘格子不跳
+    trayBlankImage = nativeImage.createFromPath(path.join(__dirname, 'tray-blank.ico'));
+    if (trayBlankImage.isEmpty()) trayBlankImage = null;
+  }
 
   try {
     tray = new Tray(img);
@@ -2260,6 +2332,7 @@ function trayTemplate(inf) {
 }
 
 function showFromTray() {
+  stopTrayFlash(); // 用户从托盘叫回界面 = 已经看到了消息，闪动到此为止
   if (hostWin && !hostWin.isDestroyed() && hostWin.isVisible()) {
     if (hostWin.isMinimized()) hostWin.restore();
     hostWin.focus();
@@ -2353,6 +2426,9 @@ function notifyTrayParked() {
 function notifyIncoming(payload, source) {
   const title = String((payload && payload.title) || 'XiaoMao 互传').slice(0, 120);
   const body = String((payload && payload.body) || '').slice(0, 240);
+  // Windows 托盘闪动和通知同源：所有消息提醒都从这里走（主进程盯 /api/list、
+  // 页面 IPC 上报、托盘里的「测试系统通知」），只在窗口全收着时才闪。
+  startTrayFlash();
   if (!Notification.isSupported()) return Promise.resolve({ error: '这台系统不支持桌面通知' });
   return new Promise((resolve) => {
     let settled = false;
@@ -2368,6 +2444,8 @@ function notifyIncoming(payload, source) {
         try { target.show(); } catch { /* 同上 */ }
         activateApp();
         try { target.focus(); } catch { /* 同上 */ }
+        // show/focus 事件一般会把闪动停掉；窗口若本来就可见则不触发 show，这里兜底
+        stopTrayFlash();
       });
       // macOS 的通知走 UNNotification，**要求应用已代码签名**才有投递资格；
       // 没签名时它会在这里报失败，而不是静默消失 —— 把原因带回去，别让人瞎猜
@@ -3816,6 +3894,7 @@ if (!app.requestSingleInstanceLock()) {
     if (quitting) return;
     e.preventDefault();
     quitting = true;
+    stopTrayFlash(); // 别让闪动 timer 在退出流程里还往托盘上画
     // 托盘先撤掉：mac 上偶尔会出现「进程退了、菜单栏图标还挂着」的残影
     if (tray) {
       try { tray.destroy(); } catch { /* 已经没了 */ }
