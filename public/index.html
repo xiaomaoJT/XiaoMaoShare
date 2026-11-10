@@ -1960,7 +1960,29 @@
 
   /* 非默认视图：点卡片就地完整展开，再点收起；只放开这一张，其它卡片照旧 */
   .feed:not(.lay-default) .card{cursor:pointer}
+  /* 被裁切的卡片：底部渐隐 + 明确提示，别让用户以为内容就这么多 */
+  .feed:not(.lay-default) .card.can-expand::before{
+    content:"";position:absolute;left:1px;right:1px;bottom:1px;height:46px;
+    border-radius:0 0 13px 13px;z-index:2;pointer-events:none;
+    background:linear-gradient(to bottom,transparent,var(--card) 90%);
+  }
+  .feed:not(.lay-default) .card.can-expand::after{
+    content:"▾ 还有内容 · 点击展开";
+    position:absolute;left:50%;bottom:9px;transform:translateX(-50%);
+    z-index:3;pointer-events:none;white-space:nowrap;
+    padding:4px 10px;border-radius:999px;
+    background:rgba(15,18,24,.72);color:#fff;
+    font-size:11px;font-weight:600;letter-spacing:.2px;
+    box-shadow:0 4px 14px rgba(0,0,0,.18);
+    -webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);
+  }
+  .feed:not(.lay-default) .card.can-expand .text-body{
+    -webkit-mask-image:linear-gradient(to bottom,#000 72%,transparent)!important;
+    mask-image:linear-gradient(to bottom,#000 72%,transparent)!important;
+  }
   .feed:not(.lay-default) .card.expanded{cursor:default}
+  .feed:not(.lay-default) .card.expanded::before,
+  .feed:not(.lay-default) .card.expanded::after{display:none}
   .feed:not(.lay-default) .card.expanded{
     padding:13px 14px 14px!important;border-radius:14px!important;
     box-shadow:0 12px 32px rgba(0,0,0,.13);
@@ -4809,10 +4831,32 @@
     if (on) {
       el._expandWasCollapsed = el.classList.contains('collapsed');
       if (el._expandWasCollapsed) el.classList.remove('collapsed');
+      el.classList.remove('can-expand');
     } else if (el._expandWasCollapsed) {
       el.classList.add('collapsed');
       el._expandWasCollapsed = false;
     }
+    if (!on) updateExpandHints();
+  }
+  /** 检测非默认视图里真正被裁掉的卡片，给它们挂上「还有内容」提示 */
+  function updateExpandHints() {
+    if (view.layout === 'default') return;
+    nodes.forEach(function (el) {
+      if (!el.isConnected || el.classList.contains('expanded')) return;
+      var cut = el.classList.contains('collapsed');
+      if (!cut) {
+        el.querySelectorAll('.text-body').forEach(function (b) {
+          if (b.scrollHeight > b.clientHeight + 2) cut = true;
+        });
+      }
+      if (!cut) {
+        var thumbs = el.querySelectorAll('.shots .thumb');
+        for (var i = 0; i < thumbs.length; i++) {
+          if (getComputedStyle(thumbs[i]).display === 'none') { cut = true; break; }
+        }
+      }
+      el.classList.toggle('can-expand', cut);
+    });
   }
   function updateSelBar() {
     var n = state.picked.size;
@@ -6366,6 +6410,7 @@
     applyLayoutClasses();
 
     fresh.forEach(maybeClamp);
+    updateExpandHints();
 
     feed.querySelectorAll('.meta > span[data-ts]').forEach(function (s) {
       s.textContent = fmtTime(Number(s.dataset.ts));
@@ -9596,6 +9641,8 @@
     var row = e.target.closest ? e.target.closest('.fpop-i') : null;
     if (row) setLayout(row.dataset.layout);
   });
+  // 窗口宽窄变化会改变列数和裁切高度，重新判一次哪些卡片需要展开提示
+  window.addEventListener('resize', updateExpandHints);
   var qEl = $('q');
   var qTimer = null;
   function flushQuery() {
