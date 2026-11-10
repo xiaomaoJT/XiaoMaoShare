@@ -1958,16 +1958,20 @@
   .feed.lay-compact .notes-wrap.has-notes{margin-top:7px;padding-top:7px}
   .feed.lay-compact .note-row{padding:3px 0}
 
-  /* ② 双列交错：按发送时间从左到右、从上到下逐行铺开（不是先排满一列再排下一列）。
-     细粒度行网格 + 脚本写每张卡的实际高度跨度，保留大/中/小卡错落的水波感。 */
+  /* ② 双列交错：卡片按发送时间轮流落进第 1/2/3 列，从上往下自然堆叠。
+     用真实的列容器（flex 列）承载卡片，而不是网格去算高度：
+     列高完全由内容撑开，展开卡片、图片加载、切列数都不需要重算任何高度，
+     也就不可能出现「算出来的高度比内容矮、页面看着有东西却滚不动」。 */
   .feed.lay-masonry{
-    display:grid;grid-template-columns:repeat(2,minmax(0,1fr));
-    grid-auto-flow:row;grid-auto-rows:1px;row-gap:0;column-gap:10px;align-items:start;
+    display:flex;flex-direction:row;flex-wrap:wrap;
+    align-items:flex-start;column-gap:10px;row-gap:0;
   }
-  .feed.lay-masonry > .card{width:100%;min-width:0;margin:0 0 10px}
+  .feed.lay-masonry > .mcol{flex:1 1 0;min-width:0;display:flex;flex-direction:column}
+  .feed.lay-masonry .mcol > .card{width:100%;min-width:0;margin:0 0 10px}
   .feed.lay-masonry > .more-row,
   .feed.lay-masonry > .empty,
-  .feed.lay-masonry > .search-empty{grid-column:1/-1;margin:0 0 10px}
+  .feed.lay-masonry > .search-empty,
+  .feed.lay-masonry > .recvbox{flex:0 0 100%;width:100%;margin:10px 0 0}
   .feed.lay-masonry .meta{margin-bottom:6px}
   .feed.lay-masonry .text-body,.feed.lay-masonry .text-body.clamp{overflow:hidden;-webkit-mask-image:none;mask-image:none}
   .feed.lay-masonry .card.sz-l .text-body,.feed.lay-masonry .card.sz-l .text-body.clamp{max-height:5em}
@@ -1994,13 +1998,10 @@
   .feed.lay-masonry .fico{width:32px;height:32px;border-radius:9px}
   .feed.lay-masonry .dl{height:29px;padding:0 9px}
   .feed.lay-masonry .notes-wrap.has-notes{margin-top:8px;padding-top:8px}
-  @media (max-width:640px){
-    /* 手机上两列太挤，退回单列但保留大卡的满幅封面 */
-    .feed.lay-masonry{grid-template-columns:minmax(0,1fr)}
-  }
-  /* 三列交错：复用上面全部卡片规则，只收紧列距和文字，窄屏逐级降列 */
-  .feed.lay-masonry.cols-3{grid-template-columns:repeat(3,minmax(0,1fr));column-gap:8px}
-  .feed.lay-masonry.cols-3 > .card{margin-bottom:8px}
+  /* 列数统一由脚本按容器宽度决定（见 wantCols），这里只管间距和排版，
+     免得 CSS 断点和 JS 分列各说一套、切一次列就错位。 */
+  .feed.lay-masonry.cols-3{column-gap:8px}
+  .feed.lay-masonry.cols-3 .mcol > .card{margin-bottom:8px}
   .feed.lay-masonry.cols-3 .meta{font-size:11px}
   .feed.lay-masonry.cols-3 .card.sz-l{padding:9px 9px 11px}
   .feed.lay-masonry.cols-3 .card.sz-l .shots{margin:4px -9px 0}
@@ -2013,8 +2014,6 @@
   .feed.lay-masonry.cols-3 .card.sz-s .text-body,
   .feed.lay-masonry.cols-3 .card.sz-s .text-body.clamp{font-size:13px;line-height:1.5;max-height:4.5em}
   .feed.lay-masonry.cols-3 .fico{width:28px;height:28px;border-radius:8px}
-  @media (max-width:720px){ .feed.lay-masonry.cols-3{grid-template-columns:repeat(2,minmax(0,1fr))} }
-  @media (max-width:520px){ .feed.lay-masonry.cols-3{grid-template-columns:minmax(0,1fr)} }
 
   /* 非默认视图：只有底部胶囊按钮能展开 / 收起，卡片其它地方不响应（框选文字不误触） */
   .feed:not(.lay-default) .card{cursor:default}
@@ -6529,62 +6528,61 @@
     }
   }
 
-  /** 交错视图用 1px 细行网格做瀑布流：卡片按发送时间轮流落到第 1/2/3 列，
-      再用各自实际高度算出起始行，保证「从左往右、从上到下」而不是先竖着排满一列。 */
-  var masonryRO = null, masonrySyncing = false;
-  function clearMasonryPos(el) {
-    el.style.gridColumnStart = '';
-    el.style.gridColumnEnd = '';
-    el.style.gridRowStart = '';
-    el.style.gridRowEnd = '';
+  /** 交错视图：卡片按发送时间轮流放进第 1/2/3 个列容器，从上往下自然堆叠。
+      列高完全由内容撑开，脚本里不测量、更不写死任何高度。
+      上一版用 1px 细行网格 + 手动写 feed.style.height 兜底，有两种致命表现：
+      ① 写出的高度一旦比真实内容矮，页面就没有可滚空间；
+      ② 每次重排先把高度清空，文档瞬间变矮，浏览器会把 scrollY 夹回 0，
+         于是「滚动条动一下又弹回顶部」。
+      换成真实列容器以后，这两条从原理上不存在。 */
+  var feedCards = [];       // 列表里按时间顺序排列的卡片元素
+  function wantCols() {
+    var w = window.innerWidth;
+    if (feed.classList.contains('cols-3')) {
+      if (w <= 520) return 1;
+      if (w <= 720) return 2;
+      return 3;
+    }
+    return w <= 640 ? 1 : 2;
   }
   function syncMasonry() {
-    if (masonrySyncing) return;
     var on = feed.classList.contains('lay-masonry');
-    if (!on && !masonryRO) return;
-    masonrySyncing = true;
-    try {
-      // 先清掉上一轮的列位置和固定高度：3 列切 2 列时残留的 grid-column-start:3
-      // 会建隐式列；而上一版写死的容器高度也会干扰卡片高度测量，两者都会让重排算错。
-      feed.style.height = '';
-      if (on) Array.prototype.forEach.call(feed.children, clearMasonryPos);
-      var cs = getComputedStyle(feed);
-      var cols = on ? (cs.gridTemplateColumns.trim().match(/\S+/g) || ['1']).length : 1;
-      if (typeof ResizeObserver !== 'undefined') {
-        if (!masonryRO) masonryRO = new ResizeObserver(function () { syncMasonry(); });
-        masonryRO.disconnect();
-      }
-      var ends = [];
-      for (var c = 0; c < cols; c++) ends[c] = 0;
-      var cardIdx = 0;
-      Array.prototype.forEach.call(feed.children, function (el) {
-        if (!on) { clearMasonryPos(el); return; }
-        if (masonryRO) masonryRO.observe(el);
-        if (getComputedStyle(el).display === 'none') { clearMasonryPos(el); return; }
-        var mb = parseFloat(getComputedStyle(el).marginBottom) || 0;
-        var span = Math.max(1, Math.ceil(el.offsetHeight + mb));
-        if (el.classList.contains('card')) {
-          var col = cardIdx++ % cols;
-          el.style.gridColumnStart = String(col + 1);
-          el.style.gridColumnEnd = '';
-          el.style.gridRowStart = String(ends[col] + 1);
-          el.style.gridRowEnd = 'span ' + span;
-          ends[col] += span;
-        } else {
-          var top = Math.max.apply(null, ends) + 1;
-          el.style.gridColumnStart = '1';
-          el.style.gridColumnEnd = '-1';
-          el.style.gridRowStart = String(top);
-          el.style.gridRowEnd = 'span ' + span;
-          for (var k = 0; k < cols; k++) ends[k] = top + span - 1;
-        }
-      });
-      // 显式给容器高度兜底：1px 细行网格的隐式高度在内容动态变高时可能滞后，
-      // 会让展开后的卡片溢出，页面也跟着算不出正确滚动高度。
-      feed.style.height = on ? (Math.max.apply(null, ends) + 1) + 'px' : '';
-    } finally {
-      masonrySyncing = false;
+    var old = Array.prototype.slice.call(feed.querySelectorAll(':scope > .mcol'));
+    if (!on) {
+      if (!old.length) return;
+      // 拆列：卡片按时间顺序搬回 feed，更多按钮 / 空态留在原位
+      var back = document.createDocumentFragment();
+      feedCards.forEach(function (el) { back.appendChild(el); });
+      feed.insertBefore(back, old[0]);
+      old.forEach(function (c) { c.remove(); });
+      return;
     }
+    var n = wantCols();
+    var cols = old;
+    if (cols.length !== n) {
+      // 卡片先整体摘出来，避免跟着被删掉的列一起消失
+      var stash = document.createDocumentFragment();
+      feedCards.forEach(function (el) { stash.appendChild(el); });
+      // 只从尾部删多余列、在末尾补新列。绝不「全删再全建」——
+      // 那样会把原本当作插入锚点的列也删掉，insertBefore 拿到已脱离文档的
+      // 节点会直接抛 NotFoundError，整片卡片当场消失。
+      while (cols.length > n) cols.pop().remove();
+      while (cols.length < n) {
+        var d = document.createElement('div');
+        d.className = 'mcol';
+        var after = cols[cols.length - 1];
+        feed.insertBefore(d, after ? after.nextSibling : feed.firstChild);
+        cols.push(d);
+      }
+    }
+    // 第 i 张卡进第 i%n 列、列内第 floor(i/n) 位。已经就位的不动 DOM，
+    // 否则每次轮询都把整片卡片搬一遍，滚动位置和图片加载都会跟着抖。
+    feedCards.forEach(function (el, i) {
+      var target = cols[i % n];
+      var want = Math.floor(i / n);
+      if (target.children[want] === el) return;
+      target.insertBefore(el, target.children[want] || null);
+    });
   }
 
   /** 把当前布局套到列表和每张卡上。卡片 DOM 是复用的，所以每次渲染都刷一遍尺寸档。 */
@@ -6646,8 +6644,13 @@
     nodes.forEach(function (el, id) {
       if (!seen.has(id)) { el.remove(); nodes.delete(id); }
     });
-    feed.appendChild(frag);
     applyLayoutClasses();
+    // 卡片顺序就是时间顺序，交错视图按这个顺序轮流分列。
+    // 交错视图下不再把卡片先塞回 feed 顶层再搬进列 —— 少一次「搬出又搬回」，
+    // 文档高度不会在重排过程中忽高忽低，滚动位置和图片加载都不会抖。
+    feedCards = shown.map(function (it) { return nodes.get(it.id); }).filter(Boolean);
+    if (feed.classList.contains('lay-masonry')) syncMasonry();
+    else { feed.appendChild(frag); syncMasonry(); }
 
     fresh.forEach(maybeClamp);
     updateExpandHints();
@@ -9882,8 +9885,8 @@
     var row = e.target.closest ? e.target.closest('.fpop-i') : null;
     if (row) setLayout(row.dataset.layout);
   });
-  // 窗口宽窄变化会改变列数和裁切高度，重新判一次哪些卡片需要展开提示
-  window.addEventListener('resize', updateExpandHints);
+  // 窗口宽窄变化会改变列数和裁切高度：先按新宽度重新分列，再判一次展开提示
+  window.addEventListener('resize', function () { syncMasonry(); updateExpandHints(); });
   var qEl = $('q');
   var qTimer = null;
   function flushQuery() {
