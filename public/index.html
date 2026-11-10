@@ -1960,23 +1960,25 @@
 
   /* 非默认视图：点卡片就地完整展开，再点收起；只放开这一张，其它卡片照旧 */
   .feed:not(.lay-default) .card{cursor:pointer}
-  /* 被裁切的卡片：只在底部留一点淡出和一枚很小的箭头，不抢内容视线 */
+  /* 被裁切的卡片：底部渐隐 + 一句轻量提示，别让用户以为内容就这么多 */
   .feed:not(.lay-default) .card.can-expand::before{
-    content:"";position:absolute;left:1px;right:1px;bottom:1px;height:24px;
+    content:"";position:absolute;left:1px;right:1px;bottom:1px;height:46px;
     border-radius:0 0 13px 13px;z-index:2;pointer-events:none;
-    background:linear-gradient(to bottom,transparent,var(--card) 92%);
+    background:linear-gradient(to bottom,transparent,var(--card) 90%);
   }
   .feed:not(.lay-default) .card.can-expand::after{
-    content:"";position:absolute;left:50%;bottom:5px;
-    width:6px;height:6px;transform:translateX(-50%) rotate(45deg);
-    border-right:1px solid var(--faint);border-bottom:1px solid var(--faint);
-    opacity:.3;z-index:3;pointer-events:none;
-    transition:opacity .16s,bottom .16s;
+    content:"▾ 还有内容 · 点击展开";
+    position:absolute;left:50%;bottom:8px;transform:translateX(-50%);
+    z-index:3;pointer-events:none;white-space:nowrap;
+    padding:3px 8px;border-radius:999px;
+    background:rgba(15,18,24,.42);color:rgba(255,255,255,.85);
+    font-size:10px;font-weight:500;letter-spacing:0;
+    box-shadow:0 2px 8px rgba(0,0,0,.08);
+    -webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);
   }
-  .feed:not(.lay-default) .card.can-expand:hover::after{opacity:.65;bottom:4px}
   .feed:not(.lay-default) .card.can-expand .text-body{
-    -webkit-mask-image:linear-gradient(to bottom,#000 90%,transparent)!important;
-    mask-image:linear-gradient(to bottom,#000 90%,transparent)!important;
+    -webkit-mask-image:linear-gradient(to bottom,#000 72%,transparent)!important;
+    mask-image:linear-gradient(to bottom,#000 72%,transparent)!important;
   }
   .feed:not(.lay-default) .card.expanded{cursor:default}
   .feed:not(.lay-default) .card.expanded::before,
