@@ -460,6 +460,8 @@
   .toolbar{display:flex;flex-direction:column;gap:8px;margin:6px 2px 10px}
   .tb-row{display:flex;align-items:center;gap:8px;min-width:0}
   .tb-top{justify-content:space-between}
+  /* 左侧「条数 + 布局切换」成组，筛选 tag 依旧整体靠右 */
+  .tb-left{display:flex;align-items:center;gap:8px;min-width:0}
   .tb-bot{justify-content:flex-start}
   .count{font-size:12.5px;color:var(--sub);font-weight:500;flex:none;white-space:nowrap}
 
@@ -1864,6 +1866,77 @@
   .card > .file{margin-top:10px}
   .img-broken{font-size:12px;color:var(--faint);padding:10px 2px}
 
+  /* ---- 信息流布局：当前 / 简略详情 / 双列交错 ---- */
+  /* 多图右上角的 +N：只在简略视图和瀑布流里出现，当前视图保持原样 */
+  .shots{position:relative}
+  .shot-more{display:none}
+  .feed.lay-compact .shot-more,.feed.lay-masonry .shot-more{
+    display:grid;place-items:center;position:absolute;right:7px;bottom:7px;
+    min-width:25px;height:21px;padding:0 6px;border-radius:999px;
+    background:rgba(12,15,20,.6);color:#fff;font-size:11px;font-weight:700;letter-spacing:.2px;
+    -webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);pointer-events:none;
+  }
+  /* ① 简略详情：一张小封面 + 两行正文，元数据压扁，适合快速扫 */
+  .feed.lay-compact{gap:7px}
+  .feed.lay-compact .card{padding:9px 12px;border-radius:12px}
+  .feed.lay-compact .meta{margin-bottom:5px;row-gap:2px;font-size:11px}
+  .feed.lay-compact .meta .pv,.feed.lay-compact .meta .tg-tag{display:none}
+  .feed.lay-compact .text-body,.feed.lay-compact .text-body.clamp{
+    font-size:13px;line-height:1.48;max-height:2.96em;overflow:hidden;
+    -webkit-mask-image:linear-gradient(to bottom,#000 62%,transparent);
+    mask-image:linear-gradient(to bottom,#000 62%,transparent);
+  }
+  .feed.lay-compact .more,.feed.lay-compact .collapsed-note{display:none}
+  .feed.lay-compact .shots{margin-top:6px;grid-template-columns:1fr!important}
+  .feed.lay-compact .shots .thumb:nth-child(n+2){display:none}
+  .feed.lay-compact .shots .thumb,.feed.lay-compact .shots.n1 .thumb{
+    width:100%;height:auto;max-height:132px;aspect-ratio:16/7;object-fit:cover;justify-self:stretch;
+  }
+  .feed.lay-compact .file{gap:8px}
+  .feed.lay-compact .fico{width:30px;height:30px;border-radius:9px}
+  .feed.lay-compact .fsize{display:none}
+  .feed.lay-compact .dl{height:28px;padding:0 9px}
+  .feed.lay-compact .notes-wrap.has-notes{margin-top:7px;padding-top:7px}
+  .feed.lay-compact .note-row{padding:3px 0}
+
+  /* ② 双列交错：CSS 多列天然瀑布流，卡片按内容分大 / 中 / 小三档 */
+  .feed.lay-masonry{display:block;column-count:2;column-gap:10px}
+  .feed.lay-masonry > .card{
+    display:inline-block;width:100%;margin:0 0 10px;vertical-align:top;
+    break-inside:avoid;-webkit-column-break-inside:avoid;page-break-inside:avoid;
+  }
+  .feed.lay-masonry > .more-row,.feed.lay-masonry > .empty,.feed.lay-masonry > .search-empty{column-span:all}
+  .feed.lay-masonry .meta{margin-bottom:6px}
+  .feed.lay-masonry .text-body,.feed.lay-masonry .text-body.clamp{overflow:hidden;-webkit-mask-image:none;mask-image:none}
+  .feed.lay-masonry .card.sz-l .text-body,.feed.lay-masonry .card.sz-l .text-body.clamp{max-height:5em}
+  .feed.lay-masonry .card.sz-m .text-body,.feed.lay-masonry .card.sz-m .text-body.clamp{max-height:7em}
+  .feed.lay-masonry .card.sz-s .text-body,.feed.lay-masonry .card.sz-s .text-body.clamp{
+    font-size:14px;line-height:1.5;max-height:4.5em;
+  }
+  .feed.lay-masonry .more,.feed.lay-masonry .collapsed-note{display:none}
+  .feed.lay-masonry .shots{grid-template-columns:1fr!important;margin-top:0}
+  .feed.lay-masonry .shots .thumb:nth-child(n+2){display:none}
+  /* 大卡：图片满幅贴边，像内容社区的首图 */
+  .feed.lay-masonry .card.sz-l{padding:11px 11px 12px}
+  .feed.lay-masonry .card.sz-l .shots{margin:5px -11px 0}
+  .feed.lay-masonry .card.sz-l .shots .thumb,.feed.lay-masonry .card.sz-l .shots.n1 .thumb{
+    width:100%;height:auto;max-height:none;aspect-ratio:4/3;object-fit:cover;
+    justify-self:stretch;border-radius:11px 11px 0 0;border-left:0;border-right:0;border-top:0;
+  }
+  .feed.lay-masonry .card.sz-l .text-body{margin-top:9px}
+  /* 中卡 / 小卡：靠字号和内边距拉开层级，两列长度自然错开 */
+  .feed.lay-masonry .card.sz-m{padding:11px 12px}
+  .feed.lay-masonry .card.sz-s{padding:10px 11px;border-radius:13px}
+  .feed.lay-masonry .card.sz-s .meta{font-size:11px}
+  .feed.lay-masonry .file{gap:8px}
+  .feed.lay-masonry .fico{width:32px;height:32px;border-radius:9px}
+  .feed.lay-masonry .dl{height:29px;padding:0 9px}
+  .feed.lay-masonry .notes-wrap.has-notes{margin-top:8px;padding-top:8px}
+  @media (max-width:640px){
+    /* 手机上两列太挤，退回单列但保留大卡的满幅封面 */
+    .feed.lay-masonry{column-count:1}
+  }
+
   /* 通用提示条 */
   .note-box{
     display:flex;align-items:flex-start;gap:8px;padding:10px 11px;border-radius:11px;
@@ -1902,6 +1975,22 @@
 
   /* ---- 设置弹窗：左侧 tab 导航 + 右侧内容 ---- */
   .dlg.wide{max-width:720px}
+  /* 宽屏：内容再多也只让右侧 pane 滚，左侧导航钉住不动；
+     弹窗本身封顶，不再随着设备列表越来越长一路顶到屏幕上下边。
+     窄屏（≤640px）沿用下面那套「顶部横向分段条吸顶」的方案。 */
+  @media (min-width:641px){
+    .dlg.settings{max-height:min(640px,calc(100vh - 48px));max-height:min(640px,calc(100dvh - 48px))}
+    .dlg.settings .dlg-body{display:flex;flex-direction:column;overflow:hidden}
+    .dlg.settings .dlg-body.scrollable{padding-bottom:0;-webkit-mask-image:none;mask-image:none}
+    .dlg.settings .set-wrap{flex:1 1 auto;min-height:0;align-items:stretch}
+    .dlg.settings .set-nav{position:sticky;top:0;align-self:flex-start;height:max-content}
+    .dlg.settings .set-pane.on{min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;padding-right:6px}
+    /* 渐隐只盖内容 pane，别把左侧导航一起糊掉 */
+    .dlg.settings .dlg-body.scrollable:not(.at-end) .set-pane.on{
+      -webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 18px),rgba(0,0,0,.12) 100%);
+      mask-image:linear-gradient(to bottom,#000 calc(100% - 18px),rgba(0,0,0,.12) 100%);
+    }
+  }
   .set-wrap{display:flex;gap:16px;align-items:flex-start}
   .set-nav{
     width:134px;flex:none;display:flex;flex-direction:column;gap:2px;
@@ -2050,6 +2139,15 @@
   .fpop-nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .fpop-ck{width:14px;height:14px;flex:none;opacity:0}
   .fpop-i.on .fpop-ck{opacity:1}
+
+  /* 布局切换面板 */
+  .fpop.layout{width:252px;max-width:calc(100vw - 20px)}
+  .fpop.layout .lay-ico{width:19px;height:19px;flex:none;color:var(--sub)}
+  .fpop.layout .fpop-i.on .lay-ico{color:currentColor}
+  .lay-nm{display:flex;flex-direction:column;gap:1px;line-height:1.35}
+  .lay-nm b{font-size:12.5px;font-weight:650}
+  .lay-nm small{font-size:11px;color:var(--faint);white-space:normal}
+  .fpop.layout .fpop-i.on .lay-nm small{color:var(--accent);opacity:.78}
 
   /* 日历视图 */
   .fpop.cal{width:286px;max-width:calc(100vw - 20px);padding:10px 10px 8px}
@@ -2374,7 +2472,13 @@
   </div>
   <div class="toolbar">
     <div class="tb-row tb-top">
-      <span class="count" id="count">载入中…</span>
+      <div class="tb-left">
+        <span class="count" id="count">载入中…</span>
+        <button class="fbtn t-slate" id="layoutBtn" type="button" aria-haspopup="dialog" aria-expanded="false" title="切换内容布局">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/></svg>
+          <span class="fbtn-txt">布局</span>
+        </button>
+      </div>
       <div class="filters" id="filters" role="tablist" aria-label="内容筛选">
         <button class="fchip t-indigo on" data-f="all" type="button">全部</button>
         <button class="fchip t-sky" data-f="text" type="button">文字</button>
@@ -2420,6 +2524,7 @@
   </div>
   <div class="fpop" id="senderPop" hidden></div>
   <div class="fpop cal" id="datePop" hidden></div>
+  <div class="fpop layout" id="layoutPop" hidden></div>
 
   <section class="feed" id="feed"></section>
   <button id="toTop" class="to-top" hidden type="button" aria-label="回到顶部" title="回到顶部">↑</button>
@@ -2977,7 +3082,7 @@
         var mask = document.createElement('div');
         mask.className = 'dlg-mask';
         var card = document.createElement('div');
-        card.className = 'dlg' + (opt.wide ? ' wide' : '');
+        card.className = 'dlg' + (opt.wide ? ' wide' : '') + (opt.settings ? ' settings' : '');
         card.setAttribute('role', 'dialog');
         card.setAttribute('aria-modal', 'true');
 
@@ -3012,13 +3117,16 @@
         mask.appendChild(card);
         document.body.appendChild(mask);
 
-        // 内容超出时给底部一点渐隐，提示「还能往下滚」
+        // 内容超出时给底部一点渐隐，提示「还能往下滚」。
+        // 宽屏设置弹窗的真实滚动容器是右侧 .set-pane，不是 box 本身，
+        // 所以按当前可见 pane 计算，并用捕获接住内层 pane 的 scroll。
         function syncFade() {
-          var can = box.scrollHeight > box.clientHeight + 2;
+          var se = box.querySelector('.set-pane.on') || box;
+          var can = se.scrollHeight > se.clientHeight + 2;
           box.classList.toggle('scrollable', can);
-          box.classList.toggle('at-end', can && box.scrollTop + box.clientHeight >= box.scrollHeight - 4);
+          box.classList.toggle('at-end', can && se.scrollTop + se.clientHeight >= se.scrollHeight - 4);
         }
-        box.addEventListener('scroll', syncFade, { passive: true });
+        box.addEventListener('scroll', syncFade, { passive: true, capture: true });
         setTimeout(syncFade, 60);
 
         var closed = false;
@@ -3411,7 +3519,30 @@
   /* 列表筛选 / 分页：内容攒多了不能一次性全铺到 DOM 里 */
   var allItems = [];
   var pageLimit = 20;          // 当前渲染多少条，滚到底再 +20
-  var view = { q: '', filter: 'all', sender: '', date: '' };
+  /* 信息流布局：默认（现在的单列卡片）/ 简略详情 / 双列交错。
+     只影响呈现，不改数据结构和任何操作，随时能切回来。 */
+  var LAYOUTS = [
+    {
+      id: 'default', name: '当前视图', desc: '完整卡片，逐条细看',
+      icon: '<path d="M4 6h16M4 12h16M4 18h11"/>'
+    },
+    {
+      id: 'compact', name: '简略详情视图', desc: '小封面 + 两行摘要，快速扫',
+      icon: '<rect x="3.5" y="4.5" width="17" height="5" rx="2"/><rect x="3.5" y="12" width="17" height="3" rx="1.5"/><rect x="3.5" y="17.5" width="12" height="3" rx="1.5"/>'
+    },
+    {
+      id: 'masonry', name: '双列交错视图', desc: '大卡 / 中卡 / 小卡错落排布',
+      icon: '<rect x="3.5" y="4" width="7" height="10" rx="2"/><rect x="13.5" y="4" width="7" height="6" rx="2"/><rect x="3.5" y="16" width="7" height="5" rx="2"/><rect x="13.5" y="12" width="7" height="9" rx="2"/>'
+    }
+  ];
+  function readLayout() {
+    try {
+      var v = localStorage.getItem('xm.layout');
+      for (var i = 0; i < LAYOUTS.length; i++) if (LAYOUTS[i].id === v) return v;
+    } catch (e) {}
+    return 'default';
+  }
+  var view = { q: '', filter: 'all', sender: '', date: '', layout: readLayout() };
   var netFail = 0;             // 连续失败次数，攒够就提示断线
 
   /** 设备指纹：授权要靠它认设备（只看 IP 会让换了设备的同一个 IP 白嫖授权） */
@@ -4658,6 +4789,9 @@
   /** 长内容默认折叠：超过约 7 行才收起并给「展开全文」 */
   function maybeClamp(el) {
     el.querySelectorAll('.text-body').forEach(function (body) {
+      // 布局切换会重算折叠：先撤掉上一轮的「展开全文」，否则每切一次多一个按钮
+      var prev = body.nextElementSibling;
+      if (prev && prev.classList && prev.classList.contains('more')) prev.remove();
       if (body.scrollHeight <= 180) return;
       body.classList.add('clamp');
       var btn = document.createElement('button');
@@ -4735,6 +4869,12 @@
         };
         grid.appendChild(img);
       });
+      if (run.length > 1) {
+        var morePic = document.createElement('span');
+        morePic.className = 'shot-more';
+        morePic.textContent = '+' + (run.length - 1);
+        grid.appendChild(morePic);
+      }
       grid.classList.add('bnode');
       el.appendChild(grid);
       run = [];
@@ -5829,7 +5969,7 @@
   }
 
   /* ---------------- 发送人 / 日期筛选（图标按钮 + 弹出面板） ---------------- */
-  var senderPop = $('senderPop'), datePop = $('datePop');
+  var senderPop = $('senderPop'), datePop = $('datePop'), layoutPop = $('layoutPop');
   var senderMap = {}, senderCids = [];
   var dateCounts = {}, dateKeys = [], dateMax = '';
   var calY = 0, calM = 0, calReady = false;
@@ -5966,9 +6106,58 @@
   function closePops() {
     if (senderPop && !senderPop.hidden) senderPop.hidden = true;
     if (datePop && !datePop.hidden) datePop.hidden = true;
-    var sb = $('senderBtn'), db = $('dateBtn');
+    if (layoutPop && !layoutPop.hidden) layoutPop.hidden = true;
+    var sb = $('senderBtn'), db = $('dateBtn'), lb = $('layoutBtn');
     if (sb) sb.setAttribute('aria-expanded', 'false');
     if (db) db.setAttribute('aria-expanded', 'false');
+    if (lb) lb.setAttribute('aria-expanded', 'false');
+  }
+
+  /* ---------------- 内容布局切换 ---------------- */
+  function layoutOf(id) {
+    for (var i = 0; i < LAYOUTS.length; i++) if (LAYOUTS[i].id === id) return LAYOUTS[i];
+    return LAYOUTS[0];
+  }
+  function updateLayoutBtn() {
+    var b = $('layoutBtn');
+    if (!b) return;
+    var l = layoutOf(view.layout);
+    b.title = '内容布局：' + l.name + '（点击切换）';
+    b.setAttribute('aria-label', b.title);
+  }
+  function renderLayoutPop() {
+    if (!layoutPop) return;
+    var h = '<div class="fpop-h">内容布局</div><div class="fpop-list" role="listbox">';
+    LAYOUTS.forEach(function (l) {
+      var on = l.id === view.layout;
+      h += '<button class="fpop-i' + (on ? ' on' : '') + '" type="button" role="option" aria-selected="' +
+        (on ? 'true' : 'false') + '" data-layout="' + l.id + '">' +
+        '<svg class="lay-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + l.icon + '</svg>' +
+        '<span class="fpop-nm lay-nm"><b>' + l.name + '</b><small>' + l.desc + '</small></span>' +
+        '<svg class="fpop-ck" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></button>';
+    });
+    layoutPop.innerHTML = h + '</div>';
+  }
+  function toggleLayoutPop(btn) {
+    if (!layoutPop) return;
+    if (!layoutPop.hidden) { closePops(); return; }
+    closePops();
+    renderLayoutPop();
+    placePop(layoutPop, btn);
+    btn.setAttribute('aria-expanded', 'true');
+  }
+  function setLayout(id) {
+    var l = layoutOf(id);
+    closePops();
+    if (view.layout === l.id) return;
+    view.layout = l.id;
+    try { localStorage.setItem('xm.layout', l.id); } catch (e) {}
+    updateLayoutBtn();
+    // 换布局后卡片宽度变了，长文本重新量一遍折叠高度
+    nodes.forEach(resetClamp);
+    render(true);
+    nodes.forEach(maybeClamp);
+    toast('已切换为' + l.name);
   }
   function toggleSenderPop(btn) {
     if (!senderPop) return;
@@ -6023,6 +6212,27 @@
     }
   }
 
+  /** 把当前布局套到列表和每张卡上。卡片 DOM 是复用的，所以每次渲染都刷一遍尺寸档。 */
+  function applyLayoutClasses() {
+    feed.classList.remove('lay-default', 'lay-compact', 'lay-masonry');
+    feed.classList.add('lay-' + view.layout);
+    nodes.forEach(function (el) {
+      el.classList.remove('sz-l', 'sz-m', 'sz-s');
+      if (view.layout !== 'masonry') return;
+      var it = el._it || {};
+      var parts = Array.isArray(it.parts) && it.parts.length
+        ? it.parts : (it.text ? [{ kind: 'text', text: it.text }] : []);
+      var nImg = 0, nFile = 0, chars = 0;
+      parts.forEach(function (p) {
+        if (p.kind === 'image') nImg++;
+        else if (p.kind === 'text') chars += String(p.text || '').trim().length;
+        else nFile++;
+      });
+      // 有图 = 大卡（满幅封面）；长文 / 带文件 = 中卡；短句 = 小卡
+      el.classList.add(nImg ? 'sz-l' : ((nFile || chars > 90) ? 'sz-m' : 'sz-s'));
+    });
+  }
+
   // 渲染快照：内容 / 筛选 / 选中态都没变时直接跳过，避免整片卡片被搬来搬去
   var lastRenderKey = '';
   function render(force) {
@@ -6031,7 +6241,7 @@
     var pk = [];
     state.picked.forEach(function (id) { pk.push(id); });
     pk.sort();
-    var key = allItems.length + '|' + shown.length + '|' + pageLimit + '|' + view.filter + '|' + view.sender + '|' + view.date + '|' + view.q + '|' +
+    var key = allItems.length + '|' + shown.length + '|' + pageLimit + '|' + view.filter + '|' + view.sender + '|' + view.date + '|' + view.q + '|' + view.layout + '|' +
       (state.pickMode ? '1' : '0') + '|' + pk.join(',') + '|' +
       shown.map(function (it) { return it.id + (it.tgAt ? 't' : ''); }).join(',');
     if (!force && key === lastRenderKey && nodes.size) return;
@@ -6059,6 +6269,7 @@
       if (!seen.has(id)) { el.remove(); nodes.delete(id); }
     });
     feed.appendChild(frag);
+    applyLayoutClasses();
 
     fresh.forEach(maybeClamp);
 
@@ -8848,6 +9059,7 @@
             : '这台设备通过专属密码临时提权，管理权限 8 小时后自动失效。',
       body: wrapEl,
       wide: true,
+      settings: true,
       onReady: function (h) { relayout = h.relayout; },
       actions: ownerish
         ? [{ label: '关闭', value: null }, { label: '保存', value: 'save', kind: 'primary' }]
@@ -9281,6 +9493,15 @@
     var b = e.target.closest('.fchip');
     if (b) setFilter(b.dataset.f);
   });
+  var layoutBtn = $('layoutBtn');
+  if (layoutBtn) layoutBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    toggleLayoutPop(this);
+  });
+  if (layoutPop) layoutPop.addEventListener('click', function (e) {
+    var row = e.target.closest ? e.target.closest('.fpop-i') : null;
+    if (row) setLayout(row.dataset.layout);
+  });
   var qEl = $('q');
   var qTimer = null;
   function flushQuery() {
@@ -9440,15 +9661,15 @@
 
   // 点面板外部 / Esc / 滚动 / 缩放 → 收起
   document.addEventListener('click', function (e) {
-    if (!senderPop || !datePop) return;
-    if (senderPop.hidden && datePop.hidden) return;
-    if (senderPop.contains(e.target) || datePop.contains(e.target)) return;
-    if (e.target.closest && (e.target.closest('#senderBtn') || e.target.closest('#dateBtn'))) return;
+    if (!senderPop || !datePop || !layoutPop) return;
+    if (senderPop.hidden && datePop.hidden && layoutPop.hidden) return;
+    if (senderPop.contains(e.target) || datePop.contains(e.target) || layoutPop.contains(e.target)) return;
+    if (e.target.closest && (e.target.closest('#senderBtn') || e.target.closest('#dateBtn') || e.target.closest('#layoutBtn'))) return;
     closePops();
   });
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closePops(); });
   window.addEventListener('scroll', function () {
-    if ((senderPop && !senderPop.hidden) || (datePop && !datePop.hidden)) closePops();
+    if ((senderPop && !senderPop.hidden) || (datePop && !datePop.hidden) || (layoutPop && !layoutPop.hidden)) closePops();
   }, { passive: true });
   window.addEventListener('resize', closePops);
 
@@ -9665,6 +9886,7 @@
   function launch(d) {
     Gate.close();
     applyHello(d);
+    updateLayoutBtn();
     renderToChip();
     restoreListCache();   // 主机停止后刷新：先还原上次快照，避免白屏
     poll(true);
