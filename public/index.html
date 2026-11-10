@@ -1611,6 +1611,8 @@
   }
   .na-tool:hover{background:var(--line);color:var(--text)}
   .na-tool.on{background:var(--accent-soft);color:var(--accent)}
+  .na-tool-svg{display:inline-flex;align-items:center;justify-content:center}
+  .na-tool-svg svg{width:13px;height:13px;display:block}
   .na-hint{margin-left:auto;font-size:10.5px;color:var(--faint);letter-spacing:.2px;padding-right:6px}
   .na-file{display:none}
   .note-send{
@@ -2189,6 +2191,7 @@
   /* 双击头像收起：保留元信息 + 一行文字预览 + 「点击展开」入口 */
   .card.collapsed .shots,
   .card.collapsed .file,
+  .card.collapsed .notes-wrap,
   .card.collapsed .more{display:none}
   .card.collapsed .text-body{
     max-height:1.66em;overflow:hidden;
@@ -4733,6 +4736,8 @@
 
     ava.title = '双击收起 / 展开这条消息';
     ava.addEventListener('dblclick', function (e) {
+      // 简略 / 交错视图有自己的底部胶囊展开逻辑，双击头像收起会和它打架，这里屏蔽
+      if (view.layout !== 'default') return;
       e.preventDefault();
       e.stopPropagation();
       // 收起 / 展开都把长文本打回「默认折叠」，免得展开后突然铺满一屏
@@ -5651,7 +5656,10 @@
       addFiles(Array.prototype.slice.call(pick.files || []));
       pick.value = '';
     };
-    bar.appendChild(tool('📎', '添加图片或文件', function () { pick.click(); }));
+    var fileTool = tool('', '添加图片或文件', function () { pick.click(); });
+    fileTool.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>';
+    fileTool.classList.add('na-tool-svg');
+    bar.appendChild(fileTool);
 
     var hint = document.createElement('span');
     hint.className = 'na-hint';
