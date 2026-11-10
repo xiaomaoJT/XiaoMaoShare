@@ -4925,6 +4925,9 @@
       el._expandWasCollapsed = false;
     }
     if (!on) updateExpandHints();
+    // 展开会改变卡片高度；不立即重排的话，网格高度还是旧值，
+    // 内容会溢出容器、页面高度也算错，表现就是「往下滚不动」。
+    syncMasonry();
   }
   /** 收起态提示按当前实际内容重写（补充说明会异步追加，不能在建卡时写死） */
   function updateCollapsedNoteLabel(el) {
@@ -6541,8 +6544,9 @@
     if (!on && !masonryRO) return;
     masonrySyncing = true;
     try {
-      // 先清掉上一轮的列位置：3 列切 2 列时残留的 grid-column-start:3 会建隐式列，
-      // 不止卡片错位，连 gridTemplateColumns 读出来的列数都会变成 3。
+      // 先清掉上一轮的列位置和固定高度：3 列切 2 列时残留的 grid-column-start:3
+      // 会建隐式列；而上一版写死的容器高度也会干扰卡片高度测量，两者都会让重排算错。
+      feed.style.height = '';
       if (on) Array.prototype.forEach.call(feed.children, clearMasonryPos);
       var cs = getComputedStyle(feed);
       var cols = on ? (cs.gridTemplateColumns.trim().match(/\S+/g) || ['1']).length : 1;
@@ -6575,6 +6579,9 @@
           for (var k = 0; k < cols; k++) ends[k] = top + span - 1;
         }
       });
+      // 显式给容器高度兜底：1px 细行网格的隐式高度在内容动态变高时可能滞后，
+      // 会让展开后的卡片溢出，页面也跟着算不出正确滚动高度。
+      feed.style.height = on ? (Math.max.apply(null, ends) + 1) + 'px' : '';
     } finally {
       masonrySyncing = false;
     }
