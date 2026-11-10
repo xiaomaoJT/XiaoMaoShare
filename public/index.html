@@ -1958,31 +1958,36 @@
   @media (max-width:720px){ .feed.lay-masonry.cols-3{column-count:2} }
   @media (max-width:520px){ .feed.lay-masonry.cols-3{column-count:1} }
 
-  /* 非默认视图：点卡片就地完整展开，再点收起；只放开这一张，其它卡片照旧 */
-  .feed:not(.lay-default) .card{cursor:pointer}
-  /* 被裁切的卡片：底部渐隐 + 一句轻量提示，别让用户以为内容就这么多 */
+  /* 非默认视图：只有底部胶囊按钮能展开 / 收起，卡片其它地方不响应（框选文字不误触） */
+  .feed:not(.lay-default) .card{cursor:default}
+  /* 被裁切的卡片：底部渐隐 + 轻量提示按钮，别让用户以为内容就这么多 */
   .feed:not(.lay-default) .card.can-expand::before{
     content:"";position:absolute;left:1px;right:1px;bottom:1px;height:46px;
     border-radius:0 0 13px 13px;z-index:2;pointer-events:none;
     background:linear-gradient(to bottom,transparent,var(--card) 90%);
   }
-  .feed:not(.lay-default) .card.can-expand::after{
-    content:"▾ 还有内容 · 点击展开";
-    position:absolute;left:50%;bottom:8px;transform:translateX(-50%);
-    z-index:3;pointer-events:none;white-space:nowrap;
-    padding:3px 8px;border-radius:999px;
+  .expand-tip{
+    display:none;position:absolute;left:50%;bottom:8px;transform:translateX(-50%);
+    z-index:3;white-space:nowrap;
+    padding:3px 8px;border:0;border-radius:999px;
     background:rgba(15,18,24,.42);color:rgba(255,255,255,.85);
-    font-size:10px;font-weight:500;letter-spacing:0;
+    font-family:inherit;font-size:10px;font-weight:500;letter-spacing:0;line-height:1.5;
     box-shadow:0 2px 8px rgba(0,0,0,.08);
-    -webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);
+    -webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);cursor:pointer;
   }
+  .feed:not(.lay-default) .card.can-expand > .expand-tip{display:inline-block}
+  /* 展开后胶囊变成收起入口，压得更淡 */
+  .feed:not(.lay-default) .card.expanded > .expand-tip{
+    display:inline-block;background:rgba(15,18,24,.24);
+  }
+  .expand-tip:hover{background:rgba(15,18,24,.55);color:#fff}
+  body.picking .expand-tip{display:none!important}
   .feed:not(.lay-default) .card.can-expand .text-body{
     -webkit-mask-image:linear-gradient(to bottom,#000 72%,transparent)!important;
     mask-image:linear-gradient(to bottom,#000 72%,transparent)!important;
   }
   .feed:not(.lay-default) .card.expanded{cursor:default}
-  .feed:not(.lay-default) .card.expanded::before,
-  .feed:not(.lay-default) .card.expanded::after{display:none}
+  .feed:not(.lay-default) .card.expanded::before{display:none}
   .feed:not(.lay-default) .card.expanded{
     padding:13px 14px 14px!important;border-radius:14px!important;
     box-shadow:0 12px 32px rgba(0,0,0,.13);
@@ -2194,12 +2199,12 @@
   /* 只有收起态才出现的说明按钮：明确告诉用户「内容被折叠了」 */
   .collapsed-note{display:none}
   .card.collapsed .collapsed-note{
-    display:inline-flex;align-items:center;gap:5px;margin-top:7px;
-    padding:3px 10px;border-radius:999px;border:1px solid var(--line);
-    background:var(--card-2);color:var(--sub);
-    font-family:inherit;font-size:calc(11.5px * var(--tfs));font-weight:550;line-height:1.5;cursor:pointer;
+    display:inline-flex;align-items:center;gap:4px;margin-top:6px;
+    padding:2px 7px;border-radius:999px;border:1px solid transparent;
+    background:var(--card-2);color:var(--faint);
+    font-family:inherit;font-size:calc(10px * var(--tfs));font-weight:500;line-height:1.5;cursor:pointer;
   }
-  .collapsed-note svg{width:11px;height:11px;flex:none}
+  .collapsed-note svg{width:9px;height:9px;flex:none}
   .collapsed-note:hover{color:var(--accent);border-color:var(--accent);background:var(--accent-soft)}
 
   /* 发送人 / 日期 弹出面板 */
@@ -4733,6 +4738,7 @@
       // 收起 / 展开都把长文本打回「默认折叠」，免得展开后突然铺满一屏
       resetClamp(el);
       el.classList.toggle('collapsed');
+      updateExpandHints();
     });
     meta.appendChild(ava); meta.appendChild(who);
     if (it.to && it.to.length) {
@@ -4787,12 +4793,16 @@
       if (e.target.closest && e.target.closest('.icon, a, button, img')) return;
       togglePick(it.id);
     });
-    // 非默认视图：点卡片空白处就地展开 / 收起；按钮、链接、图片仍走各自的老逻辑
-    el.addEventListener('click', function (e) {
-      if (state.pickMode || view.layout === 'default') return;
-      if (e.target.closest && e.target.closest('a, button, input, textarea, select, img, .icon')) return;
+    // 非默认视图：只有底部胶囊能展开 / 收起；点卡片其它地方（含框选文字）都不触发
+    var tip = document.createElement('button');
+    tip.type = 'button';
+    tip.className = 'expand-tip';
+    tip.textContent = '▾ 还有内容 · 点击展开';
+    tip.addEventListener('click', function (e) {
+      e.stopPropagation();
       toggleCardExpand(el);
     });
+    el.appendChild(tip);
 
     el._it = it;
     refreshEditedBadge(el, it);
@@ -4823,11 +4833,13 @@
     if (el) el.classList.toggle('sel', state.picked.has(id));
     updateSelBar();
   }
-  /** 简略 / 交错视图：点卡片就地完整展开（正文、多图、文件、补充全放开），再点收起 */
+  /** 简略 / 交错视图：点底部胶囊就地完整展开（正文、多图、文件、补充全放开），再点胶囊收起 */
   function toggleCardExpand(el) {
     if (!el || state.pickMode || view.layout === 'default') return;
     var on = !el.classList.contains('expanded');
     el.classList.toggle('expanded', on);
+    var tip = el.querySelector('.expand-tip');
+    if (tip) tip.textContent = on ? '▴ 收起' : '▾ 还有内容 · 点击展开';
     if (on) {
       el._expandWasCollapsed = el.classList.contains('collapsed');
       if (el._expandWasCollapsed) el.classList.remove('collapsed');
@@ -5044,6 +5056,7 @@
       e.stopPropagation();
       resetClamp(el);
       el.classList.remove('collapsed');
+      updateExpandHints();
     });
     el.appendChild(note);
   }
@@ -6288,6 +6301,8 @@
     nodes.forEach(function (el) {
       el.classList.remove('expanded');
       el._expandWasCollapsed = false;
+      var tip = el.querySelector('.expand-tip');
+      if (tip) tip.textContent = '▾ 还有内容 · 点击展开';
     });
     nodes.forEach(resetClamp);
     render(true);
