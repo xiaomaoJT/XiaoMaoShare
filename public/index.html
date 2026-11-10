@@ -50,6 +50,17 @@
     --header:rgba(255,255,255,.84);
     --shadow:0 1px 2px rgba(16,24,40,.04), 0 10px 28px -14px rgba(16,24,40,.22);
     --shadow-sm:0 1px 2px rgba(16,24,40,.05);
+    /* 信息流小胶囊：随主题走的磨砂玻璃层。浅色不要再压一层重投影，
+       暗色也不能继续用白底，否则在深色卡片上会变成刺眼的白片。 */
+    --pill-fill:linear-gradient(180deg,rgba(255,255,255,.78),rgba(236,241,250,.58));
+    --pill-fill-quiet:linear-gradient(180deg,rgba(255,255,255,.55),rgba(236,241,250,.38));
+    --pill-fill-hover:linear-gradient(180deg,rgba(255,255,255,.94),rgba(239,243,251,.80));
+    --pill-line:rgba(255,255,255,.92);
+    --pill-line-quiet:rgba(255,255,255,.70);
+    --pill-ink:#5b6676;
+    --pill-ink-hover:#2b3340;
+    --pill-shadow:0 1px 4px rgba(16,24,40,.08), inset 0 1px 0 rgba(255,255,255,.88);
+    --pill-blur:blur(10px) saturate(150%);
     --glass:0px;
     /* 滚动条：细、圆、低调；自绘悬浮条，滚动/贴边浮现，静止 0.9s 后淡出 */
     --sb-thumb:rgba(16,24,40,.24);
@@ -68,6 +79,16 @@
     --header:rgba(13,16,21,.80);
     --shadow:0 1px 2px rgba(0,0,0,.35), 0 10px 28px -14px rgba(0,0,0,.7);
     --shadow-sm:0 1px 2px rgba(0,0,0,.3);
+    /* 暗色玻璃：只比卡片底色略亮，靠细边框和文字识别，不靠白底 */
+    --pill-fill:linear-gradient(180deg,rgba(255,255,255,.075),rgba(255,255,255,.025));
+    --pill-fill-quiet:linear-gradient(180deg,rgba(255,255,255,.045),rgba(255,255,255,.014));
+    --pill-fill-hover:linear-gradient(180deg,rgba(255,255,255,.14),rgba(255,255,255,.07));
+    --pill-line:rgba(255,255,255,.11);
+    --pill-line-quiet:rgba(255,255,255,.07);
+    --pill-ink:#a3aec1;
+    --pill-ink-hover:#f2f5fa;
+    --pill-shadow:0 1px 5px rgba(0,0,0,.20), inset 0 1px 0 rgba(255,255,255,.035);
+    --pill-blur:blur(10px) saturate(130%);
     --glass:0px;
     --sb-thumb:rgba(255,255,255,.20);
     --sb-thumb-hover:rgba(255,255,255,.36);
@@ -87,6 +108,16 @@
     --header:rgba(255,255,255,.66);
     --shadow:0 10px 40px -14px rgba(28,42,74,.36);
     --shadow-sm:0 4px 16px -8px rgba(28,42,74,.26);
+    /* 毛玻璃主题卡片本身半透明，胶囊要更实一点，字才压得住彩色背景 */
+    --pill-fill:linear-gradient(180deg,rgba(255,255,255,.88),rgba(255,255,255,.68));
+    --pill-fill-quiet:linear-gradient(180deg,rgba(255,255,255,.68),rgba(255,255,255,.48));
+    --pill-fill-hover:linear-gradient(180deg,rgba(255,255,255,.98),rgba(255,255,255,.86));
+    --pill-line:rgba(255,255,255,.96);
+    --pill-line-quiet:rgba(255,255,255,.78);
+    --pill-ink:#4b5567;
+    --pill-ink-hover:#141a26;
+    --pill-shadow:0 2px 10px rgba(28,42,74,.14), inset 0 1px 0 rgba(255,255,255,.95);
+    --pill-blur:blur(10px) saturate(160%);
     --glass:20px;
     --sb-thumb:rgba(28,42,74,.26);
     --sb-thumb-hover:rgba(28,42,74,.44);
@@ -1538,11 +1569,11 @@
   .note-list{display:block}
   .notes-more{
     display:none;align-items:center;gap:3px;margin:7px 0 2px;
-    padding:3px 9px;border:1px solid rgba(255,255,255,.6);border-radius:999px;
-    background:rgba(255,255,255,.42);color:var(--sub);
+    padding:3px 9px;border:1px solid var(--pill-line);border-radius:999px;
+    background:var(--pill-fill);color:var(--pill-ink);
     font-family:inherit;font-size:10px;font-weight:600;letter-spacing:.1px;line-height:1.45;
-    box-shadow:0 2px 10px rgba(18,26,40,.10), inset 0 1px 0 rgba(255,255,255,.55);
-    -webkit-backdrop-filter:blur(10px) saturate(160%);backdrop-filter:blur(10px) saturate(160%);
+    box-shadow:var(--pill-shadow);
+    -webkit-backdrop-filter:var(--pill-blur);backdrop-filter:var(--pill-blur);
     cursor:pointer;white-space:nowrap;
   }
   /* 用块级 flex 独占一行，避免和下面的「继续补充」挤在同一行 */
@@ -1554,7 +1585,7 @@
     mask-image:linear-gradient(to bottom,#000 70%,transparent);
   }
   .notes-wrap.notes-collapsed .note-list .note-shots .thumb:nth-child(n+2){display:none}
-  .notes-more:hover{background:rgba(255,255,255,.68);color:var(--text)}
+  .notes-more:hover{background:var(--pill-fill-hover);color:var(--pill-ink-hover)}
 
   /* 删除确认气泡：破坏性操作统一走这里，二次确认不打断上下文 */
   .cfm-pop{
@@ -1996,19 +2027,19 @@
   .expand-tip{
     display:none;position:absolute;left:50%;bottom:8px;transform:translateX(-50%);
     z-index:3;white-space:nowrap;
-    padding:3px 9px;border:1px solid rgba(255,255,255,.6);border-radius:999px;
-    background:rgba(255,255,255,.42);color:var(--sub);
+    padding:3px 9px;border:1px solid var(--pill-line);border-radius:999px;
+    background:var(--pill-fill);color:var(--pill-ink);
     font-family:inherit;font-size:10px;font-weight:600;letter-spacing:.1px;line-height:1.45;
-    box-shadow:0 2px 10px rgba(18,26,40,.10), inset 0 1px 0 rgba(255,255,255,.55);
-    -webkit-backdrop-filter:blur(10px) saturate(160%);backdrop-filter:blur(10px) saturate(160%);cursor:pointer;
+    box-shadow:var(--pill-shadow);
+    -webkit-backdrop-filter:var(--pill-blur);backdrop-filter:var(--pill-blur);cursor:pointer;
   }
   .feed:not(.lay-default) .card.can-expand > .expand-tip{display:inline-block}
   /* 展开后胶囊变成收起入口，压得更淡 */
   .feed:not(.lay-default) .card.expanded > .expand-tip{
-    display:inline-block;background:rgba(255,255,255,.24);
-    border-color:rgba(255,255,255,.42);
+    display:inline-block;background:var(--pill-fill-quiet);
+    border-color:var(--pill-line-quiet);
   }
-  .expand-tip:hover{background:rgba(255,255,255,.68);color:var(--text)}
+  .expand-tip:hover{background:var(--pill-fill-hover);color:var(--pill-ink-hover)}
   /* 卡片级「还有内容」和补充区胶囊同时出现时，给补充胶囊让位，别让两颗胶囊叠在一起 */
   .feed:not(.lay-default) .card.can-expand .notes-more{margin-bottom:26px}
   body.picking .expand-tip{display:none!important}
