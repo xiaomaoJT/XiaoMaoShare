@@ -1974,8 +1974,9 @@
   .feed.lay-masonry .mcol > .card{width:100%;min-width:0;margin:0 0 10px}
   .feed.lay-masonry > .more-row,
   .feed.lay-masonry > .empty,
-  .feed.lay-masonry > .search-empty,
-  .feed.lay-masonry > .recvbox{flex:0 0 100%;width:100%;margin:10px 0 0}
+  .feed.lay-masonry > .search-empty{flex:0 0 100%;width:100%;margin:10px 0 0}
+  /* 上传进度条独占一行压在卡片上方：底部要留空，否则进度条和第一行卡片贴在一起 */
+  .feed.lay-masonry > .recvbox{flex:0 0 100%;width:100%;margin:10px 0 14px}
   .feed.lay-masonry .meta{margin-bottom:6px}
   .feed.lay-masonry .text-body,.feed.lay-masonry .text-body.clamp{overflow:hidden;-webkit-mask-image:none;mask-image:none}
   .feed.lay-masonry .card.sz-l .text-body,.feed.lay-masonry .card.sz-l .text-body.clamp{max-height:5em}
@@ -6593,11 +6594,18 @@
       // 那样会把原本当作插入锚点的列也删掉，insertBefore 拿到已脱离文档的
       // 节点会直接抛 NotFoundError，整片卡片当场消失。
       while (cols.length > n) cols.pop().remove();
+      // 新列插在上传进度条之后、其余内容之前。不能图省事插到 feed.firstChild：
+      // 那样正在上传时列容器会把进度条顶到卡片下面去（看着就是进度条贴着列表底）。
+      var anchor = null;
+      for (var k = 0; k < feed.children.length; k++) {
+        var ch = feed.children[k];
+        if (!ch.classList.contains('recvbox')) { anchor = ch; break; }
+      }
       while (cols.length < n) {
         var d = document.createElement('div');
         d.className = 'mcol';
         var after = cols[cols.length - 1];
-        feed.insertBefore(d, after ? after.nextSibling : feed.firstChild);
+        feed.insertBefore(d, after ? after.nextSibling : anchor);
         cols.push(d);
       }
     }
