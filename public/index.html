@@ -609,10 +609,10 @@
   .fbtn:active{transform:scale(.96)}
   .fbtn:focus-visible{outline:2px solid rgba(var(--t,76,110,245),.85);outline-offset:2px}
   .fbtn .fbtn-txt{max-width:112px;overflow:hidden;text-overflow:ellipsis}
-  /* 布局切换：小图标胶囊，与筛选 tag 同排靠右 */
-  .fbtn.layout-btn{height:25px;width:25px;padding:0;justify-content:center;gap:0;flex:none}
+  /* 布局切换：宽屏显示「图标 + 当前视图名」，窄屏收成纯图标给筛选 tag 让位 */
+  .fbtn.layout-btn{height:25px;padding:0 9px 0 7px;gap:5px;flex:none}
   .fbtn.layout-btn svg{width:13px;height:13px}
-  .fbtn.layout-btn .fbtn-txt{display:none}
+  .fbtn.layout-btn .fbtn-txt{max-width:72px;overflow:hidden;text-overflow:ellipsis}
 
   /* 小屏：筛选 tag 可横向滚动；第二行允许换行，图标按钮只留图标 */
   @media (max-width:720px){
@@ -621,6 +621,9 @@
     .tb-top{flex-wrap:nowrap}
     .filters{flex:0 1 auto;min-width:0;overflow-x:auto;scrollbar-width:none}
     .filters::-webkit-scrollbar{display:none}
+    /* 这一行要给筛选 tag 留滚动空间，布局按钮只留图标 */
+    .fbtn.layout-btn{padding:0;width:25px;justify-content:center;gap:0}
+    .fbtn.layout-btn .fbtn-txt{display:none}
     /* 搜索框不拉满整行：窄屏时占满剩余空间，稍宽时封顶，避免长长一条 */
     .search{flex:1 1 140px;min-width:0;max-width:220px}
     .search input{flex:1;width:auto;min-width:0}
@@ -636,6 +639,7 @@
   @media (max-width:560px){
     /* 未选中的按钮收成纯图标，选中时保留文字，一眼能看出已筛选 */
     .fbtn:not(.on){padding:0;width:29px;justify-content:center;gap:0}
+    .fbtn.layout-btn{width:25px}
     .fbtn:not(.on) .fbtn-txt{display:none}
     .fbtn.on .fbtn-txt{max-width:76px}
   }
@@ -2310,6 +2314,9 @@
   .lay-nm b{font-size:12.5px;font-weight:650}
   .lay-nm small{font-size:11px;color:var(--faint);white-space:normal}
   .fpop.layout .fpop-i.on .lay-nm small{color:var(--accent);opacity:.78}
+  /* 窄屏下双/三列会降列：提前说清楚，别让用户以为切换没生效 */
+  .lay-fit{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;color:var(--faint)}
+  .lay-fit::before{content:'';width:4px;height:4px;border-radius:50%;background:currentColor;opacity:.65}
 
   /* 日历视图 */
   .fpop.cal{width:286px;max-width:calc(100vw - 20px);padding:10px 10px 8px}
@@ -6428,11 +6435,31 @@
     for (var i = 0; i < LAYOUTS.length; i++) if (LAYOUTS[i].id === id) return LAYOUTS[i];
     return LAYOUTS[0];
   }
+  /** 某个布局在当前宽度下真正能排几列。wantCols() 与提示共用这一份判断，避免两处阈值走偏。 */
+  function colsFor(id, w) {
+    w = (typeof w === 'number') ? w : window.innerWidth;
+    if (id === 'masonry3') return w <= 520 ? 1 : (w <= 720 ? 2 : 3);
+    if (id === 'masonry') return w <= 640 ? 1 : 2;
+    return 1;
+  }
+  function colsLabel(n) { return n === 1 ? '单列' : n === 2 ? '双列' : '三列'; }
+  function isMasonryLayout(id) { return id === 'masonry' || id === 'masonry3'; }
+  /** 降列时返回人话提示；宽度够就返回空串。 */
+  function fitHint(id) {
+    if (!isMasonryLayout(id)) return '';
+    var n = colsFor(id), want = id === 'masonry3' ? 3 : 2;
+    return n < want ? '窗口较窄，实际显示' + colsLabel(n) : '';
+  }
   function updateLayoutBtn() {
     var b = $('layoutBtn');
     if (!b) return;
     var l = layoutOf(view.layout);
-    b.title = '内容布局：' + l.name + '（点击切换）';
+    var oldSvg = b.querySelector('svg');
+    if (oldSvg) oldSvg.outerHTML = svgIcon(l.icon, 1.9);
+    var txt = b.querySelector('.fbtn-txt');
+    if (txt) txt.textContent = l.name;
+    var hint = fitHint(view.layout);
+    b.title = '内容布局：' + l.name + (hint ? '（' + hint + '）' : '') + '（点击切换）';
     b.setAttribute('aria-label', b.title);
   }
   function renderLayoutPop() {
@@ -6440,10 +6467,12 @@
     var h = '<div class="fpop-h">内容布局</div><div class="fpop-list" role="listbox">';
     LAYOUTS.forEach(function (l) {
       var on = l.id === view.layout;
+      var hint = fitHint(l.id);
       h += '<button class="fpop-i' + (on ? ' on' : '') + '" type="button" role="option" aria-selected="' +
         (on ? 'true' : 'false') + '" data-layout="' + l.id + '">' +
         '<svg class="lay-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + l.icon + '</svg>' +
-        '<span class="fpop-nm lay-nm"><b>' + l.name + '</b><small>' + l.desc + '</small></span>' +
+        '<span class="fpop-nm lay-nm"><b>' + l.name + '</b><small>' + l.desc + '</small>' +
+        (hint ? '<span class="lay-fit">' + hint + '</span>' : '') + '</span>' +
         '<svg class="fpop-ck" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></button>';
     });
     layoutPop.innerHTML = h + '</div>';
@@ -6463,6 +6492,7 @@
     view.layout = l.id;
     try { localStorage.setItem('xm.layout', l.id); } catch (e) {}
     updateLayoutBtn();
+    lastCols = colsFor(l.id);
     // 换布局后清掉上一视图的就地展开态，宽度变了也重新量一遍折叠高度
     nodes.forEach(function (el) {
       el.classList.remove('expanded');
@@ -6473,7 +6503,8 @@
     nodes.forEach(resetClamp);
     render(true);
     nodes.forEach(maybeClamp);
-    toast('已切换为' + l.name);
+    var hint = fitHint(l.id);
+    toast('已切换为' + l.name + (hint ? '（' + hint + '，窗口变宽后自动恢复）' : ''));
   }
   function toggleSenderPop(btn) {
     if (!senderPop) return;
@@ -6536,14 +6567,9 @@
          于是「滚动条动一下又弹回顶部」。
       换成真实列容器以后，这两条从原理上不存在。 */
   var feedCards = [];       // 列表里按时间顺序排列的卡片元素
+  var lastCols = colsFor(view.layout);  // 上次生效的列数：只在跨档时提示，拖动窗口不刷屏
   function wantCols() {
-    var w = window.innerWidth;
-    if (feed.classList.contains('cols-3')) {
-      if (w <= 520) return 1;
-      if (w <= 720) return 2;
-      return 3;
-    }
-    return w <= 640 ? 1 : 2;
+    return colsFor(feed.classList.contains('cols-3') ? 'masonry3' : 'masonry', window.innerWidth);
   }
   function syncMasonry() {
     var on = feed.classList.contains('lay-masonry');
@@ -9886,7 +9912,20 @@
     if (row) setLayout(row.dataset.layout);
   });
   // 窗口宽窄变化会改变列数和裁切高度：先按新宽度重新分列，再判一次展开提示
-  window.addEventListener('resize', function () { syncMasonry(); updateExpandHints(); });
+  window.addEventListener('resize', function () {
+    syncMasonry();
+    updateExpandHints();
+    var n = colsFor(view.layout);
+    if (n === lastCols) return;
+    lastCols = n;
+    if (!isMasonryLayout(view.layout)) return;
+    var l = layoutOf(view.layout);
+    var want = l.id === 'masonry3' ? 3 : 2;
+    toast(n < want
+      ? '窗口较窄，' + l.name + '已自动改为' + colsLabel(n) + '显示'
+      : '窗口够宽，' + l.name + '已恢复' + colsLabel(n) + '显示');
+    updateLayoutBtn();
+  });
   var qEl = $('q');
   var qTimer = null;
   function flushQuery() {
