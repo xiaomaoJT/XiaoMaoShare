@@ -1,8 +1,14 @@
 # XiaoMao 互传
 
-![XM 互传 · 系统介绍](docs/xm-intro.png)
+![XM 互传 · 概览与界面](docs/xm-intro-1-overview.png)
 
-> 当前版本：**v2.5.0** · [更新日志](CHANGELOG.md) · [MIT 许可](LICENSE)
+![XM 互传 · 功能](docs/xm-intro-2-features.png)
+
+![XM 互传 · 本次更新 v2.6.0](docs/xm-intro-3-v2.6.0.png)
+
+![XM 互传 · 身份权限与技术形态](docs/xm-intro-4-architecture.png)
+
+> 当前版本：**v2.6.0** · [更新日志](CHANGELOG.md) · [MIT 许可](LICENSE)
 
 <p align="center">
   <a href="https://hub.xerj.org/contributors/xiaomaoJT">
@@ -1046,7 +1052,7 @@ XiaoMaoShare/
 
 个人自用的小工具。账户 + 密码是「分清谁是谁」，安全性仍然依赖「局域网本身是可信的」这个前提 —— HTTPS 是可选项、证书为自签，没有限流、没有审计日志。请勿直接暴露到公网。
 
-版本号与每次发布的变更见 [CHANGELOG.md](CHANGELOG.md)；当前版本：**v2.5.0**。
+版本号与每次发布的变更见 [CHANGELOG.md](CHANGELOG.md)；当前版本：**v2.6.0**。
 
 ## 许可
 
