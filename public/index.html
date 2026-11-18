@@ -2020,39 +2020,43 @@
   .feed.lay-masonry.cols-3 .card.sz-s .text-body.clamp{font-size:13px;line-height:1.5;max-height:4.5em}
   .feed.lay-masonry.cols-3 .fico{width:28px;height:28px;border-radius:8px}
 
-  /* 非默认视图：只有底部胶囊按钮能展开 / 收起，卡片其它地方不响应（框选文字不误触） */
+  /* 非默认视图：只有胶囊 / 顶部收起按钮能展开 / 收起，卡片其它地方不响应（框选文字不误触） */
   .feed:not(.lay-default) .card{cursor:default}
-  /* 被裁切的卡片：底部渐隐 + 轻量提示按钮，别让用户以为内容就这么多 */
-  .feed:not(.lay-default) .card.can-expand::before{
-    content:"";position:absolute;left:1px;right:1px;bottom:1px;height:46px;
-    border-radius:0 0 13px 13px;z-index:2;pointer-events:none;
-    background:linear-gradient(to bottom,transparent,var(--card) 90%);
-  }
+  /* 被裁切的卡片：正文自身已有渐隐 mask，展开胶囊走文档流排在正文与补充说明之间，
+     不再用卡片级蒙层盖住卡片底部（那会连带把补充说明入口一起冲淡、遮住） */
   .expand-tip{
-    display:none;position:absolute;left:50%;bottom:8px;transform:translateX(-50%);
-    z-index:3;white-space:nowrap;
+    display:none;width:max-content;max-width:100%;margin:6px auto 2px;white-space:nowrap;
     padding:3px 9px;border:1px solid var(--pill-line);border-radius:999px;
     background:var(--pill-fill);color:var(--pill-ink);
     font-family:inherit;font-size:10px;font-weight:600;letter-spacing:.1px;line-height:1.45;
     box-shadow:var(--pill-shadow);
     -webkit-backdrop-filter:var(--pill-blur);backdrop-filter:var(--pill-blur);cursor:pointer;
   }
-  .feed:not(.lay-default) .card.can-expand > .expand-tip{display:inline-block}
+  .feed:not(.lay-default) .card.can-expand > .expand-tip{display:block}
   /* 展开后胶囊变成收起入口，压得更淡 */
   .feed:not(.lay-default) .card.expanded > .expand-tip{
-    display:inline-block;background:var(--pill-fill-quiet);
+    display:block;background:var(--pill-fill-quiet);
     border-color:var(--pill-line-quiet);
   }
   .expand-tip:hover{background:var(--pill-fill-hover);color:var(--pill-ink-hover)}
-  /* 卡片级「还有内容」和补充区胶囊同时出现时，给补充胶囊让位，别让两颗胶囊叠在一起 */
-  .feed:not(.lay-default) .card.can-expand .notes-more{margin-bottom:26px}
-  body.picking .expand-tip{display:none!important}
+  /* 展开态顶部常驻收起入口：长卡片不必滚到底就能收起 */
+  .collapse-top{
+    display:none;align-items:center;gap:3px;
+    padding:2px 8px;border:1px solid var(--pill-line);border-radius:999px;
+    background:var(--pill-fill);color:var(--pill-ink);
+    font-family:inherit;font-size:10px;font-weight:600;line-height:1.45;cursor:pointer;
+    box-shadow:var(--pill-shadow);
+    -webkit-backdrop-filter:var(--pill-blur);backdrop-filter:var(--pill-blur);
+  }
+  .feed:not(.lay-default) .card.expanded .collapse-top{display:inline-flex}
+  .collapse-top:hover{background:var(--pill-fill-hover);color:var(--pill-ink-hover)}
+  .collapse-top svg{width:10px;height:10px;display:block}
+  body.picking .expand-tip,body.picking .collapse-top{display:none!important}
   .feed:not(.lay-default) .card.can-expand .text-body{
     -webkit-mask-image:linear-gradient(to bottom,#000 72%,transparent)!important;
     mask-image:linear-gradient(to bottom,#000 72%,transparent)!important;
   }
   .feed:not(.lay-default) .card.expanded{cursor:default}
-  .feed:not(.lay-default) .card.expanded::before{display:none}
   .feed:not(.lay-default) .card.expanded{
     padding:13px 14px 14px!important;border-radius:14px!important;
     box-shadow:0 12px 32px rgba(0,0,0,.13);
@@ -4865,6 +4869,23 @@
       meta.appendChild(dwEl);
     }
     meta.appendChild(acts);
+    // 展开态顶部常驻收起入口（仅非默认视图的展开卡片显示），点它就地收起并把卡片滚回视野
+    var topCollapse = document.createElement('button');
+    topCollapse.type = 'button';
+    topCollapse.className = 'collapse-top';
+    topCollapse.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 14l6-6 6 6"/></svg><span>收起</span>';
+    topCollapse.title = '收起这条内容';
+    topCollapse.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var r0 = el.getBoundingClientRect();
+      toggleCardExpand(el);
+      // 收起后卡片骤然变矮，把它的顶部拉回视野，免得视口停在半空找不到位置
+      if (r0.top < 0 || r0.top > window.innerHeight - 80) {
+        var y = window.scrollY + r0.top - 16;
+        window.scrollTo({ top: Math.max(0, y), behavior: 'smooth' });
+      }
+    });
+    meta.appendChild(topCollapse);
     el.appendChild(meta);
     // 内容区（文字 / 图片 / 文件 / 收起说明）抽成 buildBody，便于编辑后增量重建
     buildBody(el, it);
@@ -4877,7 +4898,8 @@
       if (e.target.closest && e.target.closest('.icon, a, button, img')) return;
       togglePick(it.id);
     });
-    // 非默认视图：只有底部胶囊能展开 / 收起；点卡片其它地方（含框选文字）都不触发
+    // 非默认视图：只有胶囊 / 顶部收起按钮能展开收起；点卡片其它地方（含框选文字）都不触发。
+    // 胶囊插在补充说明区之前（文档流内，正文末尾），不再绝对定位压住补充说明输入框。
     var tip = document.createElement('button');
     tip.type = 'button';
     tip.className = 'expand-tip';
@@ -4886,7 +4908,7 @@
       e.stopPropagation();
       toggleCardExpand(el);
     });
-    el.appendChild(tip);
+    el.insertBefore(tip, el._notes || null);
 
     el._it = it;
     refreshEditedBadge(el, it);
