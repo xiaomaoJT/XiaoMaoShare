@@ -3433,10 +3433,14 @@ const onRequest = (req, res) => {
     const ext = (nm.split('.').pop() || '').toLowerCase();
     const TEXT_EXT = new Set([
       'txt', 'md', 'markdown', 'text', 'log', 'csv', 'tsv', 'json', 'jsonc', 'yml', 'yaml',
-      'xml', 'html', 'htm', 'css', 'scss', 'less', 'js', 'mjs', 'cjs', 'ts', 'jsx', 'tsx',
-      'vue', 'py', 'go', 'rs', 'java', 'kt', 'swift', 'c', 'cc', 'cpp', 'h', 'hpp', 'cs',
-      'sh', 'bash', 'zsh', 'fish', 'bat', 'ps1', 'sql', 'ini', 'conf', 'cfg', 'env', 'toml',
-      'gitignore', 'dockerfile', 'makefile', 'patch', 'diff', 'rtf',
+      'xml', 'html', 'htm', 'css', 'scss', 'sass', 'less', 'styl', 'js', 'mjs', 'cjs', 'mts', 'cts',
+      'ts', 'jsx', 'tsx', 'vue', 'svelte', 'astro', 'py', 'pyw', 'go', 'mod', 'sum', 'rs',
+      'java', 'kt', 'kts', 'swift', 'scala', 'groovy', 'gradle', 'dart', 'rb', 'php', 'pl', 'pm',
+      'lua', 'r', 'jl', 'ex', 'exs', 'erl', 'clj', 'cljs', 'hs', 'ml', 'mm', 'm', 'c', 'cc', 'cpp',
+      'h', 'hpp', 'cs', 'sh', 'bash', 'zsh', 'fish', 'bat', 'cmd', 'ps1', 'sql', 'ini', 'conf',
+      'cfg', 'env', 'properties', 'toml', 'proto', 'graphql', 'gql', 'gitignore', 'gitattributes',
+      'dockerignore', 'editorconfig', 'dockerfile', 'makefile', 'patch', 'diff', 'ipynb', 'rtf',
+      'nfo', 'lock',
     ]);
     const mime = String(part.mime || '');
     // 只认明确的文本型 mime：写 /xml/ 这种模糊匹配会把 docx（mime 里带 openxmlformats）当成文本

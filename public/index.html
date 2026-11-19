@@ -1131,18 +1131,24 @@
   .lightbox img.no-anim{transition:none}
   .lightbox.grab .lb-stage{cursor:grab}
   .lightbox.grabbing .lb-stage{cursor:grabbing}
+  /* 关闭/翻页按钮叠在图片上：图片可能是纯白，半透明白底会看不清。
+     改成深色实底 + 浅描边 + 投影，深浅图片上都能看清；描边在深色遮罩上也不突兀。 */
   .lb-close{
     position:absolute;top:calc(16px + env(safe-area-inset-top));right:16px;z-index:3;
-    width:38px;height:38px;border-radius:50%;border:0;background:rgba(255,255,255,.14);color:#fff;
-    font-size:19px;cursor:pointer;display:grid;place-items:center;
+    width:38px;height:38px;border-radius:50%;border:1px solid rgba(255,255,255,.34);
+    background:rgba(16,19,26,.78);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);
+    color:#fff;font-size:18px;font-weight:600;cursor:pointer;display:grid;place-items:center;
+    box-shadow:0 3px 12px rgba(0,0,0,.4);transition:background .15s,border-color .15s;
   }
-  .lb-close:hover{background:rgba(255,255,255,.26)}
+  .lb-close:hover{background:rgba(35,40,52,.92);border-color:rgba(255,255,255,.62)}
   .lb-nav{
     position:absolute;top:50%;transform:translateY(-50%);z-index:3;
-    width:44px;height:44px;border-radius:50%;border:0;background:rgba(255,255,255,.14);color:#fff;
-    cursor:pointer;display:grid;place-items:center;transition:background .15s;
+    width:44px;height:44px;border-radius:50%;border:1px solid rgba(255,255,255,.34);
+    background:rgba(16,19,26,.78);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);
+    color:#fff;cursor:pointer;display:grid;place-items:center;
+    box-shadow:0 3px 12px rgba(0,0,0,.4);transition:background .15s,border-color .15s;
   }
-  .lb-nav:hover{background:rgba(255,255,255,.26)}
+  .lb-nav:hover{background:rgba(35,40,52,.92);border-color:rgba(255,255,255,.62)}
   .lb-nav svg{width:22px;height:22px;display:block}
   .lb-prev{left:calc(14px + env(safe-area-inset-left))}
   .lb-next{right:calc(14px + env(safe-area-inset-right))}
@@ -4497,7 +4503,7 @@
      图片 / 视频 / 音频 / PDF 交给浏览器自己渲染（/f/ 是 inline 的）；
      文本类（md / json / csv / 代码…）由 /api/file/text 取出文字，在弹层里渲染。
      Office 文档、压缩包浏览器解不出来，只给下载 —— 说清楚比放个假预览好。 */
-  var TEXT_FILE_RE = /\.(txt|md|markdown|text|log|csv|tsv|json|jsonc|ya?ml|xml|html?|css|scss|less|m?js|cjs|ts|jsx|tsx|vue|py|go|rs|java|kt|swift|c|cc|cpp|h|hpp|cs|sh|bash|zsh|fish|bat|ps1|sql|ini|conf|cfg|env|toml|gitignore|dockerfile|makefile|patch|diff)$/i;
+  var TEXT_FILE_RE = /\.(txt|md|markdown|text|log|csv|tsv|json|jsonc|ya?ml|xml|html?|css|scss|sass|less|styl|m?js|cjs|mts|cts|ts|jsx|tsx|mjs|vue|svelte|astro|py|pyw|go|mod|sum|rs|java|kt|kts|swift|scala|groovy|gradle|dart|rb|php|pl|pm|lua|r|jl|ex|exs|erl|clj|cljs|hs|ml|mm|m|c|cc|cpp|h|hpp|cs|sh|bash|zsh|fish|bat|cmd|ps1|sql|ini|conf|cfg|env|properties|toml|proto|graphql|gql|gitignore|gitattributes|dockerignore|editorconfig|dockerfile|makefile|patch|diff|ipynb|rtf|nfo|lock)$/i;
 
   /** 这个附件能不能在线看：返回 ''（不能）/ 'text'（内置面板）/ 'browser'（丢给浏览器） */
   function filePreviewKind(p) {
@@ -4506,8 +4512,11 @@
     var nm = String(p.name || '');
     if (/^image\//i.test(mime)) return '';                                   // 图片走缩略图 + 灯箱
     if (/^application\/pdf/i.test(mime) || /\.pdf$/i.test(nm)) return 'browser';
+    // 文本后缀优先于 mime：.ts 在 macOS 上 mime=video/mp2t（MPEG 传输流），
+    // 若先按 mime 判断会把 TypeScript 源码当视频丢给浏览器。明确的代码后缀更可信。
+    if (TEXT_FILE_RE.test(nm)) return 'text';
     if (/^(video|audio)\//i.test(mime)) return 'browser';
-    if (/^text\//i.test(mime) || TEXT_FILE_RE.test(nm)) return 'text';
+    if (/^text\//i.test(mime)) return 'text';
     // 只认明确的文本型 mime。别写 /xml/ 这种模糊匹配 —— docx 的 mime 里带 "openxmlformats"，会被误判
     if (/^application\/(json|ld\+json|xml|x-yaml|yaml|x-sh|x-shellscript|javascript|ecmascript|x-httpd-php|x-python|x-ruby|sql)\b/i.test(mime)) return 'text';
     return '';
