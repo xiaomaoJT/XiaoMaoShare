@@ -860,11 +860,20 @@
   @media (hover:none){ .file-pv{width:32px;height:32px;opacity:.85} }
   /* 收到文件夹的消息：同目录附件在信息流里也只占一行，展开才摊开 */
   .msg-folder{border:1px solid var(--line);border-radius:12px;background:var(--card-2);overflow:hidden}
+  .mf-bar{display:flex;align-items:center;gap:6px;padding-right:7px}
   .mf-head{
-    display:flex;align-items:center;gap:8px;width:100%;padding:7px 9px;border:0;
+    display:flex;align-items:center;gap:8px;flex:1;min-width:0;padding:7px 9px;border:0;
     background:transparent;color:var(--text);font:inherit;text-align:left;cursor:pointer;
   }
   .mf-head:hover{background:var(--line-soft)}
+  .mf-dl{
+    flex:none;display:inline-flex;align-items:center;gap:5px;height:30px;padding:0 10px;
+    border:1px solid var(--line);border-radius:9px;background:var(--card);color:var(--sub);
+    font-size:12px;font-weight:600;white-space:nowrap;cursor:pointer;transition:.15s;
+  }
+  .mf-dl svg{width:13px;height:13px;flex:none}
+  .mf-dl:hover{background:var(--accent);border-color:var(--accent);color:#fff}
+  @media (max-width:520px){ .mf-dl span{display:none} .mf-dl{padding:0;width:30px;justify-content:center} }
   .mf-ico{
     width:30px;height:30px;flex:none;border-radius:8px;display:grid;place-items:center;
     background:color-mix(in srgb, var(--accent) 14%, var(--card));color:var(--accent);
@@ -5094,6 +5103,30 @@
     }
   }
 
+  /** 文件夹一键下载：只打这一个夹的 fid，zip 内保留相对目录，文件名用文件夹名 */
+  async function downloadFolder(fids, dir, size) {
+    fids = fids.filter(Boolean);
+    if (!fids.length) return toast('这个文件夹里没有文件');
+    var qs = '?fids=' + encodeURIComponent(fids.join(',')) + '&path=1' +
+      '&name=' + encodeURIComponent(dir) + '&cid=' + encodeURIComponent(state.cid);
+    try {
+      var info = await api('/api/zip' + qs + '&probe=1');
+      if (!info.count) return toast('这个文件夹里没有可下载的文件');
+      if (info.tooBig) {
+        return toast('这个文件夹有 ' + Math.round(info.size / 1048576) + ' MB，太大了');
+      }
+      toast('正在打包 ' + info.count + ' 个文件…');
+      var a = document.createElement('a');
+      a.href = '/api/zip' + qs;
+      a.download = '';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (e) {
+      toast(e.message || '打包失败');
+    }
+  }
+
   /**
    * 批量删除。一次请求删完 —— 逐条 DELETE 会让服务端反复写索引，
    * 选几十条就要等半天。权限由服务端逐条判，越权的跳过并回报数量。
@@ -5231,6 +5264,8 @@
     function buildFolderGroup(dir, grp) {
       var wrap = document.createElement('div');
       wrap.className = 'msg-folder bnode';
+      var bar = document.createElement('div');
+      bar.className = 'mf-bar';
       var head = document.createElement('button');
       head.type = 'button';
       head.className = 'mf-head';
@@ -5239,6 +5274,17 @@
         '<span class="mf-nm">' + esc(dir) + '</span>' +
         '<span class="mf-meta">' + grp.length + ' 个文件 · ' + fmtSize(bytes) + '</span>' +
         '<span class="mf-tog"></span>';
+      var dl = document.createElement('button');
+      dl.type = 'button';
+      dl.className = 'mf-dl';
+      dl.innerHTML = IDL + '<span>下载整个文件夹</span>';
+      dl.title = '把这个文件夹打包成 zip 下载，保留目录结构';
+      dl.onclick = function (e) {
+        e.stopPropagation();
+        downloadFolder(grp.map(function (p) { return p.fid; }), dir, bytes);
+      };
+      bar.appendChild(head);
+      bar.appendChild(dl);
       var kids = document.createElement('div');
       kids.className = 'mf-kids';
       var key = String(it.id || '') + '|' + dir;
@@ -5254,7 +5300,7 @@
       };
       grp.forEach(function (p) { kids.appendChild(fileRow(it, p)); });
       paint();
-      wrap.appendChild(head);
+      wrap.appendChild(bar);
       wrap.appendChild(kids);
       return wrap;
     }

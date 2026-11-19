@@ -354,6 +354,13 @@ function safeZipName(s) {
   return out.trim().slice(-120) || 'file';
 }
 
+/** 文件夹一键下载用：保留相对路径的目录层级，逐段清洗并挡掉 .. / 绝对路径 */
+function safeZipPath(s) {
+  const segs = String(s || 'file').replace(/\\/g, '/').split('/')
+    .map((x) => x.trim()).filter((x) => x && x !== '.' && x !== '..');
+  return segs.map(safeZipName).join('/').slice(-240) || 'file';
+}
+
 async function crcOfFile(abs) {
   let crc = 0;
   for await (const chunk of fs.createReadStream(abs, { highWaterMark: 256 * 1024 })) {
@@ -2716,6 +2723,9 @@ const onRequest = (req, res) => {
   if (method === 'GET' && pathname === '/api/zip') {
     const ids = String(url.searchParams.get('ids') || '')
       .split(',').map((s) => s.trim()).filter(Boolean).slice(0, 300);
+    const fids = String(url.searchParams.get('fids') || '')
+      .split(',').map((s) => s.trim()).filter(Boolean).slice(0, 600);
+    const keepPath = url.searchParams.get('path') === '1'; // 文件夹下载：zip 内保留相对目录
     const me = cid ? clients.get(cid) : null;
     // 已通过接入许可即可打包下载（未授权设备已在入口 authState 处被拦下）
     // 跟 /api/list 同一套可见性规则：私聊内容不能打包给别人
@@ -2725,28 +2735,42 @@ const onRequest = (req, res) => {
         return t.length === 0 || t.some((x) => samePerson(me.cid, x)) || samePerson(me.cid, it.owner);
       })
       : items.filter((it) => (it.to || []).length === 0);
-    const chosen = visible.filter((it) => ids.indexOf(it.id) !== -1);
-    if (!chosen.length) return json(res, 404, { error: '没有可打包的内容' });
+
+    // 两种取法：fids=按指定文件（文件夹一键下载，只打这一个夹）；否则沿用 ids=整条消息
+    let targets = [];
+    if (fids.length) {
+      for (const fid of fids) {
+        const hit = fileIndex.get(fid);
+        if (hit && visible.indexOf(hit.item) !== -1 && hit.part.file) {
+          targets.push({ it: hit.item, p: hit.part });
+        }
+      }
+    } else {
+      const chosen = visible.filter((it) => ids.indexOf(it.id) !== -1);
+      if (!chosen.length) return json(res, 404, { error: '没有可打包的内容' });
+      for (const it of chosen) for (const p of it.parts || []) targets.push({ it, p });
+    }
 
     const used = new Map();
     const files = [];
     let total = 0;
-    for (const it of chosen) {
-      for (const p of it.parts || []) {
-        if (!p.file) continue;
-        const abs = path.join(FILES_DIR, p.file);
-        let st;
-        try { st = fs.statSync(abs); } catch { continue; }
-        const raw = safeZipName(p.name || ('文件-' + it.id));
-        const n = (used.get(raw) || 0) + 1;
-        used.set(raw, n);
-        const dot = raw.lastIndexOf('.');
-        const name = n === 1
-          ? raw
-          : (dot > 0 ? raw.slice(0, dot) + ' (' + n + ')' + raw.slice(dot) : raw + ' (' + n + ')');
-        total += st.size;
-        files.push({ abs, name, size: st.size, time: it.time });
-      }
+    for (const t of targets) {
+      const it = t.it, p = t.p;
+      if (!p.file) continue;
+      const abs = path.join(FILES_DIR, p.file);
+      let st;
+      try { st = fs.statSync(abs); } catch { continue; }
+      const raw = keepPath
+        ? safeZipPath(p.name || ('文件-' + it.id))
+        : safeZipName(p.name || ('文件-' + it.id));
+      const n = (used.get(raw) || 0) + 1;
+      used.set(raw, n);
+      const dot = raw.lastIndexOf('.');
+      const name = n === 1
+        ? raw
+        : (dot > 0 ? raw.slice(0, dot) + ' (' + n + ')' + raw.slice(dot) : raw + ' (' + n + ')');
+      total += st.size;
+      files.push({ abs, name, size: st.size, time: it.time });
     }
     if (!files.length) return json(res, 404, { error: '选中的内容里没有文件（纯文字不用打包）' });
     // probe=1：只问「能不能打、多大」，不真的打包——前端用它提前把错误挑出来
@@ -2759,12 +2783,14 @@ const onRequest = (req, res) => {
       return json(res, 413, { error: '选中的内容有 ' + fmtBytes(total) + '，太大了，请分批下载' });
     }
 
-    const ascii = 'XiaoMao-' + new Date().toISOString().slice(0, 10).replace(/-/g, '') + '.zip';
-    const cn = '小帽互传-' + new Date().toISOString().slice(0, 10) + '.zip';
+    const wantName = String(url.searchParams.get('name') || '').trim().slice(0, 80);
+    const ascii = (wantName ? safeZipName(wantName) :
+      'XiaoMao-' + new Date().toISOString().slice(0, 10).replace(/-/g, '')) + '.zip';
+    const cn = (wantName || ('小帽互传-' + new Date().toISOString().slice(0, 10))) + '.zip';
     res.writeHead(200, {
       'Content-Type': 'application/zip',
       'Content-Disposition':
-        'attachment; filename="' + ascii + '"; filename*=UTF-8\'\'' + encodeURIComponent(cn),
+        'attachment; filename="' + ascii.replace(/"/g, '') + '"; filename*=UTF-8\'\'' + encodeURIComponent(cn),
       'Cache-Control': 'no-store',
       'X-Content-Type-Options': 'nosniff',
     });
