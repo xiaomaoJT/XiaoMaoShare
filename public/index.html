@@ -858,6 +858,24 @@
   /* .file 自身有 11px gap，这里收一点，图标和按钮才不会隔太远 */
   .file-pv + .dl{margin-left:-4px}
   @media (hover:none){ .file-pv{width:32px;height:32px;opacity:.85} }
+  /* 收到文件夹的消息：同目录附件在信息流里也只占一行，展开才摊开 */
+  .msg-folder{border:1px solid var(--line);border-radius:12px;background:var(--card-2);overflow:hidden}
+  .mf-head{
+    display:flex;align-items:center;gap:8px;width:100%;padding:7px 9px;border:0;
+    background:transparent;color:var(--text);font:inherit;text-align:left;cursor:pointer;
+  }
+  .mf-head:hover{background:var(--line-soft)}
+  .mf-ico{
+    width:30px;height:30px;flex:none;border-radius:8px;display:grid;place-items:center;
+    background:color-mix(in srgb, var(--accent) 14%, var(--card));color:var(--accent);
+  }
+  .mf-ico svg{width:18px;height:18px;display:block}
+  .mf-nm{font-size:calc(13.5px * var(--tfs));font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .mf-meta{font-size:11.5px;color:var(--faint);margin-left:auto;white-space:nowrap;font-variant-numeric:tabular-nums}
+  .mf-tog{font-size:11.5px;color:var(--accent);white-space:nowrap}
+  .mf-kids{padding:2px 8px 8px;border-top:1px solid var(--line)}
+  .mf-kids[hidden]{display:none}
+  .mf-kids .file{padding-left:0;padding-right:0}
 
   /* ---- 文件预览弹层（文本类在内嵌面板里看，媒体类交给浏览器） ---- */
   .fpv{
@@ -1819,6 +1837,12 @@
     color:var(--faint);cursor:pointer;display:grid;place-items:center;font-size:15px;line-height:1;
   }
   .blk-x:hover{background:var(--line);color:var(--danger)}
+  .blk-retry{
+    flex:none;padding:3px 8px;border-radius:7px;border:1px solid var(--danger);
+    background:transparent;color:var(--danger);font-size:11px;line-height:1.5;cursor:pointer;
+  }
+  .blk-retry:hover{background:var(--danger);color:#fff}
+  .blk-retry[hidden]{display:none}
   .blk-md.bad{border-color:var(--danger)}
   .blk-md.bad .blk-sz{color:var(--danger)}
   /* 文件夹块：整夹只占输入区一行，点右端的展开把子文件摊开查看 */
@@ -5194,22 +5218,76 @@
       el.appendChild(grid);
       run = [];
     }
-    parts.forEach(function (p) {
+    /* 文件夹消息：连续的同目录附件在信息流里也收成一行，点开才摊平。
+       展开状态按「消息 id + 目录」记在 sessionStorage，卡片重绘后不会自己弹开。 */
+    var FOLDER_OPEN_KEY = 'xm.folderOpen';
+    var openMap;
+    try { openMap = JSON.parse(sessionStorage.getItem(FOLDER_OPEN_KEY) || '{}'); }
+    catch (e) { openMap = {}; }
+    function folderOf(p) {
+      var nm = String(p.name || ''), i = nm.indexOf('/');
+      return i > 0 ? nm.slice(0, i) : '';
+    }
+    function buildFolderGroup(dir, grp) {
+      var wrap = document.createElement('div');
+      wrap.className = 'msg-folder bnode';
+      var head = document.createElement('button');
+      head.type = 'button';
+      head.className = 'mf-head';
+      var bytes = grp.reduce(function (s, p) { return s + (p.size || 0); }, 0);
+      head.innerHTML = '<span class="mf-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></span>' +
+        '<span class="mf-nm">' + esc(dir) + '</span>' +
+        '<span class="mf-meta">' + grp.length + ' 个文件 · ' + fmtSize(bytes) + '</span>' +
+        '<span class="mf-tog"></span>';
+      var kids = document.createElement('div');
+      kids.className = 'mf-kids';
+      var key = String(it.id || '') + '|' + dir;
+      function paint() {
+        kids.hidden = !openMap[key];
+        head.querySelector('.mf-tog').textContent = kids.hidden ? '展开' : '收起';
+      }
+      head.onclick = function (e) {
+        e.stopPropagation();
+        openMap[key] = !openMap[key];
+        try { sessionStorage.setItem(FOLDER_OPEN_KEY, JSON.stringify(openMap)); } catch (err) {}
+        paint();
+      };
+      grp.forEach(function (p) { kids.appendChild(fileRow(it, p)); });
+      paint();
+      wrap.appendChild(head);
+      wrap.appendChild(kids);
+      return wrap;
+    }
+    for (var pi = 0; pi < parts.length;) {
+      var p = parts[pi];
       if (p.kind === 'text') {
         flushImages();
         var body = document.createElement('div');
         body.className = 'text-body bnode';
         body.innerHTML = mdToHtml(p.text);
         el.appendChild(body);
-      } else if (p.kind === 'image') {
-        run.push(p);
-      } else {
-        flushImages();
-        var fr = fileRow(it, p);
-        fr.classList.add('bnode');
-        el.appendChild(fr);
+        pi++; continue;
       }
-    });
+      if (p.kind === 'image') { run.push(p); pi++; continue; }
+      // 同目录的连续文件合成一组；只有 1 个就别套文件夹壳了
+      var dir = folderOf(p);
+      if (dir) {
+        var grp = [], k = pi;
+        while (k < parts.length && parts[k].kind === 'file' && folderOf(parts[k]) === dir) {
+          grp.push(parts[k]); k++;
+        }
+        if (grp.length > 1) {
+          flushImages();
+          el.appendChild(buildFolderGroup(dir, grp));
+          pi = k; continue;
+        }
+      }
+      flushImages();
+      var fr = fileRow(it, p);
+      fr.classList.add('bnode');
+      el.appendChild(fr);
+      pi++;
+    }
     flushImages();
     var nImg = 0, nFile = 0;
     parts.forEach(function (p) { if (p.kind === 'image') nImg++; else if (p.kind !== 'text') nFile++; });
@@ -7370,6 +7448,14 @@
     info.appendChild(sz);
     info.appendChild(bar);
 
+    var retry = document.createElement('button');
+    retry.type = 'button';
+    retry.className = 'blk-retry';
+    retry.textContent = '重试';
+    retry.title = '重新上传';
+    retry.hidden = true;
+    retry.onclick = function (e) { e.stopPropagation(); retryUpload(b); };
+
     var x = document.createElement('button');
     x.type = 'button';
     x.className = 'blk-x';
@@ -7379,9 +7465,21 @@
 
     row.appendChild(face);
     row.appendChild(info);
+    row.appendChild(retry);
     row.appendChild(x);
-    b.refs = { row: row, sz: sz, bar: bar, fill: fill };
+    b.refs = { row: row, sz: sz, bar: bar, fill: fill, retry: retry };
     return row;
+  }
+
+  /** 失败重传：清掉错误态后走一遍完整上传；文件夹子项重传完要重绘整夹那一行 */
+  function retryUpload(b, fb) {
+    if (!b || !b.file || !b.refs) return;
+    b.error = null;
+    b.refs.row.classList.remove('bad');
+    if (b.refs.retry) b.refs.retry.hidden = true;
+    startUpload(b);
+    if (fb) b.done.then(function () { paintFolder(fb); });
+    syncSend();
   }
 
   /* 大文件分片：8MB 一片。断一片只重发这一片，进度只增不减，不再整包归零 */
@@ -7391,8 +7489,10 @@
     b.done = new Promise(function (resolve) {
       var total = b.size || (b.file && b.file.size) || 0;
 
+      b.upct = 0;
       b.refs.bar.hidden = false;
       b.refs.sz.textContent = '0% · ' + fmtSize(total);
+      if (b.onProgress) b.onProgress();
 
       // 记下已显示过的最大百分比：重试只可能往回退一点点，绝不许归零
       var shownPct = 0;
@@ -7400,24 +7500,31 @@
         var pct = total ? Math.min(100, Math.round((doneBytes / total) * 100)) : 0;
         if (pct < shownPct) pct = shownPct;
         shownPct = pct;
+        b.upct = pct / 100;   // 文件夹聚合行据此显示进行中项的部分进度
         b.refs.fill.style.width = pct + '%';
         b.refs.sz.textContent = pct + '% · ' + fmtSize(total);
+        if (b.onProgress) b.onProgress();
       }
 
       function fail(msg) {
         b.error = msg;
+        b.upct = 0;
         b.refs.row.classList.add('bad');
         b.refs.bar.hidden = true;
         b.refs.sz.textContent = msg;
+        if (b.refs.retry) b.refs.retry.hidden = false;
         syncSend();
+        if (b.onProgress) b.onProgress();
         resolve(b);
       }
 
       function finishWith(part) {
         b.fid = part.fid;
+        b.upct = 1;
         b.refs.bar.hidden = true;
         b.refs.sz.textContent = fmtSize(b.size);
         syncSend();
+        if (b.onProgress) b.onProgress();
         resolve(b);
       }
 
@@ -7571,11 +7678,23 @@
     sz.className = 'blk-sz';
     var bar = document.createElement('div');
     bar.className = 'blk-pg';
+    bar.hidden = true;
     var fill = document.createElement('i');
     bar.appendChild(fill);
     info.appendChild(nm);
     info.appendChild(sz);
     info.appendChild(bar);
+
+    var retry = document.createElement('button');
+    retry.type = 'button';
+    retry.className = 'blk-retry';
+    retry.textContent = '重试';
+    retry.title = '重新上传失败的文件';
+    retry.hidden = true;
+    retry.onclick = function (e) {
+      e.stopPropagation();
+      b.files.filter(function (c) { return c.error; }).forEach(function (c) { retryUpload(c, b); });
+    };
 
     var detail = document.createElement('button');
     detail.type = 'button';
@@ -7600,18 +7719,22 @@
 
     row.appendChild(face);
     row.appendChild(info);
+    row.appendChild(retry);
     row.appendChild(detail);
     row.appendChild(x);
     wrap.appendChild(row);
     wrap.appendChild(kids);
     b.el = wrap;
-    b.refs = { row: row, sz: sz, bar: bar, fill: fill };
+    b.refs = { row: row, sz: sz, bar: bar, fill: fill, retry: retry };
     return wrap;
   }
 
   /** 文件夹里的单个子项：复用媒体行的外观，但 ✕ 只从本文件夹摘掉这一项 */
   function childRow(c, fb) {
     var row = buildMediaBlock(c);
+    c.onProgress = function () { paintFolder(fb); };
+    var cr = row.querySelector('.blk-retry');
+    if (cr) cr.onclick = function (e) { e.stopPropagation(); retryUpload(c, fb); };
     var cx = row.querySelector('.blk-x');
     if (cx) {
       cx.title = '从文件夹移除这一项';
@@ -7633,17 +7756,25 @@
   /** 聚合子项状态到文件夹那一行：已传条数 / 总条数 + 字节进度 + 失败标红 */
   function paintFolder(b) {
     if (!b.refs) return;
-    var total = b.files.length, ok = 0, bad = 0, bytes = 0, sent = 0;
+    var total = b.files.length, ok = 0, bad = 0, pending = 0, bytes = 0, sent = 0;
     b.files.forEach(function (c) {
-      bytes += c.size || 0;
-      if (c.fid) { ok++; sent += c.size || 0; }
+      var sz = c.size || 0;
+      bytes += sz;
+      if (c.fid) { ok++; sent += sz; }
       else if (c.error) bad++;
+      else { pending++; sent += sz * (c.upct || 0); }
     });
     var pct = bytes ? Math.round(sent / bytes * 100) : 0;
     b.refs.fill.style.width = pct + '%';
+    // 没有还在传的项就收起进度条：55/55 已上传后不该再挂着一根杆
+    b.refs.bar.hidden = !pending;
     b.refs.sz.textContent = ok + '/' + total + ' 已上传 · ' + fmtSize(bytes) +
       (bad ? ' · ' + bad + ' 项失败' : '');
     b.refs.row.classList.toggle('bad', !!bad);
+    if (b.refs.retry) {
+      b.refs.retry.hidden = !bad;
+      if (bad) b.refs.retry.textContent = '重试 ' + bad + ' 项';
+    }
   }
 
   function addFiles(files, nameOf, folderName) {
