@@ -913,6 +913,9 @@
   .fpv-ttl{font-size:14.5px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .fpv-sub{font-size:12px;color:var(--faint);margin-top:3px}
   .fpv-acts{display:flex;align-items:center;gap:8px;flex:none}
+  /* 按钮内的字和图标不参与命中测试：整颗按钮是唯一命中目标，
+     移到文字/图标上 = 移到按钮上，hover 与 pointer 全按钮统一 */
+  .fpv-acts button > *, .fpv-acts a > *{pointer-events:none}
   .fpv-dl{
     height:32px;padding:0 12px;border-radius:9px;white-space:nowrap;text-decoration:none;
     background:var(--card-2);border:1px solid var(--line);color:var(--sub);
@@ -926,7 +929,9 @@
   }
   .fpv-x:hover{background:var(--danger);border-color:var(--danger);color:#fff}
   .fpv-body{flex:1;min-height:0;overflow:auto;background:var(--card)}
-  .fpv-scroll{overflow:auto;max-height:100%;padding:14px 16px}
+  /* 只让 .fpv-body 一个滚动容器：此前 .fpv-scroll 自带 overflow，横向滚动条
+     落在整个文件末尾，要滚到底才看得到。现在横竖滚动条都钉在窗口底边 */
+  .fpv-scroll{padding:14px 16px}
   .fpv-pre{
     margin:0;white-space:pre;tab-size:2;
     font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
@@ -980,6 +985,11 @@
   .fpv-mode[hidden], .fpv-find[hidden]{display:none}
   .fpv-mode:hover, .fpv-find:hover{background:var(--accent);border-color:var(--accent);color:#fff}
   .fpv-find svg{width:14px;height:14px}
+  /* JS hover 兜底：桌面壳个别场景下 CSS :hover 不生效，
+     mouseenter/mouseleave 挂 .hov 类，同样的配色再保证一遍 */
+  .fpv-mode.hov, .fpv-find.hov, .fpv-dl.hov{background:var(--accent);border-color:var(--accent);color:#fff}
+  .fpv-x.hov{background:var(--danger);border-color:var(--danger);color:#fff}
+  .fpv-fbtn.hov{background:var(--accent);border-color:var(--accent);color:#fff}
   .fpv-frame{width:100%;height:100%;min-height:300px;border:0;background:#fff;display:block}
 
   /* 大文件降级提示 */
@@ -4689,6 +4699,14 @@
     el.querySelector('.fpv-x').onclick = fpvClose;
     // 「查找」按钮：和 Ctrl/Cmd+F 同一入口
     el.querySelector('.fpv-find').onclick = function () { fpvFindOpen(); };
+    // hover 兜底：桌面壳个别场景下 CSS :hover 不生效，mouseenter 挂 .hov 类保证变色
+    ['.fpv-find', '.fpv-mode', '.fpv-dl', '.fpv-x', '.fpv-fprev', '.fpv-fnext', '.fpv-fclose']
+      .forEach(function (c) {
+        var b = el.querySelector(c);
+        if (!b) return;
+        b.addEventListener('mouseenter', function () { b.classList.add('hov'); });
+        b.addEventListener('mouseleave', function () { b.classList.remove('hov'); });
+      });
     // 查找条事件
     el.querySelector('.fpv-fclose').onclick = fpvFindClose;
     el.querySelector('.fpv-fprev').onclick = function () { fpvFindStep(-1); };
@@ -4703,11 +4721,24 @@
     return el;
   }
 
+  /** 释放运行视图：先把 iframe 空页化再移除 —— 只藏弹层不清 body 的话，
+      运行中的 HTML（定时器 / 动画 / 音视频）在你「关闭」后还一直活着，页面越用越卡 */
+  function fpvClearBody() {
+    if (!fpvEl) return;
+    var body = fpvEl.querySelector('.fpv-body');
+    var fr = body.querySelector('iframe');
+    if (fr) {
+      try { fr.srcdoc = ''; fr.setAttribute('src', 'about:blank'); } catch (e) { /* 已毁不用管 */ }
+    }
+    body.innerHTML = '';
+  }
+
   function fpvClose() {
     if (!fpvEl) return;
     fpvEl.classList.remove('on');
     fpvCur = null;
     fpvState = null;
+    fpvClearBody();
   }
 
   /* ---------------- 代码语法高亮 ----------------
@@ -5026,12 +5057,11 @@
         var running = fpvState.mode === 'run';
         fpvState.mode = running ? 'code' : 'run';
         modeBtn.textContent = running ? '运行' : '代码';
-        var b = fpvEl.querySelector('.fpv-body');
-        b.innerHTML = '';
+        fpvClearBody();   // 切回代码视图同样要释放 iframe，别让它留在 DOM 里跑
         if (fpvState.mode === 'run') {
           // 运行视图关掉查找
           fpvEl.querySelector('.fpv-findbar').classList.remove('on');
-          b.appendChild(fpvRunHtml(fpvState.rawHtml));
+          fpvEl.querySelector('.fpv-body').appendChild(fpvRunHtml(fpvState.rawHtml));
         } else {
           var w = document.createElement('div');
           w.className = 'fpv-scroll';
@@ -5039,7 +5069,7 @@
           p2.className = 'fpv-pre';
           fpvState.hits = []; fpvState.cur = -1; fpvState.query = '';
           renderHighlighted(p2, fpvState.text, fpvState.lang, [], -1);
-          w.appendChild(p2); b.appendChild(w);
+          w.appendChild(p2); fpvEl.querySelector('.fpv-body').appendChild(w);
         }
       };
     }
@@ -5061,6 +5091,7 @@
     dl.href = '/f/' + p.fid + '?dl=1&cid=' + encodeURIComponent(state.cid);
     dl.setAttribute('download', p.name || 'file');
     var body = el.querySelector('.fpv-body');
+    fpvClearBody();   // 上一个预览若还开着运行视图，先把 iframe 释放掉再换内容
     body.innerHTML = '<div class="fpv-load"><div class="spin"></div></div>';
     el.querySelector('.fpv-findbar').classList.remove('on');
     el.querySelector('.fpv-find-i').value = '';
