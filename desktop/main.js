@@ -3969,6 +3969,36 @@ const WIN_APP_ID = 'cc.xiaomao.share';
 if (process.platform === 'win32' && app.isPackaged) app.setAppUserModelId(WIN_APP_ID);
 
 /**
+ * 把 app.ico 落到磁盘上的真实文件。
+ *
+ * Windows 的原生 API（快捷方式的图标、setAppDetails 的 appIconPath）**只认磁盘
+ * 上的真实路径**，asar 里的路径它读不到 —— 不落盘的话就只能退回去用 exe 内嵌
+ * 图标，而那个图标一旦不是我们的（打包时元数据没写进去），任务栏就整片变成
+ * Electron 的样子。这里每次启动比对一次内容，变了就覆盖。
+ */
+let WIN_ICON_FILE = null;
+
+function ensureWinIconFile() {
+  if (process.platform !== 'win32') return null;
+  if (WIN_ICON_FILE) return WIN_ICON_FILE;
+  try {
+    const dst = path.join(app.getPath('userData'), 'app.ico');
+    const buf = fs.readFileSync(path.join(__dirname, 'app.ico'));
+    let same = false;
+    try {
+      const old = fs.readFileSync(dst);
+      same = old.length === buf.length && old.equals(buf);
+    } catch { /* 没有就写 */ }
+    if (!same) {
+      fs.mkdirSync(path.dirname(dst), { recursive: true });
+      fs.writeFileSync(dst, buf);
+    }
+    WIN_ICON_FILE = dst;
+    return dst;
+  } catch { return null; }
+}
+
+/**
  * Windows 任务栏按钮的身份兜底。
  *
  * 设置了 AUMID 后，任务栏按钮的名字和图标来自「带同一 AUMID 的开始菜单
@@ -3976,15 +4006,14 @@ if (process.platform === 'win32' && app.isPackaged) app.setAppUserModelId(WIN_AP
  * 身份时，按钮会退化成 Electron 的默认样子。setAppDetails 把窗口的任务栏
  * 归属（appId + 图标 + 重启命令 + 显示名）直接写在窗口上，不经过快捷方式
  * 解析，两条路谁掉链子都兜得住。
- * 注意 appIconPath 必须是 Windows 能直接读的真实文件（asar 里的路径它不认），
- * 这里用 exe 自身内嵌的图标。
  */
 function applyWinTaskbarIdentity(w) {
   if (process.platform !== 'win32' || !app.isPackaged || !w || w.isDestroyed()) return;
+  const ico = ensureWinIconFile();
   try {
     w.setAppDetails({
       appId: WIN_APP_ID,
-      appIconPath: process.execPath,
+      appIconPath: ico || process.execPath,
       appIconIndex: 0,
       relaunchCommand: `"${process.execPath}"`,
       relaunchDisplayName: 'XiaoMao 互传',
@@ -4008,14 +4037,45 @@ function winShortcutPath() {
   return path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'XiaoMao 互传.lnk');
 }
 
+/**
+ * 把「指向我们」的快捷方式图标统一改指到落盘的 app.ico。
+ * 覆盖三处：开始菜单（任务栏按钮靠它取名字和图标）、桌面、任务栏固定区。
+ * 只动 AUMID 对得上的那条，别碰用户自己的快捷方式。
+ */
+function repointWinShortcuts(ico) {
+  if (!ico) return;
+  const appData = app.getPath('appData');
+  const candidates = [
+    winShortcutPath(),
+    path.join(app.getPath('desktop'), 'XiaoMao 互传.lnk'),
+    path.join(appData, 'Microsoft', 'Internet Explorer', 'Quick Launch', 'User Pinned', 'TaskBar', 'XiaoMao 互传.lnk'),
+  ];
+  for (const lnk of candidates) {
+    try {
+      if (!fs.existsSync(lnk)) continue;
+      const cur = shell.readShortcutLink(lnk);
+      if (!cur || cur.appUserModelId !== WIN_APP_ID) continue;
+      if (cur.icon === ico) continue;
+      shell.writeShortcutLink(lnk, 'update', { icon: ico, iconIndex: 0 });
+    } catch { /* 单条失败不影响其它 */ }
+  }
+}
+
 function ensureWinShortcut() {
   if (process.platform !== 'win32' || !app.isPackaged) return;
+  const ico = ensureWinIconFile();
   try {
     const lnk = winShortcutPath();
     if (fs.existsSync(lnk)) {
       try {
         const cur = shell.readShortcutLink(lnk);
-        if (cur && cur.appUserModelId === WIN_APP_ID) return;  // 安装版装好的，别动它
+        if (cur && cur.appUserModelId === WIN_APP_ID) {
+          /* 安装版装好的那条：AUMID 对，但图标可能指着 exe —— exe 里的图标
+             一旦不是我们的（打包元数据没写进去），任务栏就整片变 Electron。
+             下面统一把图标改指到落盘的 app.ico，绕开对 exe 图标的依赖 */
+          repointWinShortcuts(ico);
+          return;
+        }
         // AUMID 对不上：'update' 未必改得动这个字段，删了重建更干脆
         fs.unlinkSync(lnk);
       } catch { /* 读不出来就按下面重建 */ }
@@ -4025,9 +4085,10 @@ function ensureWinShortcut() {
       target: process.execPath,
       appUserModelId: WIN_APP_ID,
       description: 'XiaoMao 互传',
-      icon: process.execPath,
+      icon: ico || process.execPath,
       iconIndex: 0,
     });
+    repointWinShortcuts(ico);
   } catch { /* 没权限就算了：安装版不靠这条兜底 */ }
 }
 
