@@ -4,7 +4,7 @@
 
 ![XM 互传 · 功能](docs/xm-intro-2-features.png)
 
-![XM 互传 · 本次更新 v2.7.0](docs/xm-intro-3-v2.7.0.png)
+![XM 互传 · 本次更新 v2.7.2](docs/xm-intro-3-v2.7.2.png)
 
 ![XM 互传 · 身份权限与技术形态](docs/xm-intro-4-architecture.png)
 

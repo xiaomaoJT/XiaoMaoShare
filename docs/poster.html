@@ -195,7 +195,7 @@
     <div class="logo"><img src="assets/logo.gif" alt=""></div>
     <div>
       <div class="brandname"><em>XM</em> 互传</div>
-      <div class="brandsub">局域网互传系统 · v2.7.0 说明</div>
+      <div class="brandsub">局域网互传系统 · v2.7.2 说明</div>
     </div>
   </div>
 
@@ -382,26 +382,26 @@
 
   <div class="sect">
     <div class="sect-head">
-      <h2>本次更新<span class="ver-tag">v2.7.0</span></h2>
-      <p>文件夹整包收发、代码与 HTML 预览升级、桌面端窗口快捷键</p>
+      <h2>本次更新<span class="ver-tag">v2.7.2</span></h2>
+      <p>Windows 任务栏身份专项修复：名称、图标与归属一次理顺</p>
     </div>
     <div class="rule"></div>
 
     <div class="feats">
       <div class="feat warm">
-        <div class="ico"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/><path d="M12 11v5M9.5 13.5L12 11l2.5 2.5"/></svg></div>
-        <h4>文件夹整包收发</h4>
-        <p>拖入文件夹只在输入区折叠成一行，文件名、数量与大小一目了然；接收端按顶层目录折叠展示，可一键打包下载整个文件夹，ZIP 内完整保留目录结构。</p>
+        <div class="ico"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18M6.5 7h.01M9 7h.01"/><path d="M12 12v5M9.5 14.5L12 12l2.5 2.5"/></svg></div>
+        <h4>任务栏身份修复</h4>
+        <p>Windows 任务栏不再显示成「Electron」。根因是开发模式留下的同名快捷方式抢占应用身份，启动时自动清理并备份，重启电脑也不会残留，无需手动处理。</p>
       </div>
       <div class="feat">
-        <div class="ico"><svg viewBox="0 0 24 24"><path d="M9 7l-5 5 5 5M15 7l5 5-5 5"/></svg></div>
-        <h4>代码与 HTML 预览</h4>
-        <p>源码类文件按语法着色，支持按钮或快捷键查找、逐个跳转命中；.html 可直接切到「运行」视图实时预览，关闭或切换时自动释放页面资源，越用不卡。</p>
+        <div class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 8v4l3 2"/></svg></div>
+        <h4>归属直写窗口</h4>
+        <p>任务栏名称、图标与重启命令直接写在窗口上，不经过快捷方式解析——安装版、便携版、解压直跑三种形态全覆盖，哪条路掉链子都不受影响。</p>
       </div>
       <div class="feat">
-        <div class="ico"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18M6.5 7h.01M9 7h.01"/><path d="M8 13h4M8 16h7"/></svg></div>
-        <h4>桌面端窗口快捷键</h4>
-        <p>mac：⌘M 最小化、⌃⌘M 最大化·还原、⌘W 关闭窗口；Windows：Ctrl+M / Ctrl+Shift+M / Ctrl+W / F11。全局 ⌘⇧X（Win Ctrl+Shift+X）在任何界面一键呼出互传主窗口。</p>
+        <div class="ico"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H4z"/><path d="M8 20h8M12 16v4"/><path d="M8 9h5M8 12h8"/></svg></div>
+        <h4>排查可追溯</h4>
+        <p>清理动作完整落盘到应用数据目录的 win-taskbar.log：清了哪些项、当前进程是谁，一目了然；被清理的快捷方式自动备份，随时可回溯。</p>
       </div>
     </div>
   </div>
@@ -465,7 +465,7 @@
     </div>
     <div class="sign">
       <b><em>XM</em> 互传 <span style="display:inline;font-size:12px;color:var(--faint);font-weight:500">轻量 · 够快 · 不外传</span></b>
-      <span>v2.7.0 · github.com/xiaomaoJT/XiaoMaoShare</span>
+      <span>v2.7.2 · github.com/xiaomaoJT/XiaoMaoShare</span>
       <span>Telegram 频道 · t.me/ListenToMao</span>
     </div>
   </div>
