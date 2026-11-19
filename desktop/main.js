@@ -193,10 +193,12 @@ const START_PAGE = path.join(__dirname, 'start.html');
  */
 const APP_ICON = path.join(__dirname, '..', 'public', 'icon.png');
 
-/* Windows 的窗口/任务栏图标认 .ico（PNG 在部分场景吃不到，任务栏尤其挑）。
-   app.ico 放 desktop/ 里会随包带上（build/ 不在打包清单里）；mac 用不上它。 */
-const WIN_ICON = path.join(__dirname, 'app.ico');
-const WINDOW_ICON = (process.platform === 'win32' && fs.existsSync(WIN_ICON)) ? WIN_ICON : APP_ICON;
+/* Windows **不给窗口传 icon**，交给 exe 内嵌的图标（那个已经是我们的了）。
+   实测坑：Electron 的 nativeImage 根本读不了 .ico —— createFromPath 返回空图
+   （isEmpty() === true），传 ico 路径等于传了一张空图，Electron 于是退回它自带
+   的默认图标（蓝色原子标），任务栏一眼就是「Electron」。不传反而最稳。
+   mac / linux 继续用 PNG。 */
+const WINDOW_ICON = process.platform === 'win32' ? undefined : APP_ICON;
 
 /** 读整个 settings.json（各偏好共用一个文件） */
 function readSettings() {
@@ -3968,52 +3970,91 @@ const WIN_APP_ID = 'cc.xiaomao.share';
    开发模式不注册：任务栏退回用窗口图标 + 窗口标题（现在都是我们自己的）。 */
 if (process.platform === 'win32' && app.isPackaged) app.setAppUserModelId(WIN_APP_ID);
 
-/**
- * 把 app.ico 落到磁盘上的真实文件。
- *
- * Windows 的原生 API（快捷方式的图标、setAppDetails 的 appIconPath）**只认磁盘
- * 上的真实路径**，asar 里的路径它读不到 —— 不落盘的话就只能退回去用 exe 内嵌
- * 图标，而那个图标一旦不是我们的（打包时元数据没写进去），任务栏就整片变成
- * Electron 的样子。这里每次启动比对一次内容，变了就覆盖。
- */
-let WIN_ICON_FILE = null;
-
-function ensureWinIconFile() {
-  if (process.platform !== 'win32') return null;
-  if (WIN_ICON_FILE) return WIN_ICON_FILE;
+/** 把一条任务栏身份的诊断信息追加到 userData/win-taskbar.log。
+ *  这条日志是给「任务栏显示成 Electron」这类问题取证用的：里面记了清掉了哪些
+ *  污染快捷方式、我们的快捷方式指向哪。日志失败绝不能影响启动。 */
+function winIdLog(line) {
+  if (process.platform !== 'win32') return;
   try {
-    const dst = path.join(app.getPath('userData'), 'app.ico');
-    const buf = fs.readFileSync(path.join(__dirname, 'app.ico'));
-    let same = false;
+    const f = path.join(app.getPath('userData'), 'win-taskbar.log');
+    try { if (fs.statSync(f).size > 64 * 1024) fs.writeFileSync(f, ''); } catch { /* 没有就新建 */ }
+    fs.appendFileSync(f, `${new Date().toISOString()} ${line}\n`);
+  } catch { /* 忽略 */ }
+}
+
+/** 递归收集目录下的 .lnk（深度受限，Start Menu 下面本来就浅） */
+function collectLnks(dir, depth, out) {
+  if (depth < 0) return;
+  let ents;
+  try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+  for (const e of ents) {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) collectLnks(p, depth - 1, out);
+    else if (e.name.toLowerCase().endsWith('.lnk')) out.push(p);
+  }
+}
+
+/**
+ * 清掉「指向源码 electron.exe、却挂着我们 AUMID」的快捷方式 ——
+ * 任务栏显示成「Electron」原子图标的真正原因。
+ *
+ * 机理：Electron 在 Windows 上初始化系统通知 presenter 时，会按 exe 的 PE 产品名
+ * 在开始菜单里建一条快捷方式，并把**当前进程的 AUMID** 挂上去。开发模式下进程是
+ * node_modules 里的 electron.exe（产品名就是 "Electron"），而我们历史上是无条件
+ * app.setAppUserModelId('cc.xiaomao.share') —— 两者一凑，开始菜单里就长出一条
+ * Electron.lnk：名字 Electron、图标是原子标、AUMID 却是我们的。
+ *
+ * 之后打包版启动，AUMID 一模一样，Windows 解析任务栏按钮身份时先命中那条
+ * Electron.lnk（快捷方式优先于 exe 自身的元数据），名字和图标就整片变成 Electron。
+ * 它在磁盘上，重启电脑不会消失；只保证我们自己的 XiaoMao 互传.lnk 正确也没用。
+ *
+ * 所以每次启动扫一遍：AUMID 是我们的、target 却是 electron.exe 的，备份后删掉。
+ * 备份故意用非 .lnk 后缀 —— 留着 .lnk 的话 Windows 和通知 presenter 还会认它。
+ */
+function pruneSourceElectronShortcuts() {
+  if (process.platform !== 'win32') return [];
+  const dirs = [
+    path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs'),
+    path.join(process.env.ProgramData || 'C:\\ProgramData', 'Microsoft', 'Windows', 'Start Menu', 'Programs'),
+    app.getPath('desktop'),
+    path.join(app.getPath('appData'), 'Microsoft', 'Internet Explorer', 'Quick Launch', 'User Pinned', 'TaskBar'),
+  ];
+  const lnks = [];
+  for (const d of dirs) collectLnks(d, 3, lnks);
+
+  const removed = [];
+  for (const lnk of lnks) {
+    let cur;
+    try { cur = shell.readShortcutLink(lnk); } catch { continue; }
+    if (!cur) continue;
+    const target = path.basename(String(cur.target || '')).toLowerCase();
+    if (target !== 'electron.exe') continue;     // 只清源码 electron.exe，别碰正常快捷方式
+    const named = path.basename(lnk).toLowerCase() === 'electron.lnk';
+    if (cur.appUserModelId !== WIN_APP_ID && !named) continue;  // 别人的 Electron 快捷方式不动
     try {
-      const old = fs.readFileSync(dst);
-      same = old.length === buf.length && old.equals(buf);
-    } catch { /* 没有就写 */ }
-    if (!same) {
-      fs.mkdirSync(path.dirname(dst), { recursive: true });
-      fs.writeFileSync(dst, buf);
-    }
-    WIN_ICON_FILE = dst;
-    return dst;
-  } catch { return null; }
+      fs.copyFileSync(lnk, lnk + '.xm-bak');
+      fs.unlinkSync(lnk);
+      removed.push(lnk);
+    } catch { /* 没权限就留着：只影响观感，不影响使用 */ }
+  }
+  if (removed.length) winIdLog(`removed polluted shortcuts: ${removed.join(' | ')}`);
+  return removed;
 }
 
 /**
  * Windows 任务栏按钮的身份兜底。
  *
- * 设置了 AUMID 后，任务栏按钮的名字和图标来自「带同一 AUMID 的开始菜单
- * 快捷方式」；快捷方式缺失（便携版 / win-unpacked 直接跑）或系统缓存了旧
- * 身份时，按钮会退化成 Electron 的默认样子。setAppDetails 把窗口的任务栏
- * 归属（appId + 图标 + 重启命令 + 显示名）直接写在窗口上，不经过快捷方式
- * 解析，两条路谁掉链子都兜得住。
+ * 把窗口的任务栏归属（appId + 图标 + 重启命令 + 显示名）直接写在窗口上，
+ * 不经过快捷方式解析 —— 快捷方式那条路被污染过（见上面），这里再声明一次。
+ * appIconPath 用 exe 自身：Windows 原生 API 认 exe 也认 ico 文件，但 exe 内嵌
+ * 图标已经是我们的，少一份对外部文件的依赖。
  */
 function applyWinTaskbarIdentity(w) {
   if (process.platform !== 'win32' || !app.isPackaged || !w || w.isDestroyed()) return;
-  const ico = ensureWinIconFile();
   try {
     w.setAppDetails({
       appId: WIN_APP_ID,
-      appIconPath: ico || process.execPath,
+      appIconPath: process.execPath,
       appIconIndex: 0,
       relaunchCommand: `"${process.execPath}"`,
       relaunchDisplayName: 'XiaoMao 互传',
@@ -4037,45 +4078,14 @@ function winShortcutPath() {
   return path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'XiaoMao 互传.lnk');
 }
 
-/**
- * 把「指向我们」的快捷方式图标统一改指到落盘的 app.ico。
- * 覆盖三处：开始菜单（任务栏按钮靠它取名字和图标）、桌面、任务栏固定区。
- * 只动 AUMID 对得上的那条，别碰用户自己的快捷方式。
- */
-function repointWinShortcuts(ico) {
-  if (!ico) return;
-  const appData = app.getPath('appData');
-  const candidates = [
-    winShortcutPath(),
-    path.join(app.getPath('desktop'), 'XiaoMao 互传.lnk'),
-    path.join(appData, 'Microsoft', 'Internet Explorer', 'Quick Launch', 'User Pinned', 'TaskBar', 'XiaoMao 互传.lnk'),
-  ];
-  for (const lnk of candidates) {
-    try {
-      if (!fs.existsSync(lnk)) continue;
-      const cur = shell.readShortcutLink(lnk);
-      if (!cur || cur.appUserModelId !== WIN_APP_ID) continue;
-      if (cur.icon === ico) continue;
-      shell.writeShortcutLink(lnk, 'update', { icon: ico, iconIndex: 0 });
-    } catch { /* 单条失败不影响其它 */ }
-  }
-}
-
 function ensureWinShortcut() {
   if (process.platform !== 'win32' || !app.isPackaged) return;
-  const ico = ensureWinIconFile();
   try {
     const lnk = winShortcutPath();
     if (fs.existsSync(lnk)) {
       try {
         const cur = shell.readShortcutLink(lnk);
-        if (cur && cur.appUserModelId === WIN_APP_ID) {
-          /* 安装版装好的那条：AUMID 对，但图标可能指着 exe —— exe 里的图标
-             一旦不是我们的（打包元数据没写进去），任务栏就整片变 Electron。
-             下面统一把图标改指到落盘的 app.ico，绕开对 exe 图标的依赖 */
-          repointWinShortcuts(ico);
-          return;
-        }
+        if (cur && cur.appUserModelId === WIN_APP_ID) return;  // 安装版装好的，别动它
         // AUMID 对不上：'update' 未必改得动这个字段，删了重建更干脆
         fs.unlinkSync(lnk);
       } catch { /* 读不出来就按下面重建 */ }
@@ -4085,10 +4095,9 @@ function ensureWinShortcut() {
       target: process.execPath,
       appUserModelId: WIN_APP_ID,
       description: 'XiaoMao 互传',
-      icon: ico || process.execPath,
+      icon: process.execPath,
       iconIndex: 0,
     });
-    repointWinShortcuts(ico);
   } catch { /* 没权限就算了：安装版不靠这条兜底 */ }
 }
 
@@ -4131,7 +4140,13 @@ if (!app.requestSingleInstanceLock()) {
     // 起来第一件事就是确认自己是「常规应用」：悬浮球的窗口层级调用会把 App 打成
     // accessory（无菜单栏），一旦被打进去，后面 show 多少窗口菜单栏都不会跟随
     ensureRegularApp();
-    ensureWinShortcut();   // Windows：没有带 AUMID 的开始菜单快捷方式，toast 就弹不出来
+    // Windows 任务栏身份：**先清污染再建自己的**，顺序不能反 —— 窗口建出来那一刻
+    // Windows 就已经按 AUMID 去解析快捷方式了，残留的 Electron.lnk 会抢在前面
+    if (process.platform === 'win32') {
+      pruneSourceElectronShortcuts();
+      ensureWinShortcut();   // 没有带 AUMID 的开始菜单快捷方式，toast 就弹不出来
+      winIdLog(`boot packaged=${app.isPackaged} exec=${process.execPath}`);
+    }
 
     // 「收到消息」的提醒统一由主进程发（startNoticeWatch）。桌面壳里的 HTML5
     // Notification 一律关掉：留着只会让一条消息响两遍 —— 尤其是对方主机下发的
