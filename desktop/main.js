@@ -12,7 +12,7 @@
  * 关掉界面不影响手机连进来。
  */
 
-const { app, BrowserWindow, ipcMain, Menu, Tray, shell, clipboard, dialog, nativeImage, screen, session, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, Tray, shell, clipboard, dialog, nativeImage, screen, session, Notification, globalShortcut } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const crypto = require('node:crypto');
@@ -979,35 +979,78 @@ function toggleMaxWin(w) {
   else w.maximize();
 }
 
+/* ------------------------------------------------- 全局快捷键：打开 XiaoMao 互传
+
+   窗口快捷键只在应用里有焦点时管用；主窗口收进托盘 / 被别的窗口盖住之后，
+   得有一个「在任何地方按一下就把互传叫出来」的键 —— 那只能是 globalShortcut
+   （系统级注册，别的应用在前面时也收得到）。注册成功才占用系统按键，
+   失败自动降级备选键，两个都失败就只留菜单/托盘入口。 */
+
+const GLOBAL_OPEN_KEYS = [
+  { accelerator: 'CommandOrControl+Shift+X', note: '⌘⇧X / Ctrl+Shift+X' },
+  { accelerator: 'Alt+Shift+X', note: '⌥⇧X / Alt+Shift+X' },
+];
+let globalOpenKey = null;   // 实际注册成功的那一组；null = 没注册上
+
+function registerGlobalKeys() {
+  if (globalOpenKey) return;
+  for (const k of GLOBAL_OPEN_KEYS) {
+    try {
+      if (globalShortcut.register(k.accelerator, showMainFromHotkey)) {
+        globalOpenKey = k;
+        return;
+      }
+    } catch { /* 被占用等情况会抛，换下一组 */ }
+  }
+  // 两组都没注册上：系统键位冲突。不打扰用户，菜单 / 托盘入口照常可用
+}
+
+function unregisterGlobalKeys() {
+  try { globalShortcut.unregisterAll(); } catch { /* 退出清理，失败无所谓 */ }
+  globalOpenKey = null;
+}
+
+/** 全局快捷键的落点：呼出主窗口（已在前面就收起，跟聚光灯一个习惯） */
+function showMainFromHotkey() {
+  stopTrayFlash();
+  if (!hostWin || hostWin.isDestroyed()) { ensureHostWindow(); return; }
+  if (!hostWin.isVisible()) {
+    hostWin.show();
+    hostWin.focus();
+    activateApp();     // accessory 状态下 focus 带不回菜单栏，必须显式拉回 regular
+    refreshTray();
+    return;
+  }
+  if (hostWin.isMinimized()) { hostWin.restore(); hostWin.focus(); activateApp(); return; }
+  if (hostWin.isFocused()) {
+    hostWin.hide();    // toggle：再按一下收起来，和「收进托盘」同一个去处
+    refreshTray();
+    return;
+  }
+  hostWin.focus();
+  activateApp();
+}
+
 /**
- * 给一个窗口挂上窗口快捷键。
- * mac：⌘M 最小化、⌃⌘M 最大化·还原（⌘W 关窗由「我的主机 → 关闭窗口」的 role 管）
+ * 给一个窗口挂上窗口快捷键（仅 Windows：页面层 before-input-event 兜底）。
+ * mac 不在这里挂 —— ⌘M / ⌃⌘M / ⌘W 已由应用菜单的加速键正式注册（见 buildMenu），
+ * 那是系统级路径，输入法拦不住；再在这里拦一遍就是两边各响一次。
  * win：Ctrl+M 最小化、Ctrl+Shift+M 最大化·还原、Ctrl+W 关窗（Alt+F4 系统自带）
  */
 function bindWindowKeys(win) {
+  if (IS_MAC) return;          // mac 全部走菜单加速键，见 buildMenu
   if (!win || win.isDestroyed() || win.__xmKeys) return;
   win.__xmKeys = true;
   win.webContents.on('before-input-event', (e, input) => {
     if (!input || input.type !== 'keyDown') return;
     const key = String(input.key || '').toLowerCase();
-    // Windows 的 F11 全屏没有修饰键，先单独认掉（mac 的 ⌃⌘F 由菜单 role 管）
-    if (!IS_MAC && key === 'f11') {
+    // Windows 的 F11 全屏没有修饰键，先单独认掉
+    if (key === 'f11') {
       e.preventDefault();
       if (win.isFullScreen()) win.setFullScreen(false); else win.setFullScreen(true);
       return;
     }
-    const mod = IS_MAC ? input.meta : input.control;
-    if (!mod) return;
-    // 另一家的修饰键必须没按着：mac 的 ⌃⌘M 是例外（两个一起按才是最大化）
-    const cross = IS_MAC ? input.control : input.meta;
-    if (input.alt) return;
-    if (IS_MAC) {
-      if (cross && key === 'm' && !input.shift) { e.preventDefault(); toggleMaxWin(win); return; }
-      if (cross) return;
-      if (key === 'm' && !input.shift) { e.preventDefault(); win.minimize(); }
-      return;
-    }
-    if (cross) return;
+    if (!input.control || input.meta || input.alt) return;
     if (key === 'm' && input.shift) { e.preventDefault(); toggleMaxWin(win); return; }
     if (key === 'm') { e.preventDefault(); win.minimize(); return; }
     if (key === 'w' && !input.shift) { e.preventDefault(); win.close(); }
@@ -1288,16 +1331,29 @@ function buildMenu() {
     {
       label: '窗口',
       submenu: [
+        // 全局快捷键「打开 XiaoMao 互传」真正由 globalShortcut 注册（见 registerGlobalKeys），
+        // 这里只展示按键提示 —— globalShortcut 是系统级的，菜单再注册一遍就会一按响两次
+        {
+          label: '打开 XiaoMao 互传',
+          accelerator: (globalOpenKey || GLOBAL_OPEN_KEYS[0]).accelerator,
+          registerAccelerator: false,
+          click: () => showMainFromHotkey(),
+        },
         {
           label: '最小化',
-          accelerator: 'CmdOrCtrl+M',
-          registerAccelerator: false,   // 同上：实际按键由 bindWindowKeys 处理
+          // mac：加速键正式注册给系统菜单 —— 系统级处理，输入法和页面焦点都拦不住
+          // （before-input-event 是页面层路径，真机上会被输入法截胡，实测 ⌃⌘M 因此失灵）；
+          // Windows：frame:false 下原生加速键时灵时不灵，仍靠 bindWindowKeys 兜
+          ...(IS_MAC
+            ? { accelerator: 'CmdOrCtrl+M' }
+            : { accelerator: 'CmdOrCtrl+M', registerAccelerator: false }),
           click: () => { const w = focusedWin(); if (w) w.minimize(); },
         },
         {
           label: '最大化 / 还原',
-          accelerator: IS_MAC ? 'Control+Cmd+M' : 'Ctrl+Shift+M',
-          registerAccelerator: false,
+          ...(IS_MAC
+            ? { accelerator: 'Control+Cmd+M' }
+            : { accelerator: 'Ctrl+Shift+M', registerAccelerator: false }),
           click: () => toggleMaxWin(focusedWin()),
         },
         { type: 'separator' },
@@ -2361,7 +2417,11 @@ function trayTemplate(inf) {
   const closePref = readClosePref();
   const lanUrl = (hostInfo && hostInfo.lan[0] && hostInfo.lan[0].url) || '';
   return [
-    { label: '打开 XiaoMao 互传', click: () => showFromTray() },
+    {
+      label: '打开 XiaoMao 互传',
+      accelerator: (globalOpenKey || GLOBAL_OPEN_KEYS[0]).accelerator,  // 只展示，实际由 globalShortcut 接
+      click: () => showFromTray(),
+    },
     { type: 'separator' },
     inf.running
       ? { label: `本机可被连接 · 端口 ${inf.port}`, enabled: false }
@@ -3986,6 +4046,7 @@ if (!app.requestSingleInstanceLock()) {
       ses.setPermissionCheckHandler(() => false);
     } catch { /* 老版本 Electron 没这两个 API 就算了，页面里也有兜底 */ }
 
+    registerGlobalKeys(); // 全局快捷键先注册，菜单里「打开 XiaoMao 互传」的按键提示要跟它对上
     buildMenu();          // 菜单先挂上，别让窗口出来时顶栏是空的
     buildTray();          // 托盘尽早建：关闭按钮的三种结局都依赖它在不在
     syncBallMetrics();    // 球的尺寸先算好，后面布局都靠它
@@ -4023,6 +4084,7 @@ if (!app.requestSingleInstanceLock()) {
     if (quitting) return;
     e.preventDefault();
     quitting = true;
+    unregisterGlobalKeys();  // 系统级按键要还回去，退出后 ⌘⇧X 不能还被我们占着
     stopTrayFlash(); // 别让闪动 timer 在退出流程里还往托盘上画
     // 托盘先撤掉：mac 上偶尔会出现「进程退了、菜单栏图标还挂着」的残影
     if (tray) {
