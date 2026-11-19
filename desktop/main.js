@@ -193,6 +193,11 @@ const START_PAGE = path.join(__dirname, 'start.html');
  */
 const APP_ICON = path.join(__dirname, '..', 'public', 'icon.png');
 
+/* Windows 的窗口/任务栏图标认 .ico（PNG 在部分场景吃不到，任务栏尤其挑）。
+   app.ico 放 desktop/ 里会随包带上（build/ 不在打包清单里）；mac 用不上它。 */
+const WIN_ICON = path.join(__dirname, 'app.ico');
+const WINDOW_ICON = (process.platform === 'win32' && fs.existsSync(WIN_ICON)) ? WIN_ICON : APP_ICON;
+
 /** 读整个 settings.json（各偏好共用一个文件） */
 function readSettings() {
   try { return JSON.parse(fs.readFileSync(SETTINGS_FILE(), 'utf8')) || {}; } catch { return {}; }
@@ -368,7 +373,7 @@ function createHostWindow(opts = {}) {
     minWidth: 640,
     minHeight: 520,
     title: 'XiaoMao 互传',
-    icon: APP_ICON,
+    icon: WINDOW_ICON,
     backgroundColor: '#f4f6f9',
     show: false,
     // 沉浸式顶栏：mac 红绿灯收进页面顶栏（hiddenInset）；Windows 去掉系统边框，
@@ -619,7 +624,7 @@ function openLink(rawUrl) {
     minWidth: 560,
     minHeight: 480,
     title: `连到 ${n.host}`,
-    icon: APP_ICON,
+    icon: WINDOW_ICON,
     backgroundColor: '#f4f6f9',
     webPreferences: {
       contextIsolation: true,
@@ -1421,7 +1426,7 @@ function askPort(current) {
       parent: hostWin && !hostWin.isDestroyed() ? hostWin : undefined,
       modal: !!(hostWin && !hostWin.isDestroyed()),
       title: '选择端口',
-      icon: APP_ICON,
+      icon: WINDOW_ICON,
       resizable: false,
       show: false,
       webPreferences: { contextIsolation: true, nodeIntegration: false },
@@ -1586,7 +1591,7 @@ function openDataDirGuide() {
     parent: hostWin && !hostWin.isDestroyed() ? hostWin : undefined,
     modal: false, // 不挡主界面，随手可关
     title: '数据目录',
-    icon: APP_ICON,
+    icon: WINDOW_ICON,
     resizable: false,
     show: false,
     webPreferences: { contextIsolation: true, nodeIntegration: false },
@@ -1795,7 +1800,7 @@ function updShow(state, extra) {
       width: 380,
       height: 128,
       title: '检查更新',
-      icon: APP_ICON,
+      icon: WINDOW_ICON,
       resizable: false,
       minimizable: false,
       maximizable: false,
@@ -3957,7 +3962,38 @@ function reportBallIdentity(base, cid) {
    这里必须与 package.json 的 build.appId 完全一致：安装包给快捷方式写的就是
    那个值，两边对不上 AUMID 照样匹配不到应用。 */
 const WIN_APP_ID = 'cc.xiaomao.share';
-if (process.platform === 'win32') app.setAppUserModelId(WIN_APP_ID);
+/* AUMID 只在打包后注册。开发模式也注册的话，electron.exe 这个进程会顶着
+   「cc.xiaomao.share」这个身份进任务栏 —— Windows 一旦给这个 AUMID 缓存了
+   「Electron」这个名字和图标，之后连打包版都可能跟着显示成 Electron。
+   开发模式不注册：任务栏退回用窗口图标 + 窗口标题（现在都是我们自己的）。 */
+if (process.platform === 'win32' && app.isPackaged) app.setAppUserModelId(WIN_APP_ID);
+
+/**
+ * Windows 任务栏按钮的身份兜底。
+ *
+ * 设置了 AUMID 后，任务栏按钮的名字和图标来自「带同一 AUMID 的开始菜单
+ * 快捷方式」；快捷方式缺失（便携版 / win-unpacked 直接跑）或系统缓存了旧
+ * 身份时，按钮会退化成 Electron 的默认样子。setAppDetails 把窗口的任务栏
+ * 归属（appId + 图标 + 重启命令 + 显示名）直接写在窗口上，不经过快捷方式
+ * 解析，两条路谁掉链子都兜得住。
+ * 注意 appIconPath 必须是 Windows 能直接读的真实文件（asar 里的路径它不认），
+ * 这里用 exe 自身内嵌的图标。
+ */
+function applyWinTaskbarIdentity(w) {
+  if (process.platform !== 'win32' || !app.isPackaged || !w || w.isDestroyed()) return;
+  try {
+    w.setAppDetails({
+      appId: WIN_APP_ID,
+      appIconPath: process.execPath,
+      appIconIndex: 0,
+      relaunchCommand: `"${process.execPath}"`,
+      relaunchDisplayName: 'XiaoMao 互传',
+    });
+  } catch { /* 老版本 Electron 没这个 API 就算了 */ }
+}
+
+// 每个窗口建出来就挂上（悬浮球那类 skipTaskbar 窗口挂着也无害）
+app.on('browser-window-created', (_e, w) => applyWinTaskbarIdentity(w));
 
 /**
  * Windows 投 toast 还有一个硬前提：**开始菜单里必须有一条带 AppUserModelID
