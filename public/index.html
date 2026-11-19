@@ -353,7 +353,7 @@
   .btn.ghost:disabled{opacity:.45;cursor:not-allowed}
   .btn.danger{background:var(--danger);color:#fff}
   .hint{font-size:12px;color:var(--faint);margin-left:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  @media (max-width:430px){ .hint{display:none} #send{margin-left:auto} .pick-label{display:none} #pick{padding:0 10px} }
+  @media (max-width:430px){ .hint{display:none} #send{margin-left:auto} .pick-label{display:none} #pick,#pickDir{padding:0 10px} }
 
   /* 发送对象选择 */
   .to-chip{
@@ -2637,12 +2637,17 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
           <span class="pick-label">文件 / 图片</span>
         </button>
+        <button class="btn ghost" id="pickDir" title="选择整个文件夹（含子目录）">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+          <span class="pick-label">文件夹</span>
+        </button>
         <input type="file" id="file" multiple hidden>
+        <input type="file" id="dir" webkitdirectory directory multiple hidden>
         <button class="btn ghost" id="clearAll" type="button" hidden title="清空输入区（可撤销）">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
           <span class="pick-label">清空</span>
         </button>
-        <span class="hint" id="hint">拖拽文件到页面 · 可直接粘贴截图</span>
+        <span class="hint" id="hint">拖拽文件 / 文件夹到页面 · 可直接粘贴截图</span>
         <span class="len-chip" id="lenChip" hidden></span>
         <button class="btn primary" id="send" disabled>发送</button>
       </div>
@@ -2842,6 +2847,7 @@
   /* ============================================================ 小工具 */
   var $ = function (id) { return document.getElementById(id); };
   var feed = $('feed'), sendBtn = $('send'), fileInput = $('file');
+  var dirInput = $('dir'), pickDirBtn = $('pickDir');
   var pickBtn = $('pick'), countEl = $('count'), peerRow = $('peerRow'), peerCountEl = $('peerCount');
   var peersBtn = $('peersBtn'), peersPop = $('peersPop'), pstack = $('pstack');
   var mdBtn = $('mdBtn'), mdBusy = false;
@@ -4326,6 +4332,7 @@
       if (b.type === 'text') b.el.disabled = !textOK;
     });
     pickBtn.disabled = !attachOK;
+    if (pickDirBtn) pickDirBtn.disabled = !attachOK;
 
     var tools = $('mtools');
     if (tools) {
@@ -7477,9 +7484,48 @@
     else blocksEl.appendChild(b.el);
   }
 
-  function addFiles(files) {
+  // 一次进输入区的附件上限：服务端暂存区上限 120（MAX_STAGED），留余量避免整批上传后半截 429
+  var MAX_ADD_FILES = 100;
+
+  /* 递归展开拖进来的文件夹：webkitGetAsEntry 拿到目录项，逐层 readEntries 读出文件和子目录。
+     readEntries 每次最多返回 100 条，要循环读到空为止；整个流程是异步回调。
+     产出 [{ file: File, path: '文件夹/子目录/文件名' }]，空目录自然不产出。 */
+  function readDirEntry(entry, prefix, out, done) {
+    if (entry.isFile) {
+      entry.file(function (f) {
+        out.push({ file: f, path: prefix + (f.name || entry.name) });
+        done();
+      }, done);
+      return;
+    }
+    if (!entry.isDirectory) { done(); return; }
+    var reader = entry.createReader();
+    var children = [];
+    function readBatch() {
+      reader.readEntries(function (entries) {
+        if (!entries.length) {
+          // 这一层读完，递归子项（含更深的子目录）
+          var i = 0;
+          (function next() {
+            if (i >= children.length) { done(); return; }
+            readDirEntry(children[i++], prefix + entry.name + '/', out, next);
+          })();
+          return;
+        }
+        children = children.concat(Array.prototype.slice.call(entries));
+        readBatch();
+      }, done);
+    }
+    readBatch();
+  }
+
+  function addFiles(files, nameOf) {
     files = Array.prototype.slice.call(files || []).filter(Boolean);
     if (!files.length) return;
+    if (files.length > MAX_ADD_FILES) {
+      toast('一次最多添加 ' + MAX_ADD_FILES + ' 个文件，请分批发送');
+      files = files.slice(0, MAX_ADD_FILES);
+    }
 
     // 附件插在「正在写的那一段」后面：那一段是空的就直接顶替它，
     // 已经有内容就新起一段接着写，不会在中间留一块空白。
@@ -7490,16 +7536,19 @@
     var at = anchorEmpty ? base : base + 1;
 
     var added = 0;
-    files.forEach(function (f) {
+    files.forEach(function (f, i) {
       var isImg = /^image\//.test(f.type);
       if (isImg && !canSend('image')) { toast('主设备已关闭图片发送'); return; }
       if (!isImg && !canSend('file')) { toast('主设备已关闭文件发送'); return; }
 
+      // nameOf：文件夹上传时给出带子目录的相对路径，接收端一眼看出来源（下载仍按同名平铺）
+      var nm = (typeof nameOf === 'function' ? nameOf(f, i) : '') || f.name ||
+        ('粘贴图片-' + Date.now() + (isImg ? '.png' : ''));
       var b = {
         type: 'media',
         kind: isImg ? 'image' : 'file',
         file: f,
-        name: f.name || ('粘贴图片-' + Date.now() + (isImg ? '.png' : '')),
+        name: nm,
         size: f.size,
         fid: ''
       };
@@ -10166,6 +10215,14 @@
     fileInput.value = '';
   });
 
+  // 选文件夹：webkitRelativePath 带子目录，作为显示名传给 addFiles
+  pickDirBtn.addEventListener('click', function () { dirInput.click(); });
+  dirInput.addEventListener('change', function () {
+    var fs = Array.prototype.slice.call(dirInput.files || []);
+    if (fs.length) addFiles(fs, function (f) { return f.webkitRelativePath || f.name; });
+    dirInput.value = '';
+  });
+
   clearBtn.addEventListener('click', async function () {
     if (!nodes.size) return toast('已经是空的了');
     var ok = await Dialog.confirm({
@@ -10194,7 +10251,32 @@
   });
   window.addEventListener('drop', function (e) {
     e.preventDefault(); dragDepth = 0; dropEl.classList.remove('on');
-    if (e.dataTransfer && e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
+    var dt = e.dataTransfer;
+    if (!dt) return;
+
+    // 拖的是文件夹时，dataTransfer.files 只有一个占位的目录条目，必须走 entry 递归展开。
+    // 只要 items 里有任意一项能解析出 directory entry，就整批走递归；纯文件维持原路径。
+    var entries = [];
+    var items = dt.items ? Array.prototype.slice.call(dt.items) : [];
+    for (var i = 0; i < items.length; i++) {
+      var en = items[i].webkitGetAsEntry ? items[i].webkitGetAsEntry() : null;
+      if (en) entries.push(en);
+    }
+    var hasDir = entries.some(function (en) { return en.isDirectory; });
+    if (hasDir) {
+      var out = [], pending = entries.length;
+      if (!pending) return;
+      entries.forEach(function (en) {
+        readDirEntry(en, '', out, function () {
+          if (--pending) return;
+          var fs = out.map(function (o) { return o.file; });
+          if (fs.length) addFiles(fs, function (f, i) { return out[i].path; });
+          else toast('这个文件夹是空的');
+        });
+      });
+      return;
+    }
+    if (dt.files.length) addFiles(dt.files);
   });
 
   // 粘贴（文件级别的粘贴由输入块自己处理，这里兜底全页面）
