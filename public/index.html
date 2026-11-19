@@ -353,7 +353,7 @@
   .btn.ghost:disabled{opacity:.45;cursor:not-allowed}
   .btn.danger{background:var(--danger);color:#fff}
   .hint{font-size:12px;color:var(--faint);margin-left:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  @media (max-width:430px){ .hint{display:none} #send{margin-left:auto} .pick-label{display:none} #pick,#pickDir{padding:0 10px} }
+  @media (max-width:430px){ .hint{display:none} #send{margin-left:auto} .pick-label{display:none} #pick{padding:0 10px} }
 
   /* 发送对象选择 */
   .to-chip{
@@ -2365,6 +2365,10 @@
   .fpop-i.on .fpop-ck{opacity:1}
 
   /* 布局切换面板 */
+  /* 添加菜单（文件/图片 or 文件夹） */
+  .fpop.add{width:240px;max-width:calc(100vw - 20px)}
+  .fpop.add .add-ico{width:19px;height:19px;flex:none;color:var(--sub)}
+  .pick-caret{width:13px;height:13px;flex:none;opacity:.7;margin-right:-3px}
   .fpop.layout{width:252px;max-width:calc(100vw - 20px)}
   .fpop.layout .lay-ico{width:19px;height:19px;flex:none;color:var(--sub)}
   .fpop.layout .fpop-i.on .lay-ico{color:currentColor}
@@ -2680,13 +2684,10 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s7-4.5 7-10V6l-7-3-7 3v5c0 5.5 7 10 7 10z"/></svg>
           <span id="toName">所有人</span>
         </button>
-        <button class="btn ghost" id="pick">
+        <button class="btn ghost" id="pick" title="添加文件、图片或文件夹" aria-haspopup="true" aria-expanded="false">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
-          <span class="pick-label">文件 / 图片</span>
-        </button>
-        <button class="btn ghost" id="pickDir" title="选择整个文件夹（含子目录）">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
-          <span class="pick-label">文件夹</span>
+          <span class="pick-label">添加</span>
+          <svg class="pick-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
         </button>
         <input type="file" id="file" multiple hidden>
         <input type="file" id="dir" webkitdirectory directory multiple hidden>
@@ -2764,6 +2765,18 @@
   <div class="fpop" id="senderPop" hidden></div>
   <div class="fpop cal" id="datePop" hidden></div>
   <div class="fpop layout" id="layoutPop" hidden></div>
+  <div class="fpop add" id="pickPop" hidden>
+    <div class="fpop-list" role="menu">
+      <button class="fpop-i" type="button" data-add="file" role="menuitem">
+        <svg class="add-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+        <span class="fpop-nm lay-nm"><b>文件 / 图片</b><small>可多选；也可直接拖到页面里</small></span>
+      </button>
+      <button class="fpop-i" type="button" data-add="dir" role="menuitem">
+        <svg class="add-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+        <span class="fpop-nm lay-nm"><b>文件夹</b><small>整个文件夹，保留子目录</small></span>
+      </button>
+    </div>
+  </div>
 
   <section class="feed" id="feed"></section>
   <button id="toTop" class="to-top" hidden type="button" aria-label="回到顶部" title="回到顶部"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="M6 11l6-6 6 6"/></svg></button>
@@ -2894,7 +2907,7 @@
   /* ============================================================ 小工具 */
   var $ = function (id) { return document.getElementById(id); };
   var feed = $('feed'), sendBtn = $('send'), fileInput = $('file');
-  var dirInput = $('dir'), pickDirBtn = $('pickDir');
+  var dirInput = $('dir');
   var pickBtn = $('pick'), countEl = $('count'), peerRow = $('peerRow'), peerCountEl = $('peerCount');
   var peersBtn = $('peersBtn'), peersPop = $('peersPop'), pstack = $('pstack');
   var mdBtn = $('mdBtn'), mdBusy = false;
@@ -4379,7 +4392,6 @@
       if (b.type === 'text') b.el.disabled = !textOK;
     });
     pickBtn.disabled = !attachOK;
-    if (pickDirBtn) pickDirBtn.disabled = !attachOK;
 
     var tools = $('mtools');
     if (tools) {
@@ -6485,7 +6497,7 @@
   }
 
   /* ---------------- 发送人 / 日期筛选（图标按钮 + 弹出面板） ---------------- */
-  var senderPop = $('senderPop'), datePop = $('datePop'), layoutPop = $('layoutPop');
+  var senderPop = $('senderPop'), datePop = $('datePop'), layoutPop = $('layoutPop'), pickPop = $('pickPop');
   var senderMap = {}, senderCids = [];
   var dateCounts = {}, dateKeys = [], dateMax = '';
   var calY = 0, calM = 0, calReady = false;
@@ -6623,10 +6635,19 @@
     if (senderPop && !senderPop.hidden) senderPop.hidden = true;
     if (datePop && !datePop.hidden) datePop.hidden = true;
     if (layoutPop && !layoutPop.hidden) layoutPop.hidden = true;
-    var sb = $('senderBtn'), db = $('dateBtn'), lb = $('layoutBtn');
+    if (pickPop && !pickPop.hidden) pickPop.hidden = true;
+    var sb = $('senderBtn'), db = $('dateBtn'), lb = $('layoutBtn'), pb = $('pick');
     if (sb) sb.setAttribute('aria-expanded', 'false');
     if (db) db.setAttribute('aria-expanded', 'false');
     if (lb) lb.setAttribute('aria-expanded', 'false');
+    if (pb) pb.setAttribute('aria-expanded', 'false');
+  }
+  function togglePickPop(btn) {
+    if (!pickPop) return;
+    if (!pickPop.hidden) { closePops(); return; }
+    closePops();
+    placePop(pickPop, btn);
+    btn.setAttribute('aria-expanded', 'true');
   }
 
   /* ---------------- 内容布局切换 ---------------- */
@@ -10552,28 +10573,39 @@
 
   // 点面板外部 / Esc / 滚动 / 缩放 → 收起
   document.addEventListener('click', function (e) {
-    if (!senderPop || !datePop || !layoutPop) return;
-    if (senderPop.hidden && datePop.hidden && layoutPop.hidden) return;
-    if (senderPop.contains(e.target) || datePop.contains(e.target) || layoutPop.contains(e.target)) return;
-    if (e.target.closest && (e.target.closest('#senderBtn') || e.target.closest('#dateBtn') || e.target.closest('#layoutBtn'))) return;
+    if (!senderPop || !datePop || !layoutPop || !pickPop) return;
+    if (senderPop.hidden && datePop.hidden && layoutPop.hidden && pickPop.hidden) return;
+    if (senderPop.contains(e.target) || datePop.contains(e.target) || layoutPop.contains(e.target) || pickPop.contains(e.target)) return;
+    if (e.target.closest && (e.target.closest('#senderBtn') || e.target.closest('#dateBtn') || e.target.closest('#layoutBtn') || e.target.closest('#pick'))) return;
     closePops();
   });
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closePops(); });
   window.addEventListener('scroll', function () {
-    if ((senderPop && !senderPop.hidden) || (datePop && !datePop.hidden) || (layoutPop && !layoutPop.hidden)) closePops();
+    if ((senderPop && !senderPop.hidden) || (datePop && !datePop.hidden) || (layoutPop && !layoutPop.hidden) || (pickPop && !pickPop.hidden)) closePops();
   }, { passive: true });
   window.addEventListener('resize', closePops);
 
   sendBtn.addEventListener('click', sendAll);
 
-  pickBtn.addEventListener('click', function () { fileInput.click(); });
+  // 一个「添加」按钮弹出菜单，选文件/图片或文件夹；两个隐藏 input 各自保留原有上传链路
+  pickBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    togglePickPop(pickBtn);
+  });
+  if (pickPop) pickPop.addEventListener('click', function (e) {
+    var item = e.target.closest ? e.target.closest('[data-add]') : null;
+    if (!item) return;
+    closePops();
+    var which = item.getAttribute('data-add');
+    if (which === 'dir') dirInput.click();
+    else fileInput.click();
+  });
   fileInput.addEventListener('change', function () {
     addFiles(fileInput.files);
     fileInput.value = '';
   });
 
   // 选文件夹：整夹只出一个块；子文件用带子目录的相对路径，接收端仍看得出来源
-  pickDirBtn.addEventListener('click', function () { dirInput.click(); });
   dirInput.addEventListener('change', function () {
     var fs = Array.prototype.slice.call(dirInput.files || []);
     if (fs.length) {
