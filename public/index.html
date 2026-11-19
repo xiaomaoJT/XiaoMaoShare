@@ -913,9 +913,6 @@
   .fpv-ttl{font-size:14.5px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .fpv-sub{font-size:12px;color:var(--faint);margin-top:3px}
   .fpv-acts{display:flex;align-items:center;gap:8px;flex:none}
-  /* 按钮内的字和图标不参与命中测试：整颗按钮是唯一命中目标，
-     移到文字/图标上 = 移到按钮上，hover 与 pointer 全按钮统一 */
-  .fpv-acts button > *, .fpv-acts a > *{pointer-events:none}
   .fpv-dl{
     height:32px;padding:0 12px;border-radius:9px;white-space:nowrap;text-decoration:none;
     background:var(--card-2);border:1px solid var(--line);color:var(--sub);
@@ -4699,14 +4696,10 @@
     el.querySelector('.fpv-x').onclick = fpvClose;
     // 「查找」按钮：和 Ctrl/Cmd+F 同一入口
     el.querySelector('.fpv-find').onclick = function () { fpvFindOpen(); };
-    // hover 兜底：桌面壳个别场景下 CSS :hover 不生效，mouseenter 挂 .hov 类保证变色
-    ['.fpv-find', '.fpv-mode', '.fpv-dl', '.fpv-x', '.fpv-fprev', '.fpv-fnext', '.fpv-fclose']
-      .forEach(function (c) {
-        var b = el.querySelector(c);
-        if (!b) return;
-        b.addEventListener('mouseenter', function () { b.classList.add('hov'); });
-        b.addEventListener('mouseleave', function () { b.classList.remove('hov'); });
-      });
+    // 按钮 hover 不走 CSS :hover —— 真机上鼠标移到按钮里的文字/图标上时 :hover 会丢。
+    // 改成几何判定：页面级 mousemove 拿坐标和按钮矩形比，命中就挂 .hov 类。
+    // 命中测试、层级、文字溢出都影响不到它，鼠标在动就一定变色。
+    document.addEventListener('mousemove', fpvHoverMove, true);
     // 查找条事件
     el.querySelector('.fpv-fclose').onclick = fpvFindClose;
     el.querySelector('.fpv-fprev').onclick = function () { fpvFindStep(-1); };
@@ -4719,6 +4712,30 @@
     document.body.appendChild(el);
     fpvEl = el;
     return el;
+  }
+
+  /**
+   * 预览面板按钮 hover：纯几何判定，不用 CSS :hover / mouseenter。
+   * 真机上鼠标移到按钮里的文字、图标上时 :hover 会丢（同一颗按钮，边缘变色、
+   * 字上面不变色），命中测试和层级都靠不住。这里直接拿鼠标坐标和按钮矩形比，
+   * 只要 mousemove 还能收到就一定变色。
+   */
+  function fpvHoverMove(e) {
+    if (!fpvEl || !fpvEl.classList.contains('on')) return;
+    var btns = fpvEl.querySelectorAll('.fpv-find, .fpv-mode, .fpv-dl, .fpv-x, .fpv-fbtn');
+    var hit = null;
+    for (var i = 0; i < btns.length; i++) {
+      var b = btns[i];
+      if (b.hidden) continue;
+      var r = b.getBoundingClientRect();
+      if (r.width < 1 || r.height < 1) continue;   // 查找条收起 / 运行按钮隐藏
+      if (e.clientX >= r.left && e.clientX <= r.right &&
+          e.clientY >= r.top && e.clientY <= r.bottom) { hit = b; break; }
+    }
+    for (var j = 0; j < btns.length; j++) {
+      var on = btns[j] === hit;
+      if (btns[j].classList.contains('hov') !== on) btns[j].classList.toggle('hov', on);
+    }
   }
 
   /** 释放运行视图：先把 iframe 空页化再移除 —— 只藏弹层不清 body 的话，
@@ -4736,6 +4753,9 @@
   function fpvClose() {
     if (!fpvEl) return;
     fpvEl.classList.remove('on');
+    // 关掉时把几何 hover 留下的 .hov 清干净，下次打开不会是「预亮」状态
+    var hs = fpvEl.querySelectorAll('.hov');
+    for (var i = 0; i < hs.length; i++) hs[i].classList.remove('hov');
     fpvCur = null;
     fpvState = null;
     fpvClearBody();
