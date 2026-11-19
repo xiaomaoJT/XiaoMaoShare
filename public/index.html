@@ -2443,6 +2443,12 @@
   }
   .winctl .wmenu:hover{color:var(--text);background:var(--fill)}
 
+  /* 自绘标题栏高 34px、z-index:9999 浮在所有弹层之上（红绿灯任何时候都要能点）。
+     图片/文件查看是全屏浮层，顶部控件若不自己让位就会被它压住一半 —— 只在 Win 无边框下补间距。 */
+  html.desktop-win .lb-close{top:calc(50px + env(safe-area-inset-top))}
+  html.desktop-win .fpv{padding:54px 20px 20px}
+  html.desktop-win .fpv-box{max-height:calc(100vh - 74px)}
+
   /* 设备互联面板 */
   .dc{display:flex;flex-direction:column;gap:18px;padding-bottom:2px}
   .dc-sec{display:flex;flex-direction:column;gap:9px}
@@ -5976,6 +5982,21 @@
     ta.addEventListener('input', typed);
     ta.addEventListener('keydown', function (e) {
       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); submit(); }
+    });
+    // 粘贴文件/图片要进这条补充说明自己，而不是被 document 的全局监听抢走加到顶部主输入框。
+    // 只拦含文件的粘贴，纯文本仍走浏览器默认行为。
+    ta.addEventListener('paste', function (e) {
+      if (!e.clipboardData) return;
+      var files = Array.prototype.slice.call(e.clipboardData.files || []);
+      if (!files.length) return;               // 纯文本：放行
+      e.preventDefault();
+      e.stopPropagation();                     // 别让 document 的全局 paste 再处理一次
+      files.forEach(function (f, i) {
+        if (!f.name) {
+          try { f = new File([f], '粘贴图片-' + Date.now() + (i ? i : '') + '.png', { type: f.type || 'image/png' }); } catch (err) {}
+        }
+        addFiles([f]);
+      });
     });
 
     var toggle = document.createElement('button');
