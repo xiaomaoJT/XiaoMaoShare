@@ -883,7 +883,12 @@
   .mf-nm{font-size:calc(13.5px * var(--tfs));font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .mf-sub{display:flex;align-items:center;gap:8px;min-width:0}
   .mf-meta{font-size:11.5px;color:var(--faint);white-space:nowrap;font-variant-numeric:tabular-nums;min-width:0;overflow:hidden;text-overflow:ellipsis}
-  .mf-tog{font-size:11.5px;color:var(--accent);white-space:nowrap;flex:none}
+  .mf-tog{font-size:11.5px;color:var(--sub);white-space:nowrap;flex:none}
+  .mf-foot-tog{
+    display:block;width:100%;margin-top:6px;padding:7px 0;border:0;border-top:1px solid var(--line-soft);
+    background:transparent;color:var(--sub);font-size:11.5px;cursor:pointer;
+  }
+  .mf-foot-tog:hover{color:var(--text)}
   .mf-kids{padding:2px 8px 8px;border-top:1px solid var(--line)}
   .mf-kids[hidden]{display:none}
   .mf-kids .file{padding-left:0;padding-right:0}
@@ -931,6 +936,52 @@
   .fpv-err{font-size:13.5px;font-weight:600;color:var(--danger)}
   .fpv-errtip{margin-top:8px;font-size:12.5px;line-height:1.7;color:var(--faint)}
   .fpv-more{margin-top:10px;font-size:12px;color:var(--faint)}
+
+  /* ---- 代码预览：语法高亮配色 ---- */
+  :root{
+    --c-kw:#d73a49; --c-str:#0a3069; --c-com:#6a737d; --c-num:#0550ae; --c-tag:#116329; --c-attr:#953800;
+  }
+  :root[data-theme="dark"]{
+    --c-kw:#ff7b72; --c-str:#a5d6ff; --c-com:#8b949e; --c-num:#79c0ff; --c-tag:#7ee787; --c-attr:#ffa657;
+  }
+  .tok-kw{color:var(--c-kw);font-weight:600}
+  .tok-str{color:var(--c-str)}
+  .tok-com{color:var(--c-com);font-style:italic}
+  .tok-num{color:var(--c-num)}
+  .tok-tag{color:var(--c-tag);font-weight:600}
+  .tok-attr{color:var(--c-attr)}
+  .fpv-hit{background:#ffe08a;color:inherit;border-radius:2px;padding:0 1px}
+  .fpv-hit.on{background:#ff9f1c;color:#fff}
+  :root[data-theme="dark"] .fpv-hit{background:#7a6420}
+  :root[data-theme="dark"] .fpv-hit.on{background:#d29922;color:#fff}
+
+  /* ---- 预览面板：查找条 / 运行切换 ---- */
+  .fpv-findbar{
+    display:none;align-items:center;gap:6px;padding:8px 12px;flex:none;
+    border-bottom:1px solid var(--line);background:var(--card-2);
+  }
+  .fpv-findbar.on{display:flex}
+  .fpv-findbar input{
+    flex:1;min-width:0;height:30px;padding:0 10px;border:1px solid var(--line);border-radius:8px;
+    background:var(--card);color:var(--text);font-size:13px;font-family:inherit;outline:none;
+  }
+  .fpv-findbar input:focus{border-color:var(--accent)}
+  .fpv-fc{font-size:11.5px;color:var(--faint);white-space:nowrap;min-width:48px;text-align:center;font-variant-numeric:tabular-nums}
+  .fpv-fbtn{
+    height:30px;min-width:30px;padding:0 7px;border:1px solid var(--line);border-radius:8px;
+    background:var(--card);color:var(--sub);font-size:13px;cursor:pointer;
+  }
+  .fpv-fbtn:hover{background:var(--accent);border-color:var(--accent);color:#fff}
+  .fpv-mode{
+    height:32px;padding:0 11px;border-radius:9px;border:1px solid var(--line);background:var(--card-2);
+    color:var(--sub);font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;
+  }
+  .fpv-mode:hover{background:var(--accent);border-color:var(--accent);color:#fff}
+  .fpv-frame{width:100%;height:100%;min-height:300px;border:0;background:#fff;display:block}
+
+  /* 大文件降级提示 */
+  .fpv-degrade{margin:0 0 10px;font-size:12px;color:var(--faint)}
+
   .fpv-table{border-collapse:collapse;font-size:12.5px;white-space:nowrap}
   .fpv-table th,.fpv-table td{border:1px solid var(--line);padding:6px 10px;text-align:left}
   .fpv-table th{background:var(--card-2);font-weight:650;position:sticky;top:0;z-index:1}
@@ -4591,6 +4642,7 @@
   }
 
   var fpvEl = null, fpvCur = null;
+  var fpvState = null;   // 当前预览的文本 / 高亮 span / 查找命中，供查找条复用
 
   function fpvBuild() {
     var el = document.createElement('div');
@@ -4600,17 +4652,43 @@
         '<div class="fpv-head">' +
           '<div class="fpv-meta"><div class="fpv-ttl"></div><div class="fpv-sub"></div></div>' +
           '<div class="fpv-acts">' +
+            '<button type="button" class="fpv-mode" hidden></button>' +
             '<a class="fpv-dl" download>' + IDL + '<span>下载</span></a>' +
             '<button type="button" class="fpv-x" aria-label="关闭预览">✕</button>' +
           '</div>' +
+        '</div>' +
+        '<div class="fpv-findbar">' +
+          '<input type="text" class="fpv-find-i" placeholder="查找内容…" aria-label="查找内容">' +
+          '<span class="fpv-fc"></span>' +
+          '<button type="button" class="fpv-fbtn fpv-fprev" title="上一个">↑</button>' +
+          '<button type="button" class="fpv-fbtn fpv-fnext" title="下一个">↓</button>' +
+          '<button type="button" class="fpv-fbtn fpv-fclose" title="关闭查找">✕</button>' +
         '</div>' +
         '<div class="fpv-body"></div>' +
       '</div>';
     el.addEventListener('click', function (e) { if (e.target === el) fpvClose(); });
     document.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape' && el.classList.contains('on')) fpvClose();
+      if (!el.classList.contains('on')) return;
+      if (e.key === 'Escape') {
+        // 查找条开着时，Esc 先关查找；否则关预览
+        var fb = el.querySelector('.fpv-findbar');
+        if (fb.classList.contains('on')) { fpvFindClose(); return; }
+        fpvClose();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
+        // 代码视图里接管 Ctrl/Cmd+F，做面板内查找
+        if (fpvState && fpvState.searchable) { e.preventDefault(); fpvFindOpen(); }
+      }
     });
     el.querySelector('.fpv-x').onclick = fpvClose;
+    // 查找条事件
+    el.querySelector('.fpv-fclose').onclick = fpvFindClose;
+    el.querySelector('.fpv-fprev').onclick = function () { fpvFindStep(-1); };
+    el.querySelector('.fpv-fnext').onclick = function () { fpvFindStep(1); };
+    var findInput = el.querySelector('.fpv-find-i');
+    findInput.addEventListener('input', function () { fpvFindRun(findInput.value); });
+    findInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); fpvFindStep(e.shiftKey ? -1 : 1); }
+    });
     document.body.appendChild(el);
     fpvEl = el;
     return el;
@@ -4620,6 +4698,187 @@
     if (!fpvEl) return;
     fpvEl.classList.remove('on');
     fpvCur = null;
+    fpvState = null;
+  }
+
+  /* ---------------- 代码语法高亮 ----------------
+     轻量 lexer：把文本切成带类别的段（注释 / 字符串 / 数字 / 关键字 / 标签 / 属性），
+     各段保留原始 [s,e) 偏移 —— 查找命中时按偏移重新切分，高亮和查找就能叠加。
+     不引外部库，纯离线可用；超长文本（>200KB）跳过高亮，只保留纯文本 + 查找。 */
+  var CODE_KEYWORDS = ('const let var function return if else for while do break continue new class extends ' +
+    'import export from as default async await try catch finally throw typeof instanceof in of delete void ' +
+    'this super static get set yield switch case null undefined true false NaN ' +
+    'def elif pass raise lambda with global nonlocal assert del is not and or print self None True False ' +
+    'package public private protected interface implements enum struct typedef namespace using template ' +
+    'func go defer select chan map range var type nil foreach echo include require use trait ' +
+    'select insert update delete create table from where join on group by order having limit ' +
+    'BEGIN END IF THEN ELSE FI DO DONE ESAC local declare readonly function').split(/\s+/);
+
+  function codeLang(ext) {
+    var e = String(ext || '').toLowerCase();
+    if (/^(html|htm|vue|svelte|astro|xml|svg)$/.test(e)) return 'markup';
+    if (/^(js|mjs|cjs|jsx|ts|tsx|mts|cts)$/.test(e)) return 'js';
+    if (/^(css|scss|sass|less|styl)$/.test(e)) return 'css';
+    if (/^(py|pyw|rb|sh|bash|zsh|fish|pl|lua|r|jl|php)$/.test(e)) return 'script';
+    if (/^(json|jsonc)$/.test(e)) return 'json';
+    return 'plain';
+  }
+
+  /** 返回 [{s,e,cls}]，cls 为空表示普通文本 */
+  function tokenizeCode(text, lang) {
+    var out = [], n = text.length;
+    if (lang === 'plain' || n > 200000) return [{ s: 0, e: n, cls: '' }];
+    var i = 0;
+    function isKw(w) { return CODE_KEYWORDS.indexOf(w) >= 0; }
+    function push(s, e, cls) { if (e > s) out.push({ s: s, e: e, cls: cls || '' }); }
+    while (i < n) {
+      var c = text[i], s = i, cls = '';
+
+      // 注释：// … 、/* … */ 、<!-- … --> 、# …（脚本）
+      if (c === '/' && text[i + 1] === '/') {
+        i = text.indexOf('\n', i); if (i < 0) i = n; cls = 'tok-com';
+      } else if (c === '/' && text[i + 1] === '*') {
+        i = text.indexOf('*/', i + 2); i = i < 0 ? n : i + 2; cls = 'tok-com';
+      } else if (text.substr(i, 4) === '<!--') {
+        i = text.indexOf('-->', i + 4); i = i < 0 ? n : i + 3; cls = 'tok-com';
+      } else if (c === '#' && (lang === 'script' || lang === 'css')) {
+        // css 里的 # 是 id 选择器，别当注释；只有 script 才算
+        if (lang === 'script') { i = text.indexOf('\n', i); if (i < 0) i = n; cls = 'tok-com'; }
+        else { i++; }
+      }
+      // 字符串：' " ` （含转义）
+      else if (c === '"' || c === "'" || c === '`') {
+        var q = c; i++;
+        while (i < n) {
+          if (text[i] === '\\') { i += 2; continue; }
+          if (text[i] === q) { i++; break; }
+          i++;
+        }
+        cls = 'tok-str';
+      }
+      // 数字
+      else if (c >= '0' && c <= '9') {
+        while (i < n && /[0-9a-fA-FxX._]/.test(text[i])) i++;
+        cls = 'tok-num';
+      }
+      // 单词：关键字 / 标签 / 属性
+      else if (/[A-Za-z_$@]/.test(c)) {
+        while (i < n && /[\w$-]/.test(text[i])) i++;
+        var word = text.slice(s, i);
+        if (isKw(word)) cls = 'tok-kw';
+        else if (lang === 'markup' && text[s - 1] === '<') cls = 'tok-tag';
+        // 标签内、形如 xxx= 的当属性名
+        else if (lang === 'markup' && text[i] === '=') cls = 'tok-attr';
+      }
+      // 尖括号后跟字母：标签名（补齐上面从 '<' 起 token 的情况）
+      else if (c === '<' && /[A-Za-z]/.test(text[i + 1] || '')) {
+        i += 2; while (i < n && /[\w-]/.test(text[i])) i++; cls = 'tok-tag';
+      } else {
+        i++;
+      }
+      push(s, i, cls);
+    }
+    return out;
+  }
+
+  /** 把 text 按 token 段 + 命中区间渲染成 DOM 节点，追加进 parent */
+  function renderHighlighted(parent, text, lang, hits, cur) {
+    var toks = tokenizeCode(text, lang);
+    // 把每个 token 段再按命中边界切开
+    toks.forEach(function (t) {
+      var segs = [{ s: t.s, e: t.e, hit: -1, cls: t.cls }];
+      (hits || []).forEach(function (h, hi) {
+        var hs = h[0], he = h[1];
+        if (he <= t.s || hs >= t.e) return;
+        var next = [];
+        segs.forEach(function (g) {
+          if (he <= g.s || hs >= g.e) { next.push(g); return; }
+          if (hs > g.s) next.push({ s: g.s, e: hs, hit: -1, cls: g.cls });
+          next.push({ s: Math.max(g.s, hs), e: Math.min(g.e, he), hit: hi, cls: g.cls });
+          if (he < g.e) next.push({ s: he, e: g.e, hit: -1, cls: g.cls });
+        });
+        segs = next;
+      });
+      segs.forEach(function (g) {
+        var str = text.slice(g.s, g.e);
+        if (!str) return;
+        var node;
+        if (g.hit >= 0) {
+          node = document.createElement('mark');
+          node.className = 'fpv-hit' + (g.hit === cur ? ' on' : '');
+          node.dataset.hit = g.hit;
+        } else if (g.cls) {
+          node = document.createElement('span');
+          node.className = g.cls;
+        }
+        if (node) { node.textContent = str; parent.appendChild(node); }
+        else parent.appendChild(document.createTextNode(str));
+      });
+    });
+  }
+
+  /** 计算命中区间 [[s,e],…]，大小写不敏感 */
+  function fpvFindHits(text, q) {
+    var out = [];
+    if (!q) return out;
+    var low = text.toLowerCase(), lq = q.toLowerCase(), from = 0, at;
+    while ((at = low.indexOf(lq, from)) >= 0) {
+      out.push([at, at + q.length]);
+      from = at + Math.max(1, q.length);
+      if (out.length > 9999) break;
+    }
+    return out;
+  }
+
+  function fpvFindOpen() {
+    if (!fpvEl || !fpvState || !fpvState.searchable) return;
+    fpvEl.querySelector('.fpv-findbar').classList.add('on');
+    var inp = fpvEl.querySelector('.fpv-find-i');
+    inp.focus(); inp.select();
+  }
+  function fpvFindClose() {
+    if (!fpvEl) return;
+    fpvEl.querySelector('.fpv-findbar').classList.remove('on');
+    fpvEl.querySelector('.fpv-find-i').value = '';
+    if (fpvState) { fpvState.hits = []; fpvState.cur = -1; fpvState.query = ''; }
+    fpvFindRedraw();
+    fpvFindCount();
+  }
+  function fpvFindCount() {
+    if (!fpvEl || !fpvState) return;
+    var el = fpvEl.querySelector('.fpv-fc');
+    var n = fpvState.hits.length;
+    el.textContent = fpvState.query ? ((n ? fpvState.cur + 1 : 0) + ' / ' + n) : '';
+  }
+  /** 用当前 query / cur 重绘代码区（保留高亮） */
+  function fpvFindRedraw() {
+    if (!fpvEl || !fpvState) return;
+    var st = fpvState;
+    if (st.mode === 'run') return;               // 运行视图不重绘代码
+    var pre = fpvEl.querySelector('.fpv-pre');
+    if (!pre) return;
+    pre.innerHTML = '';
+    renderHighlighted(pre, st.text, st.lang, st.hits, st.cur);
+  }
+  function fpvFindRun(q) {
+    if (!fpvState) return;
+    fpvState.query = q || '';
+    fpvState.hits = fpvFindHits(fpvState.text, fpvState.query);
+    fpvState.cur = fpvState.hits.length ? 0 : -1;
+    fpvFindRedraw();
+    fpvFindCount();
+    fpvFindScroll();
+  }
+  function fpvFindStep(dir) {
+    var st = fpvState;
+    if (!st || !st.hits.length) return;
+    st.cur = (st.cur + dir + st.hits.length) % st.hits.length;
+    fpvFindRedraw(); fpvFindCount(); fpvFindScroll();
+  }
+  function fpvFindScroll() {
+    if (!fpvEl || !fpvState || fpvState.cur < 0) return;
+    var node = fpvEl.querySelector('.fpv-hit.on');
+    if (node && node.scrollIntoView) node.scrollIntoView({ block: 'center' });
   }
 
   /** CSV / TSV：按行切，能还原成表格就不当纯文本看 */
@@ -4677,9 +4936,28 @@
     return wrap;
   }
 
+  /** HTML 运行预览：iframe 沙箱里跑，禁脚本外的能力，防止本地文件被读 */
+  function fpvRunHtml(raw) {
+    var frame = document.createElement('iframe');
+    frame.className = 'fpv-frame';
+    frame.setAttribute('sandbox', 'allow-scripts');
+    frame.setAttribute('title', 'HTML 运行预览');
+    // srcdoc 用属性赋值，避免把内容拼进 outerHTML 引发注入
+    frame.srcdoc = raw;
+    return frame;
+  }
+
   function fpvRender(p, d) {
     var body = fpvEl.querySelector('.fpv-body');
     body.innerHTML = '';
+    // 切换视图时把查找状态清干净
+    fpvEl.querySelector('.fpv-findbar').classList.remove('on');
+    fpvEl.querySelector('.fpv-find-i').value = '';
+    fpvEl.querySelector('.fpv-fc').textContent = '';
+    var modeBtn = fpvEl.querySelector('.fpv-mode');
+    modeBtn.hidden = true;
+    fpvState = null;
+
     var ext = String(d.ext || '').toLowerCase();
     var text = String(d.text || '');
 
@@ -4691,7 +4969,7 @@
       body.appendChild(art);
       return;
     }
-    // CSV / TSV：表格比一屏逗号好读
+    // CSV / TSV：表格比一屏逗号好读（表格不支持面板内查找）
     if (ext === 'csv' || ext === 'tsv') {
       var tb = csvToTable(text, ext === 'tsv' ? '\t' : ',');
       if (tb) { body.appendChild(tb); return; }
@@ -4700,13 +4978,55 @@
     if (ext === 'json' || ext === 'jsonc') {
       try { text = JSON.stringify(JSON.parse(text), null, 2); } catch (e) { /* 原样显示 */ }
     }
-    var pre = document.createElement('pre');
-    pre.className = 'fpv-pre';
-    pre.textContent = text;
+
+    var lang = codeLang(ext);
+    var isHtml = ext === 'html' || ext === 'htm';
     var wrap = document.createElement('div');
     wrap.className = 'fpv-scroll';
+    var pre = document.createElement('pre');
+    pre.className = 'fpv-pre';
+    renderHighlighted(pre, text, lang, [], -1);
+    if (text.length > 200000) {
+      var deg = document.createElement('div');
+      deg.className = 'fpv-degrade';
+      deg.textContent = '内容较大，已跳过高亮着色（查找仍可用）';
+      wrap.appendChild(deg);
+    }
     wrap.appendChild(pre);
     body.appendChild(wrap);
+
+    fpvState = {
+      text: text, lang: lang, ext: ext, mode: 'code',
+      searchable: true, hits: [], cur: -1, query: '',
+      rawHtml: isHtml ? text : ''
+    };
+
+    // HTML：加「运行 / 代码」切换，默认看代码
+    if (isHtml) {
+      modeBtn.hidden = false;
+      modeBtn.textContent = '运行';
+      modeBtn.onclick = function () {
+        if (!fpvState) return;
+        var running = fpvState.mode === 'run';
+        fpvState.mode = running ? 'code' : 'run';
+        modeBtn.textContent = running ? '运行' : '代码';
+        var b = fpvEl.querySelector('.fpv-body');
+        b.innerHTML = '';
+        if (fpvState.mode === 'run') {
+          // 运行视图关掉查找
+          fpvEl.querySelector('.fpv-findbar').classList.remove('on');
+          b.appendChild(fpvRunHtml(fpvState.rawHtml));
+        } else {
+          var w = document.createElement('div');
+          w.className = 'fpv-scroll';
+          var p2 = document.createElement('pre');
+          p2.className = 'fpv-pre';
+          fpvState.hits = []; fpvState.cur = -1; fpvState.query = '';
+          renderHighlighted(p2, fpvState.text, fpvState.lang, [], -1);
+          w.appendChild(p2); b.appendChild(w);
+        }
+      };
+    }
   }
 
   function openFilePreview(p) {
@@ -4726,6 +5046,10 @@
     dl.setAttribute('download', p.name || 'file');
     var body = el.querySelector('.fpv-body');
     body.innerHTML = '<div class="fpv-load"><div class="spin"></div></div>';
+    el.querySelector('.fpv-findbar').classList.remove('on');
+    el.querySelector('.fpv-find-i').value = '';
+    el.querySelector('.fpv-mode').hidden = true;
+    fpvState = null;
     el.classList.add('on');
     fpvCur = p.fid;
 
@@ -5302,17 +5626,24 @@
       var kids = document.createElement('div');
       kids.className = 'mf-kids';
       var key = String(it.id || '') + '|' + dir;
+      // 展开项可能很长，滚到底部也要能收起 —— 在末尾放一个收起入口
+      var foot = document.createElement('button');
+      foot.type = 'button';
+      foot.className = 'mf-foot-tog';
+      foot.textContent = '收起文件夹';
       function paint() {
         kids.hidden = !openMap[key];
         head.querySelector('.mf-tog').textContent = kids.hidden ? '展开' : '收起';
       }
-      head.onclick = function (e) {
-        e.stopPropagation();
+      function toggle() {
         openMap[key] = !openMap[key];
         try { sessionStorage.setItem(FOLDER_OPEN_KEY, JSON.stringify(openMap)); } catch (err) {}
         paint();
-      };
+      }
+      head.onclick = function (e) { e.stopPropagation(); toggle(); };
+      foot.onclick = function (e) { e.stopPropagation(); toggle(); };
       grp.forEach(function (p) { kids.appendChild(fileRow(it, p)); });
+      kids.appendChild(foot);
       paint();
       wrap.appendChild(bar);
       wrap.appendChild(kids);
@@ -6040,14 +6371,16 @@
       });
     }
 
-    function addFiles(files) {
-      files.forEach(function (f) {
+    function addFiles(files, nameOf) {
+      files.forEach(function (f, i) {
         if (!f || !f.size) { toast('空文件无法添加'); return; }
         var isImg = /^image\//.test(f.type);
         if (isImg && !canSend('image')) { toast('主设备已关闭图片发送'); return; }
         if (!isImg && !canSend('file')) { toast('主设备已关闭文件发送'); return; }
 
-        var item = { kind: isImg ? 'image' : 'file', name: f.name || ('图片-' + Date.now() + '.png'), size: f.size, part: null, thumb: null };
+        // nameOf：粘贴/选择文件夹时给出带子目录的相对路径，接收端看得出来源
+        var nm = (typeof nameOf === 'function' ? nameOf(f, i) : '') || f.name || ('图片-' + Date.now() + '.png');
+        var item = { kind: isImg ? 'image' : 'file', name: nm, size: f.size, part: null, thumb: null };
         pending.push(item);
 
         var chip = document.createElement('span');
@@ -6155,10 +6488,35 @@
     // 只拦含文件的粘贴，纯文本仍走浏览器默认行为。
     ta.addEventListener('paste', function (e) {
       if (!e.clipboardData) return;
-      var files = Array.prototype.slice.call(e.clipboardData.files || []);
+      var dt = e.clipboardData;
+      var files = Array.prototype.slice.call(dt.files || []);
       if (!files.length) return;               // 纯文本：放行
       e.preventDefault();
       e.stopPropagation();                     // 别让 document 的全局 paste 再处理一次
+
+      // 文件夹在 clipboardData.files 里是一个 size=0 的占位项，按「空文件」提示是错的。
+      // 从 items 里取 directory entry 递归展开成真实文件，跟主输入框的拖拽文件夹走同一套。
+      var entries = [];
+      var items = dt.items ? Array.prototype.slice.call(dt.items) : [];
+      for (var k = 0; k < items.length; k++) {
+        if (items[k].kind !== 'file' || !items[k].webkitGetAsEntry) continue;
+        var en = items[k].webkitGetAsEntry();
+        if (en) entries.push(en);
+      }
+      if (entries.some(function (en) { return en.isDirectory; })) {
+        var out = [], pending = entries.length;
+        entries.forEach(function (en) {
+          readDirEntry(en, '', out, function () {
+            if (--pending) return;
+            if (!out.length) { toast('这个文件夹是空的'); return; }
+            var fs = out.map(function (o) { return o.file; });
+            if (fs.length > 500) { toast('文件夹里的文件太多，先选一部分补充'); fs = fs.slice(0, 500); }
+            addFiles(fs, function (f, i) { return out[i].path; });
+          });
+        });
+        return;
+      }
+
       files.forEach(function (f, i) {
         if (!f.name) {
           try { f = new File([f], '粘贴图片-' + Date.now() + (i ? i : '') + '.png', { type: f.type || 'image/png' }); } catch (err) {}

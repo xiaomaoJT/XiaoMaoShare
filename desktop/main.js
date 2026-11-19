@@ -3215,6 +3215,25 @@ function ballLocalCopy(t, it) {
   return fs.existsSync(p) ? p : '';
 }
 
+/**
+ * 一次文件夹发送的特征：所有文件都带同一个顶层目录前缀（如 locales/af.pak、locales/img/bg.png）。
+ * 跟主信息流的分组规则一致 —— 只要有一个文件不带目录、或顶层目录不一致，就不当成文件夹。
+ * 返回顶层目录名；不是文件夹就返回空串。
+ */
+function ballTopDir(files) {
+  if (!files.length) return '';
+  var dir = '';
+  for (var i = 0; i < files.length; i++) {
+    var nm = String((files[i] && files[i].name) || '');
+    var s = nm.indexOf('/');
+    if (s <= 0) return '';
+    var d = nm.slice(0, s);
+    if (!dir) dir = d;
+    else if (dir !== d) return '';
+  }
+  return dir;
+}
+
 /** 列表里一行要展示的东西：类型、标题、组成、以及能不能定位 / 打开位置 */
 function ballItemView(t, it) {
   const parts = Array.isArray(it.parts) && it.parts.length
@@ -3230,7 +3249,12 @@ function ballItemView(t, it) {
 
   let title;
   let kind;
-  if (pick && docs.length) {
+  // 文件夹发送：所有文件共享同一个顶层目录，直接标成文件夹，别显示「xxx 等 55 个」
+  const topDir = ballTopDir(files);
+  if (topDir) {
+    title = topDir + ' 文件夹';
+    kind = 'folder';
+  } else if (pick && docs.length) {
     title = pick.name || '文件';
     if (docs.length > 1) title += ' 等 ' + docs.length + ' 个';
     kind = 'file';
@@ -3242,17 +3266,20 @@ function ballItemView(t, it) {
     title = snippet.slice(0, 120) || '（空内容）';
     kind = 'text';
   }
-  if (pick && snippet && (texts.length || parts.length > 1)) kind = 'mixed';
+  if (kind !== 'folder' && pick && snippet && (texts.length || parts.length > 1)) kind = 'mixed';
 
-  // 类型头像：文字用「文」，文件用后缀（PDF / PNG / MP4…）
-  const tk = pick
-    ? fileType.of(pick.name, pick.mime || pick.type)
-    : { key: 'text', label: '文' };
+  // 类型头像：文字用「文」，文件用后缀（PDF / PNG / MP4…），文件夹用「夹」
+  const tk = kind === 'folder'
+    ? { key: 'dir', label: '夹' }
+    : (pick ? fileType.of(pick.name, pick.mime || pick.type) : { key: 'text', label: '文' });
 
   const comp = [];
   if (texts.length) comp.push('文字');
-  if (imgs.length) comp.push(imgs.length + ' 张图片');
-  if (docs.length) comp.push(docs.length + ' 个文件');
+  if (kind === 'folder') comp.push(files.length + ' 个文件 · 文件夹');
+  else {
+    if (imgs.length) comp.push(imgs.length + ' 张图片');
+    if (docs.length) comp.push(docs.length + ' 个文件');
+  }
 
   return {
     id: it.id,
