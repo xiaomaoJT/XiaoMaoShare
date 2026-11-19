@@ -915,7 +915,7 @@
   .fpv-acts{display:flex;align-items:center;gap:8px;flex:none}
   .fpv-dl{
     height:32px;padding:0 12px;border-radius:9px;white-space:nowrap;text-decoration:none;
-    background:var(--card-2);border:1px solid var(--line);color:var(--sub);
+    background:var(--card-2);border:1px solid var(--line);color:var(--sub);cursor:pointer;
     font-size:12.5px;font-weight:600;display:inline-flex;align-items:center;gap:5px;transition:.15s;
   }
   .fpv-dl:hover{background:var(--accent);border-color:var(--accent);color:#fff}
@@ -925,7 +925,9 @@
     color:var(--sub);font-size:13px;cursor:pointer;display:grid;place-items:center;transition:.15s;
   }
   .fpv-x:hover{background:var(--danger);border-color:var(--danger);color:#fff}
-  .fpv-body{flex:1;min-height:0;overflow:auto;background:var(--card)}
+  /* 内容区单独 containment：里面可能是一整个几万行的高亮 <pre>，
+     不隔离的话头部按钮一变样式，整块代码都要跟着参与重算 —— 鼠标划过就卡 */
+  .fpv-body{flex:1;min-height:0;overflow:auto;background:var(--card);contain:layout paint}
   /* 只让 .fpv-body 一个滚动容器：此前 .fpv-scroll 自带 overflow，横向滚动条
      落在整个文件末尾，要滚到底才看得到。现在横竖滚动条都钉在窗口底边 */
   .fpv-scroll{padding:14px 16px}
@@ -2507,6 +2509,17 @@
   html.desktop .top button,
   html.desktop .top a,
   html.desktop .top .mark{-webkit-app-region:no-drag}
+  /* 预览弹层开着时，顶栏不再是拖拽区：弹层标题栏就压在窗口最上面那条，
+     留着 drag 的话鼠标划到预览头部会被系统当成「拖窗口」，页面根本收不到
+     mousemove —— 表现就是按钮高亮不跟手、光标也不变手型。
+     同一条里顺手关掉顶栏毛玻璃：它被弹层的暗色蒙版盖着，看不出区别，
+     但每帧都要多算一次全宽模糊，弹层里划鼠标就跟着一顿。
+     （Windows 的自绘标题栏 .winctl 不在此列：它压在弹层之上、还要能拖窗口） */
+  html.fpv-open .top{
+    -webkit-app-region:no-drag;
+    -webkit-backdrop-filter:none;backdrop-filter:none;
+    background:var(--header);
+  }
   /* macOS 的红绿灯压在左上角，窄窗口时别让 logo 被盖住 */
   html.desktop-mac .top-in{padding-left:82px}
   /* Windows 无边框：红绿灯 + ⋯ 独占最上面一条标题栏行，header 从它下面开始 */
@@ -3562,9 +3575,9 @@
         b.onclick = function () { api.winAction(act); };
         return b;
       }
-      bar.appendChild(dot('close', '关闭窗口', 'close'));
-      bar.appendChild(dot('min', '最小化', 'min'));
-      var max = dot('max', '最大化', 'max');
+      bar.appendChild(dot('close', '关闭窗口 (Ctrl+W)', 'close'));
+      bar.appendChild(dot('min', '最小化 (Ctrl+M)', 'min'));
+      var max = dot('max', '最大化 (Ctrl+Shift+M)', 'max');
       bar.appendChild(max);
       var menu = document.createElement('button');
       menu.type = 'button';
@@ -3578,7 +3591,7 @@
       // 最大化状态由主进程推（双击/Win+方向键/贴靠这几种页面收不到事件）
       if (api.onWinState) api.onWinState(function (st) {
         var m = !!(st && st.maximized);
-        max.title = m ? '还原' : '最大化';
+        max.title = m ? '还原 (Ctrl+Shift+M)' : '最大化 (Ctrl+Shift+M)';
         bar.classList.toggle('maxed', m);
       });
       // 失焦时红绿灯变灰、隐藏字形，跟 macOS 一致
@@ -4699,7 +4712,16 @@
     // 按钮 hover 不走 CSS :hover —— 真机上鼠标移到按钮里的文字/图标上时 :hover 会丢。
     // 改成几何判定：页面级 mousemove 拿坐标和按钮矩形比，命中就挂 .hov 类。
     // 命中测试、层级、文字溢出都影响不到它，鼠标在动就一定变色。
+    // 按帧节流（mousemove 一秒能来上百个，每个都量一遍矩形会拖慢整页，
+    // 表现为「从一个按钮移到另一个，高亮要等一下才跟过来」）
     document.addEventListener('mousemove', fpvHoverMove, true);
+    // 鼠标移出窗口时 mousemove 就断了，高亮会留在原地 —— 补一个离场清理。
+    // 必须认「relatedTarget 为空」才是真的离开文档：mouseleave 带 capture 监听
+    // 会在每个子元素的 leave 上触发，等于鼠标一动就清一次，高亮会闪
+    document.addEventListener('mouseout', function (e) {
+      if (!e.relatedTarget) fpvHoverClear();
+    }, true);
+    window.addEventListener('blur', fpvHoverClear);
     // 查找条事件
     el.querySelector('.fpv-fclose').onclick = fpvFindClose;
     el.querySelector('.fpv-fprev').onclick = function () { fpvFindStep(-1); };
@@ -4719,23 +4741,59 @@
    * 真机上鼠标移到按钮里的文字、图标上时 :hover 会丢（同一颗按钮，边缘变色、
    * 字上面不变色），命中测试和层级都靠不住。这里直接拿鼠标坐标和按钮矩形比，
    * 只要 mousemove 还能收到就一定变色。
+   *
+   * 性能：mousemove 一秒能来上百个，每个都 querySelectorAll + 量一圈矩形会
+   * 把主线程占住 —— 真机上就是「从一个按钮移到另一个，高亮要愣一下才跟过来」。
+   * 所以只记坐标，真正的判定压到每帧一次，并且只维护「当前高亮的那一颗」，
+   * 换目标时摘一个、挂一个，不做全量比对。
    */
-  function fpvHoverMove(e) {
-    if (!fpvEl || !fpvEl.classList.contains('on')) return;
+  var fpvHovEl = null;      // 当前挂着 .hov 的按钮
+  var fpvHovRaf = 0;        // 已排队的帧回调
+  var fpvHovTimer = 0;      // 帧回调的兜底：窗口被判定为不可见时 rAF 会被挂起
+  var fpvHovX = -1, fpvHovY = -1;
+
+  function fpvHoverSet(el) {
+    if (fpvHovEl === el) return;
+    if (fpvHovEl) fpvHovEl.classList.remove('hov');
+    fpvHovEl = el || null;
+    if (fpvHovEl) fpvHovEl.classList.add('hov');
+  }
+
+  function fpvHoverClear() {
+    if (fpvHovRaf) { cancelAnimationFrame(fpvHovRaf); fpvHovRaf = 0; }
+    if (fpvHovTimer) { clearTimeout(fpvHovTimer); fpvHovTimer = 0; }
+    fpvHoverSet(null);
+  }
+
+  function fpvHoverTick() {
+    if (fpvHovRaf) { cancelAnimationFrame(fpvHovRaf); fpvHovRaf = 0; }
+    if (fpvHovTimer) { clearTimeout(fpvHovTimer); fpvHovTimer = 0; }
+    if (!fpvEl || !fpvEl.classList.contains('on')) { fpvHoverSet(null); return; }
+    var x = fpvHovX, y = fpvHovY, hit = null;
     var btns = fpvEl.querySelectorAll('.fpv-find, .fpv-mode, .fpv-dl, .fpv-x, .fpv-fbtn');
-    var hit = null;
     for (var i = 0; i < btns.length; i++) {
       var b = btns[i];
       if (b.hidden) continue;
       var r = b.getBoundingClientRect();
       if (r.width < 1 || r.height < 1) continue;   // 查找条收起 / 运行按钮隐藏
-      if (e.clientX >= r.left && e.clientX <= r.right &&
-          e.clientY >= r.top && e.clientY <= r.bottom) { hit = b; break; }
+      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) { hit = b; break; }
     }
-    for (var j = 0; j < btns.length; j++) {
-      var on = btns[j] === hit;
-      if (btns[j].classList.contains('hov') !== on) btns[j].classList.toggle('hov', on);
+    fpvHoverSet(hit);
+  }
+
+  function fpvHoverMove(e) {
+    // 弹层没开就别排帧了：主列表页才是真正吃性能的地方，别为看不见的按钮留开销
+    if (!fpvEl || !fpvEl.classList.contains('on')) {
+      if (fpvHovEl) fpvHoverClear();
+      return;
     }
+    fpvHovX = e.clientX;
+    fpvHovY = e.clientY;
+    if (fpvHovRaf || fpvHovTimer) return;        // 这一帧已经排过了，只更新坐标
+    fpvHovRaf = requestAnimationFrame(fpvHoverTick);
+    // 兜底：窗口被系统判定成不可见时 rAF 不派发，40ms 后自己补一次，
+    // 免得「鼠标动了、高亮一直不动」
+    fpvHovTimer = setTimeout(fpvHoverTick, 40);
   }
 
   /** 释放运行视图：先把 iframe 空页化再移除 —— 只藏弹层不清 body 的话，
@@ -4753,9 +4811,9 @@
   function fpvClose() {
     if (!fpvEl) return;
     fpvEl.classList.remove('on');
+    document.documentElement.classList.remove('fpv-open');
     // 关掉时把几何 hover 留下的 .hov 清干净，下次打开不会是「预亮」状态
-    var hs = fpvEl.querySelectorAll('.hov');
-    for (var i = 0; i < hs.length; i++) hs[i].classList.remove('hov');
+    fpvHoverClear();
     fpvCur = null;
     fpvState = null;
     fpvClearBody();
@@ -5119,6 +5177,7 @@
     el.querySelector('.fpv-find').hidden = true;
     fpvState = null;
     el.classList.add('on');
+    document.documentElement.classList.add('fpv-open');
     fpvCur = p.fid;
 
     api('/api/file/text?id=' + encodeURIComponent(p.fid) + '&cid=' + encodeURIComponent(state.cid))

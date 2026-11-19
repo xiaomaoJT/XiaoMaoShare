@@ -414,6 +414,7 @@ function createHostWindow(opts = {}) {
   }, 2500);
   startNoticeWatch(hostWin);   // 收消息提醒由主进程统一负责（页面只负责展示）
   attachContextMenu(hostWin);  // 浏览器同款右键：图片可复制，输入框有剪切/粘贴
+  bindWindowKeys(hostWin);     // ⌘M/⌃⌘M/⌘W（win: Ctrl+M / Ctrl+Shift+M / Ctrl+W）
 
   // 记住窗口大小与位置：拖动/缩放中只更新内存里的还原态，防抖 400ms 落盘；
   // 最大化、全屏、最小化时的瞬时几何不记录，还原态始终是上一次「正常」的样子
@@ -644,6 +645,7 @@ function openLink(rawUrl) {
     return { action: 'deny' };
   });
   attachContextMenu(win);   // 连接窗口也要浏览器同款右键（图片复制等）
+  bindWindowKeys(win);      // 连接窗口同样能用最小化 / 最大化 / 关闭快捷键
   watchTrayFlashStop(win);  // Windows：连接窗口亮出来同样算「打开了互传」
 
   // 这是最后一个可见窗口时，点关闭 = 整个应用「消失」进托盘 —— 得和主窗口一个待遇：
@@ -952,6 +954,66 @@ ipcMain.on('win:action', (_e, act) => {
   else if (act === 'close') hostWin.close();
 });
 
+/* ------------------------------------------------------- 窗口快捷键
+   最小化 / 最大化·还原 / 关闭。快捷键要作用在「你正在用的那个窗口」上 ——
+   主窗口、连接窗口、引导页都可能拿着焦点，不能一律打在主窗口上。
+
+   为什么不用菜单的 accelerator 注册：Windows 下主窗口是 frame:false，
+   原生菜单条根本不挂上去，注册出来的加速键时灵时不灵。统一改成
+   before-input-event（按键在页面之前就到主进程），菜单项只负责展示按键提示
+   （registerAccelerator:false），两边不会各响一次。 */
+
+/** 当前真正在用的窗口：跟随焦点，退而求其次用主窗口 */
+function focusedWin() {
+  const w = BrowserWindow.getFocusedWindow();
+  if (w && !w.isDestroyed()) return w;
+  if (hostWin && !hostWin.isDestroyed() && hostWin.isVisible()) return hostWin;
+  return null;
+}
+
+/** 最大化 / 还原。全屏状态下先退全屏 —— 否则「最大化」看着像没反应 */
+function toggleMaxWin(w) {
+  if (!w || w.isDestroyed()) return;
+  if (w.isFullScreen()) { w.setFullScreen(false); return; }
+  if (w.isMaximized()) w.unmaximize();
+  else w.maximize();
+}
+
+/**
+ * 给一个窗口挂上窗口快捷键。
+ * mac：⌘M 最小化、⌃⌘M 最大化·还原（⌘W 关窗由「我的主机 → 关闭窗口」的 role 管）
+ * win：Ctrl+M 最小化、Ctrl+Shift+M 最大化·还原、Ctrl+W 关窗（Alt+F4 系统自带）
+ */
+function bindWindowKeys(win) {
+  if (!win || win.isDestroyed() || win.__xmKeys) return;
+  win.__xmKeys = true;
+  win.webContents.on('before-input-event', (e, input) => {
+    if (!input || input.type !== 'keyDown') return;
+    const key = String(input.key || '').toLowerCase();
+    // Windows 的 F11 全屏没有修饰键，先单独认掉（mac 的 ⌃⌘F 由菜单 role 管）
+    if (!IS_MAC && key === 'f11') {
+      e.preventDefault();
+      if (win.isFullScreen()) win.setFullScreen(false); else win.setFullScreen(true);
+      return;
+    }
+    const mod = IS_MAC ? input.meta : input.control;
+    if (!mod) return;
+    // 另一家的修饰键必须没按着：mac 的 ⌃⌘M 是例外（两个一起按才是最大化）
+    const cross = IS_MAC ? input.control : input.meta;
+    if (input.alt) return;
+    if (IS_MAC) {
+      if (cross && key === 'm' && !input.shift) { e.preventDefault(); toggleMaxWin(win); return; }
+      if (cross) return;
+      if (key === 'm' && !input.shift) { e.preventDefault(); win.minimize(); }
+      return;
+    }
+    if (cross) return;
+    if (key === 'm' && input.shift) { e.preventDefault(); toggleMaxWin(win); return; }
+    if (key === 'm') { e.preventDefault(); win.minimize(); return; }
+    if (key === 'w' && !input.shift) { e.preventDefault(); win.close(); }
+  });
+}
+
 // Windows 无边框：顶栏 ⋯ 按钮把应用菜单在窗口里弹出来。
 // 菜单功能全在这份 application menu 里（加速键也靠它注册，无边框下照常生效）
 ipcMain.on('ui:app-menu', () => {
@@ -1214,7 +1276,40 @@ function buildMenu() {
         { type: 'separator' },
         { role: 'resetZoom', label: '实际大小' }, { role: 'zoomIn', label: '放大' }, { role: 'zoomOut', label: '缩小' },
         { type: 'separator' },
-        { role: 'togglefullscreen', label: '全屏' },
+        // Windows 无边框窗口挂不上原生菜单，加速键靠 before-input-event 兜（见 bindWindowKeys），
+        // 这里只负责把 F11 提示出来，别注册成两遍
+        {
+          role: 'togglefullscreen',
+          label: '全屏',
+          ...(IS_WIN ? { accelerator: 'F11', registerAccelerator: false } : {}),
+        },
+      ],
+    },
+    {
+      label: '窗口',
+      submenu: [
+        {
+          label: '最小化',
+          accelerator: 'CmdOrCtrl+M',
+          registerAccelerator: false,   // 同上：实际按键由 bindWindowKeys 处理
+          click: () => { const w = focusedWin(); if (w) w.minimize(); },
+        },
+        {
+          label: '最大化 / 还原',
+          accelerator: IS_MAC ? 'Control+Cmd+M' : 'Ctrl+Shift+M',
+          registerAccelerator: false,
+          click: () => toggleMaxWin(focusedWin()),
+        },
+        { type: 'separator' },
+        // mac 的「我的主机 → 关闭窗口」已经是 role close（自带 ⌘W），这里只补 Windows
+        ...(IS_WIN
+          ? [{
+            label: '关闭窗口',
+            accelerator: 'Ctrl+W',
+            registerAccelerator: false,
+            click: () => { const w = focusedWin(); if (w) w.close(); },
+          }]
+          : []),
       ],
     },
   ];
