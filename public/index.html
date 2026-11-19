@@ -924,7 +924,7 @@
     width:32px;height:32px;border-radius:9px;border:1px solid var(--line);background:var(--card-2);
     color:var(--sub);font-size:13px;cursor:pointer;display:grid;place-items:center;transition:.15s;
   }
-  .fpv-x:hover{background:var(--card);color:var(--text)}
+  .fpv-x:hover{background:var(--danger);border-color:var(--danger);color:#fff}
   .fpv-body{flex:1;min-height:0;overflow:auto;background:var(--card)}
   .fpv-scroll{overflow:auto;max-height:100%;padding:14px 16px}
   .fpv-pre{
@@ -972,11 +972,14 @@
     background:var(--card);color:var(--sub);font-size:13px;cursor:pointer;
   }
   .fpv-fbtn:hover{background:var(--accent);border-color:var(--accent);color:#fff}
-  .fpv-mode{
+  .fpv-mode, .fpv-find{
     height:32px;padding:0 11px;border-radius:9px;border:1px solid var(--line);background:var(--card-2);
     color:var(--sub);font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;
+    display:inline-flex;align-items:center;gap:5px;
   }
-  .fpv-mode:hover{background:var(--accent);border-color:var(--accent);color:#fff}
+  .fpv-mode[hidden], .fpv-find[hidden]{display:none}
+  .fpv-mode:hover, .fpv-find:hover{background:var(--accent);border-color:var(--accent);color:#fff}
+  .fpv-find svg{width:14px;height:14px}
   .fpv-frame{width:100%;height:100%;min-height:300px;border:0;background:#fff;display:block}
 
   /* 大文件降级提示 */
@@ -4652,6 +4655,10 @@
         '<div class="fpv-head">' +
           '<div class="fpv-meta"><div class="fpv-ttl"></div><div class="fpv-sub"></div></div>' +
           '<div class="fpv-acts">' +
+            '<button type="button" class="fpv-find" hidden title="查找内容（Ctrl+F）">' +
+              '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>' +
+              '<span>查找</span>' +
+            '</button>' +
             '<button type="button" class="fpv-mode" hidden></button>' +
             '<a class="fpv-dl" download>' + IDL + '<span>下载</span></a>' +
             '<button type="button" class="fpv-x" aria-label="关闭预览">✕</button>' +
@@ -4680,6 +4687,8 @@
       }
     });
     el.querySelector('.fpv-x').onclick = fpvClose;
+    // 「查找」按钮：和 Ctrl/Cmd+F 同一入口
+    el.querySelector('.fpv-find').onclick = function () { fpvFindOpen(); };
     // 查找条事件
     el.querySelector('.fpv-fclose').onclick = fpvFindClose;
     el.querySelector('.fpv-fprev').onclick = function () { fpvFindStep(-1); };
@@ -4761,9 +4770,10 @@
         while (i < n && /[0-9a-fA-FxX._]/.test(text[i])) i++;
         cls = 'tok-num';
       }
-      // 单词：关键字 / 标签 / 属性
+      // 单词：关键字 / 标签 / 属性（注意必须保证 i 至少前进 1，否则死循环）
       else if (/[A-Za-z_$@]/.test(c)) {
         while (i < n && /[\w$-]/.test(text[i])) i++;
+        if (i === s) i++;            // '@' 后面不是单词字符（如 '@/xxx'）也要吃掉它
         var word = text.slice(s, i);
         if (isKw(word)) cls = 'tok-kw';
         else if (lang === 'markup' && text[s - 1] === '<') cls = 'tok-tag';
@@ -4955,6 +4965,7 @@
     fpvEl.querySelector('.fpv-find-i').value = '';
     fpvEl.querySelector('.fpv-fc').textContent = '';
     var modeBtn = fpvEl.querySelector('.fpv-mode');
+    fpvEl.querySelector('.fpv-find').hidden = true;
     modeBtn.hidden = true;
     fpvState = null;
 
@@ -4985,7 +4996,9 @@
     wrap.className = 'fpv-scroll';
     var pre = document.createElement('pre');
     pre.className = 'fpv-pre';
-    renderHighlighted(pre, text, lang, [], -1);
+    // 高亮渲染兜底：万一着色器出错，退回纯文本，绝不让面板卡死
+    try { renderHighlighted(pre, text, lang, [], -1); }
+    catch (e) { pre.textContent = text; }
     if (text.length > 200000) {
       var deg = document.createElement('div');
       deg.className = 'fpv-degrade';
@@ -5000,6 +5013,9 @@
       searchable: true, hits: [], cur: -1, query: '',
       rawHtml: isHtml ? text : ''
     };
+
+    // 代码视图支持面板内查找：显示「查找」按钮
+    fpvEl.querySelector('.fpv-find').hidden = false;
 
     // HTML：加「运行 / 代码」切换，默认看代码
     if (isHtml) {
@@ -5049,6 +5065,7 @@
     el.querySelector('.fpv-findbar').classList.remove('on');
     el.querySelector('.fpv-find-i').value = '';
     el.querySelector('.fpv-mode').hidden = true;
+    el.querySelector('.fpv-find').hidden = true;
     fpvState = null;
     el.classList.add('on');
     fpvCur = p.fid;
