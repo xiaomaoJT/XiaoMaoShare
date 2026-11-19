@@ -1821,6 +1821,20 @@
   .blk-x:hover{background:var(--line);color:var(--danger)}
   .blk-md.bad{border-color:var(--danger)}
   .blk-md.bad .blk-sz{color:var(--danger)}
+  /* 文件夹块：整夹只占输入区一行，点右端的展开把子文件摊开查看 */
+  .blk-folder{background:color-mix(in srgb, var(--accent) 7%, var(--card-2))}
+  :root[data-theme="glass"] .blk-folder{background:rgba(255,255,255,.82)}
+  .blk-fico{
+    width:36px;height:36px;flex:none;border-radius:8px;display:grid;place-items:center;
+    background:color-mix(in srgb, var(--accent) 15%, var(--card));color:var(--accent);
+  }
+  .blk-fico svg{width:21px;height:21px;display:block}
+  .blk-fkids{margin:4px 0 1px;padding:5px 7px;border-radius:9px;background:var(--card-2);
+    border:1px solid var(--line);max-height:148px;overflow:auto}
+  .blk-fkids[hidden]{display:none}
+  .blk-fdet{font-size:11.5px;color:var(--accent);background:transparent;border:0;padding:0;
+    cursor:pointer;margin-right:5px}
+  .blk-fdet:hover{text-decoration:underline}
 
   /* ---- 输入区工具条：表情 / 分隔符 / Markdown 快捷 ---- */
   .mtools-wrap{display:flex;align-items:center;gap:4px;margin-top:6px}
@@ -7203,7 +7217,7 @@
       if (e.key === 'Backspace' && i > 0) {
         e.preventDefault();
         var prev = compose[i - 1];
-        if (prev.type === 'media') removeBlock(prev, true);
+        if (prev.type === 'media' || prev.type === 'folder') removeBlock(prev, true);
         else mergeIntoPrev(b, prev, true);
         return;
       }
@@ -7270,6 +7284,12 @@
   function dropBlock(b) {
     var i = compose.indexOf(b);
     if (i < 0) return;
+    // 文件夹：连带回收每个子项的预览，别留着 objectURL 占内存
+    if (b.type === 'folder') {
+      b.files.forEach(function (c) {
+        if (c.preview) { try { URL.revokeObjectURL(c.preview); } catch (e) {} c.preview = null; }
+      });
+    }
     if (b.preview) { try { URL.revokeObjectURL(b.preview); } catch (e) {} }
     compose.splice(i, 1);
     if (b.el && b.el.parentNode) b.el.parentNode.removeChild(b.el);
@@ -7484,8 +7504,18 @@
     else blocksEl.appendChild(b.el);
   }
 
-  // 一次进输入区的附件上限：服务端暂存区上限 120（MAX_STAGED），留余量避免整批上传后半截 429
-  var MAX_ADD_FILES = 100;
+  // 一次进输入区的附件上限：服务端暂存区上限 1200（MAX_STAGED），留余量避免整批上传后半截 429
+  var MAX_ADD_FILES = 500;
+
+  /** 把 compose 里真正要上传的项摊平：普通附件 + 文件夹里的子文件。发送/打包都走这里 */
+  function allUploads() {
+    var out = [];
+    compose.forEach(function (b) {
+      if (b.type === 'folder') b.files.forEach(function (c) { out.push(c); });
+      else if (b.type === 'media') out.push(b);
+    });
+    return out;
+  }
 
   /* 递归展开拖进来的文件夹：webkitGetAsEntry 拿到目录项，逐层 readEntries 读出文件和子目录。
      readEntries 每次最多返回 100 条，要循环读到空为止；整个流程是异步回调。
@@ -7519,7 +7549,104 @@
     readBatch();
   }
 
-  function addFiles(files, nameOf) {
+  /* 文件夹块：整夹在输入区只占一行，内部持有若干子上传项（各自上传、各自带相对路径）。
+     files[] 里的每项就是一个「没有自己 block.el 的 media 块」，字段与 media 一致，
+     这样 startUpload / composeParts 都能原样复用。 */
+  function buildFolderBlock(b) {
+    var wrap = document.createElement('div');
+    wrap.className = 'blk-fwrap';
+
+    var row = document.createElement('div');
+    row.className = 'blk-md blk-folder';
+    var face = document.createElement('div');
+    face.className = 'blk-fico';
+    face.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
+    var info = document.createElement('div');
+    info.className = 'blk-info';
+    var nm = document.createElement('div');
+    nm.className = 'blk-nm';
+    nm.textContent = b.name;
+    nm.title = b.name;
+    var sz = document.createElement('div');
+    sz.className = 'blk-sz';
+    var bar = document.createElement('div');
+    bar.className = 'blk-pg';
+    var fill = document.createElement('i');
+    bar.appendChild(fill);
+    info.appendChild(nm);
+    info.appendChild(sz);
+    info.appendChild(bar);
+
+    var detail = document.createElement('button');
+    detail.type = 'button';
+    detail.className = 'blk-fdet';
+    detail.textContent = '展开 ' + b.files.length + ' 项';
+    var kids = document.createElement('div');
+    kids.className = 'blk-fkids';
+    kids.hidden = true;
+    detail.onclick = function (e) {
+      e.stopPropagation();
+      kids.hidden = !kids.hidden;
+      detail.textContent = (kids.hidden ? '展开 ' : '收起 ') + b.files.length + ' 项';
+    };
+    b.files.forEach(function (c) { kids.appendChild(childRow(c, b)); });
+
+    var x = document.createElement('button');
+    x.type = 'button';
+    x.className = 'blk-x';
+    x.textContent = '✕';
+    x.title = '移除整个文件夹';
+    x.onclick = function () { removeBlock(b); };
+
+    row.appendChild(face);
+    row.appendChild(info);
+    row.appendChild(detail);
+    row.appendChild(x);
+    wrap.appendChild(row);
+    wrap.appendChild(kids);
+    b.el = wrap;
+    b.refs = { row: row, sz: sz, bar: bar, fill: fill };
+    return wrap;
+  }
+
+  /** 文件夹里的单个子项：复用媒体行的外观，但 ✕ 只从本文件夹摘掉这一项 */
+  function childRow(c, fb) {
+    var row = buildMediaBlock(c);
+    var cx = row.querySelector('.blk-x');
+    if (cx) {
+      cx.title = '从文件夹移除这一项';
+      cx.onclick = function (e) {
+        e.stopPropagation();
+        var i = fb.files.indexOf(c);
+        if (i >= 0) fb.files.splice(i, 1);
+        if (row.parentNode) row.parentNode.removeChild(row);
+        if (c.preview) { try { URL.revokeObjectURL(c.preview); } catch (err) {} c.preview = null; }
+        if (!fb.files.length) { removeBlock(fb); return; }
+        paintFolder(fb);
+        syncSend();
+        if (previewOn) renderPreview();
+      };
+    }
+    return row;
+  }
+
+  /** 聚合子项状态到文件夹那一行：已传条数 / 总条数 + 字节进度 + 失败标红 */
+  function paintFolder(b) {
+    if (!b.refs) return;
+    var total = b.files.length, ok = 0, bad = 0, bytes = 0, sent = 0;
+    b.files.forEach(function (c) {
+      bytes += c.size || 0;
+      if (c.fid) { ok++; sent += c.size || 0; }
+      else if (c.error) bad++;
+    });
+    var pct = bytes ? Math.round(sent / bytes * 100) : 0;
+    b.refs.fill.style.width = pct + '%';
+    b.refs.sz.textContent = ok + '/' + total + ' 已上传 · ' + fmtSize(bytes) +
+      (bad ? ' · ' + bad + ' 项失败' : '');
+    b.refs.row.classList.toggle('bad', !!bad);
+  }
+
+  function addFiles(files, nameOf, folderName) {
     files = Array.prototype.slice.call(files || []).filter(Boolean);
     if (!files.length) return;
     if (files.length > MAX_ADD_FILES) {
@@ -7535,30 +7662,57 @@
     var base = anchor ? compose.indexOf(anchor) : compose.length;
     var at = anchorEmpty ? base : base + 1;
 
-    var added = 0;
-    files.forEach(function (f, i) {
-      var isImg = /^image\//.test(f.type);
-      if (isImg && !canSend('image')) { toast('主设备已关闭图片发送'); return; }
-      if (!isImg && !canSend('file')) { toast('主设备已关闭文件发送'); return; }
+    var added = 0, fb = null;
 
-      // nameOf：文件夹上传时给出带子目录的相对路径，接收端一眼看出来源（下载仍按同名平铺）
-      var nm = (typeof nameOf === 'function' ? nameOf(f, i) : '') || f.name ||
-        ('粘贴图片-' + Date.now() + (isImg ? '.png' : ''));
-      var b = {
-        type: 'media',
-        kind: isImg ? 'image' : 'file',
-        file: f,
-        name: nm,
-        size: f.size,
-        fid: ''
-      };
-      if (isImg) { try { b.preview = URL.createObjectURL(f); } catch (e) {} }
+    if (folderName) {
+      // 文件夹模式：整夹一个块，子文件只做上传项，不各自插进 compose
+      fb = { type: 'folder', name: folderName, files: [], size: 0, fid: '', el: null, refs: null };
+      files.forEach(function (f, i) {
+        var isImg = /^image\//.test(f.type);
+        if (isImg && !canSend('image')) { toast('主设备已关闭图片发送'); return; }
+        if (!isImg && !canSend('file')) { toast('主设备已关闭文件发送'); return; }
+        var nm = (typeof nameOf === 'function' ? nameOf(f, i) : '') || f.name ||
+          ('粘贴图片-' + Date.now() + (isImg ? '.png' : ''));
+        var c = { type: 'media', kind: isImg ? 'image' : 'file', file: f, name: nm, size: f.size, fid: '' };
+        if (isImg) { try { c.preview = URL.createObjectURL(f); } catch (e) {} }
+        fb.files.push(c);
+        fb.size += f.size || 0;
+      });
+      if (!fb.files.length) return;
+      fb.el = buildFolderBlock(fb);
+      insertBlockAt(fb, at);
+      added = 1;
+      // 子项共用文件夹的聚合进度：每个传完就重绘一次那一行
+      fb.files.forEach(function (c) {
+        startUpload(c);
+        c.done.then(paintFolder.bind(null, fb));
+      });
+      paintFolder(fb);
+    } else {
+      files.forEach(function (f, i) {
+        var isImg = /^image\//.test(f.type);
+        if (isImg && !canSend('image')) { toast('主设备已关闭图片发送'); return; }
+        if (!isImg && !canSend('file')) { toast('主设备已关闭文件发送'); return; }
 
-      b.el = buildMediaBlock(b);
-      insertBlockAt(b, at + added);
-      startUpload(b);
-      added++;
-    });
+        // nameOf：文件夹上传时给出带子目录的相对路径，接收端一眼看出来源（下载仍按同名平铺）
+        var nm = (typeof nameOf === 'function' ? nameOf(f, i) : '') || f.name ||
+          ('粘贴图片-' + Date.now() + (isImg ? '.png' : ''));
+        var b = {
+          type: 'media',
+          kind: isImg ? 'image' : 'file',
+          file: f,
+          name: nm,
+          size: f.size,
+          fid: ''
+        };
+        if (isImg) { try { b.preview = URL.createObjectURL(f); } catch (e) {} }
+
+        b.el = buildMediaBlock(b);
+        insertBlockAt(b, at + added);
+        startUpload(b);
+        added++;
+      });
+    }
 
     if (!added) return;
 
@@ -7582,6 +7736,9 @@
       if (b.type === 'text') {
         var t = b.el.value.trim();
         if (t) out.push({ type: 'text', text: t });
+      } else if (b.type === 'folder') {
+        // 文件夹块对外就是它装下的所有附件，顺序按加入时的先后
+        b.files.forEach(function (c) { if (c.fid) out.push({ type: 'file', fid: c.fid }); });
       } else if (b.fid) {
         out.push({ type: 'file', fid: b.fid });
       }
@@ -7592,7 +7749,10 @@
   function hasContent() {
     return compose.some(function (b) {
       if (b.type === 'text') return !!b.el.value.trim();
-      // 上传中也算内容：允许先点发送，sendAll 会等上传完成再真正发出
+      if (b.type === 'folder') {
+        // 上传中也算内容：允许先点发送，sendAll 会等上传完成再真正发出
+        return b.files.some(function (c) { return !!c.fid || !!(c.done && !c.error); });
+      }
       return !!b.fid || !!(b.done && !b.error);
     });
   }
@@ -7798,7 +7958,7 @@
     sendBtn.disabled = !allowed || !hasContent() || textOverLimit;
     if (mdBtn) mdBtn.disabled = mdBusy || !canSend('file') || !hasContent();
 
-    var n = compose.filter(function (b) { return b.type === 'media'; }).length;
+    var n = allUploads().length;
     if (n) {
       hintEl.hidden = false;
       hintEl.textContent = '将合并成 1 条消息 · ' + n + ' 个附件';
@@ -7815,6 +7975,12 @@
 
   function resetCompose() {
     compose.forEach(function (b) {
+      if (b.type === 'folder') {
+        b.files.forEach(function (c) {
+          if (c.preview) { try { URL.revokeObjectURL(c.preview); } catch (e) {} c.preview = null; }
+        });
+        return;
+      }
       if (b.preview) { try { URL.revokeObjectURL(b.preview); } catch (e) {} }
     });
     compose = [];
@@ -7851,13 +8017,14 @@
     sendBtn.disabled = true;
     var waiting = false;
     try {
-      if (compose.some(function (b) { return b.type === 'media' && b.done && !b.fid && !b.error; })) {
+      var ups = allUploads();
+      if (ups.some(function (b) { return b.done && !b.fid && !b.error; })) {
         // 还有附件在传：先等它们传完，按钮亮「发送中…」给个反馈
         waiting = true;
         sendBtn.textContent = '发送中…';
-        await Promise.all(compose.map(function (b) { return b.done || null; }));
+        await Promise.all(ups.map(function (b) { return b.done || null; }));
       }
-      var bad = compose.filter(function (b) { return b.type === 'media' && !b.fid; });
+      var bad = ups.filter(function (b) { return !b.fid; });
       if (bad.length) {
         toast('有 ' + bad.length + ' 个附件没上传成功，移除后重发');
         return;
@@ -7934,8 +8101,15 @@
   async function buildMarkdown() {
     var chunks = [], attach = [], used = 0;
 
-    for (var i = 0; i < compose.length; i++) {
-      var b = compose[i];
+    // 文件夹块在此展开成它的子项，图片照样尝试内联
+    var seq = [];
+    compose.forEach(function (b) {
+      if (b.type === 'folder') seq = seq.concat(b.files);
+      else seq.push(b);
+    });
+
+    for (var i = 0; i < seq.length; i++) {
+      var b = seq[i];
       if (b.type === 'text') {
         var t = b.el.value.replace(/^\n+/, '').replace(/\s+$/, '');
         if (t.trim()) chunks.push(t);
@@ -7989,11 +8163,12 @@
     mdBtn.disabled = true;
 
     // 上传中的附件先等完，别让 md 里少东西
-    if (compose.some(function (b) { return b.done; })) {
-      await Promise.all(compose.map(function (b) { return b.done || null; }));
+    var ups = allUploads();
+    if (ups.some(function (b) { return b.done; })) {
+      await Promise.all(ups.map(function (b) { return b.done || null; }));
     }
 
-    var bad = compose.filter(function (b) { return b.type === 'media' && !b.fid; });
+    var bad = ups.filter(function (b) { return !b.fid; });
     if (bad.length) {
       mdBusy = false;
       syncSend();
@@ -8456,6 +8631,11 @@
       if (b.type === 'text') {
         var t = b.el.value.trim();
         if (t) html += mdToHtml(t);
+      } else if (b.type === 'folder') {
+        var bytes = 0;
+        b.files.forEach(function (c) { bytes += c.size || 0; });
+        atts += '<span class="mdp-att">📁<b>' + esc(b.name || '') + '</b><i>' +
+          b.files.length + ' 个文件 · ' + fmtSize(bytes) + '</i></span>';
       } else {
         atts += '<span class="mdp-att">' + (b.kind === 'image' ? '🖼' : '📎') +
           '<b>' + esc(b.name || '') + '</b><i>' + fmtSize(b.size) + '</i></span>';
@@ -10215,11 +10395,14 @@
     fileInput.value = '';
   });
 
-  // 选文件夹：webkitRelativePath 带子目录，作为显示名传给 addFiles
+  // 选文件夹：整夹只出一个块；子文件用带子目录的相对路径，接收端仍看得出来源
   pickDirBtn.addEventListener('click', function () { dirInput.click(); });
   dirInput.addEventListener('change', function () {
     var fs = Array.prototype.slice.call(dirInput.files || []);
-    if (fs.length) addFiles(fs, function (f) { return f.webkitRelativePath || f.name; });
+    if (fs.length) {
+      var root = String(fs[0].webkitRelativePath || fs[0].name || '文件夹').split('/')[0] || '文件夹';
+      addFiles(fs, function (f) { return f.webkitRelativePath || f.name; }, root);
+    }
     dirInput.value = '';
   });
 
@@ -10269,9 +10452,21 @@
       entries.forEach(function (en) {
         readDirEntry(en, '', out, function () {
           if (--pending) return;
-          var fs = out.map(function (o) { return o.file; });
-          if (fs.length) addFiles(fs, function (f, i) { return out[i].path; });
-          else toast('这个文件夹是空的');
+          if (!out.length) { toast('这个文件夹是空的'); return; }
+          // 按顶层目录分组：一次拖进多个文件夹，输入区就出几行，各自一个块
+          var groups = {}, loose = [];
+          out.forEach(function (o, i) {
+            var slash = o.path.indexOf('/');
+            if (slash < 0) { loose.push(o.file); return; }  // 拖进来的散文件
+            var root = o.path.slice(0, slash);
+            (groups[root] || (groups[root] = { files: [], names: [] })).files.push(o.file);
+            groups[root].names.push(o.path);
+          });
+          if (loose.length) addFiles(loose);
+          Object.keys(groups).forEach(function (root) {
+            var g = groups[root];
+            addFiles(g.files, function (f, i) { return g.names[i]; }, root);
+          });
         });
       });
       return;

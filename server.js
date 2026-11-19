@@ -37,8 +37,10 @@ const PORT_ARG = (() => {
 
 const BASE_PORT = PORT_ARG || Number(process.env.PORT || 6767);
 const MAX_FILE = 4 * 1024 * 1024 * 1024; // 4GB 单文件上限
-const MAX_PARTS = 30;                    // 一条消息最多带 30 个附件
-const MAX_STAGED = 120;                  // 暂存区上限，防内存/磁盘被灌爆
+// 整文件夹发送：前端一次最多 500 个附件（MAX_ADD_FILES），这里按 MAX_PARTS*2 放到 1000，
+// 给文字段和分批留余量；暂存区同步放宽，否则整夹传到一半就被 429 掐断。
+const MAX_PARTS = 500;                   // 一条消息最多带 500 个附件（实际收 1000 段）
+const MAX_STAGED = 1200;                 // 暂存区上限，防内存/磁盘被灌爆
 const STAGE_TTL = 30 * 60e3;             // 暂存文件 30 分钟没发送就清掉
 
 /**
