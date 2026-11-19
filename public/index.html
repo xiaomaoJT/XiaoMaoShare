@@ -879,9 +879,11 @@
     background:color-mix(in srgb, var(--accent) 14%, var(--card));color:var(--accent);
   }
   .mf-ico svg{width:18px;height:18px;display:block}
+  .mf-txt{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
   .mf-nm{font-size:calc(13.5px * var(--tfs));font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .mf-meta{font-size:11.5px;color:var(--faint);margin-left:auto;white-space:nowrap;font-variant-numeric:tabular-nums}
-  .mf-tog{font-size:11.5px;color:var(--accent);white-space:nowrap}
+  .mf-sub{display:flex;align-items:center;gap:8px;min-width:0}
+  .mf-meta{font-size:11.5px;color:var(--faint);white-space:nowrap;font-variant-numeric:tabular-nums;min-width:0;overflow:hidden;text-overflow:ellipsis}
+  .mf-tog{font-size:11.5px;color:var(--accent);white-space:nowrap;flex:none}
   .mf-kids{padding:2px 8px 8px;border-top:1px solid var(--line)}
   .mf-kids[hidden]{display:none}
   .mf-kids .file{padding-left:0;padding-right:0}
@@ -5283,9 +5285,9 @@
       head.className = 'mf-head';
       var bytes = grp.reduce(function (s, p) { return s + (p.size || 0); }, 0);
       head.innerHTML = '<span class="mf-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></span>' +
-        '<span class="mf-nm">' + esc(dir) + '</span>' +
-        '<span class="mf-meta">' + grp.length + ' 个文件 · ' + fmtSize(bytes) + '</span>' +
-        '<span class="mf-tog"></span>';
+        '<span class="mf-txt"><span class="mf-nm">' + esc(dir) + '</span>' +
+        '<span class="mf-sub"><span class="mf-meta">' + grp.length + ' 个文件 · ' + fmtSize(bytes) + '</span>' +
+        '<span class="mf-tog"></span></span></span>';
       var dl = document.createElement('button');
       dl.type = 'button';
       dl.className = 'mf-dl';
