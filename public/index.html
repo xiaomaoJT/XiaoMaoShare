@@ -6494,6 +6494,8 @@
           else reject(new Error(d.error || '上传失败'));
         };
         xhr.onerror = function () { reject(new Error('上传失败')); };
+        xhr.ontimeout = function () { reject(new Error('上传超时')); };
+        xhr.timeout = UPLOAD_XHR_TIMEOUT;
         xhr.send(file);
       });
     }
@@ -8038,6 +8040,11 @@
 
   /* 大文件分片：8MB 一片。断一片只重发这一片，进度只增不减，不再整包归零 */
   var UPLOAD_CHUNK = 8 * 1024 * 1024;
+  /* 上传看门狗：网络半开 / Wi-Fi 抖动时 XHR 的 load/error 都可能永远不来，
+     进度就卡死、按钮永远「发送中…」。停滞 20s 或整体超时 90s 就主动放弃重试。
+     值取宽松些，避免慢网误伤：正常一片 8MB 几秒内必到。 */
+  var UPLOAD_STALL_MS = 20 * 1000;
+  var UPLOAD_XHR_TIMEOUT = 90 * 1000;
 
   function startUpload(b) {
     b.done = new Promise(function (resolve) {
@@ -8092,17 +8099,34 @@
         xhr.open('POST', '/api/upload?name=' + encodeURIComponent(b.name) +
           '&type=' + encodeURIComponent((b.file && b.file.type) || '') +
           '&cid=' + encodeURIComponent(state.cid));
+        // 停滞看门狗：网络半开 / Wi-Fi 抖动时 onload/onerror 都不来，
+        // XHR 会永远挂起、进度卡死、按钮永远「发送中…」。每次收到数据就顺延，
+        // 超过 UPLOAD_STALL_MS 没动静就主动 abort，走 onerror 进失败/重试。
+        var stallTimer = null;
+        function armStall() {
+          if (stallTimer) clearTimeout(stallTimer);
+          stallTimer = setTimeout(function () {
+            try { xhr.abort(); } catch (e) {}
+          }, UPLOAD_STALL_MS);
+        }
+        function disarmStall() { if (stallTimer) { clearTimeout(stallTimer); stallTimer = null; } }
         xhr.upload.onprogress = function (e) {
           if (!e.lengthComputable) return;
           setPct(e.loaded);
+          armStall();
         };
         xhr.onload = function () {
+          disarmStall();
           var d = {};
           try { d = JSON.parse(xhr.responseText); } catch (e) {}
           if (xhr.status === 200 && d.part) finishWith(d.part);
           else fail(d.error || '上传失败');
         };
-        xhr.onerror = function () { fail('上传失败'); };
+        xhr.onerror = function () { disarmStall(); fail('网络中断，上传失败'); };
+        xhr.onabort = function () { disarmStall(); fail('上传停滞，请重试'); };
+        xhr.ontimeout = function () { disarmStall(); fail('上传超时，请重试'); };
+        xhr.timeout = UPLOAD_XHR_TIMEOUT;
+        armStall();
         xhr.send(b.file);
         return;
       }
@@ -8118,22 +8142,40 @@
             '&cid=' + encodeURIComponent(state.cid) +
             '&uid=' + encodeURIComponent(uid) +
             '&offset=' + offset + '&total=' + total + (isLast ? '&final=1' : ''));
+          // 停滞看门狗：网络半开时既不 load 也不 error，XHR 永久挂起 → 进度卡死、
+          // 按钮永远「发送中…」。每次 progress 顺延，超时没动静就 abort 触发重试。
+          var stallTimer = null, settled = false;
+          function armStall() {
+            if (settled) return;
+            if (stallTimer) clearTimeout(stallTimer);
+            stallTimer = setTimeout(function () {
+              try { xhr.abort(); } catch (e) {}
+            }, UPLOAD_STALL_MS);
+          }
+          function disarmStall() { settled = true; if (stallTimer) { clearTimeout(stallTimer); stallTimer = null; } }
           xhr.upload.onprogress = function (e) {
             if (!e.lengthComputable) return;
             setPct(offset + e.loaded);   // 全局进度 = 已完成字节 + 本片已发字节
+            armStall();
           };
           xhr.onload = function () {
+            disarmStall();
             var d = {};
             try { d = JSON.parse(xhr.responseText); } catch (e) {}
             if (xhr.status === 200 && (d.part || d.final === false)) res(d);
             else rej(new Error(d.error || '上传失败'));
           };
-          xhr.onerror = function () { rej(new Error('网络中断')); };
-          xhr.onabort = function () { rej(new Error('上传中断')); };
+          xhr.onerror = function () { disarmStall(); rej(new Error('网络中断')); };
+          xhr.onabort = function () { disarmStall(); rej(new Error('上传停滞')); };
+          xhr.ontimeout = function () { disarmStall(); rej(new Error('上传超时')); };
+          xhr.timeout = UPLOAD_XHR_TIMEOUT;
+          armStall();
           xhr.send(blob);
         }).catch(function (err) {
           if (left <= 0) throw err;
-          // 等一会儿再发同一片：进度停在 offset，不归零
+          // 等一会儿再发同一片：进度停在 offset，不归零。停滞类错误多给一次机会
+          var tries = (err && err.message === '上传停滞') ? 5 : 3;
+          if (left > tries) left = tries;
           return new Promise(function (r) { setTimeout(r, 350 * (4 - left)); })
             .then(function () { return postChunk(offset, blob, isLast, left - 1); });
         });
@@ -8836,6 +8878,8 @@
         else reject(new Error(d.error || '上传失败'));
       };
       xhr.onerror = function () { reject(new Error('上传失败')); };
+      xhr.ontimeout = function () { reject(new Error('上传超时')); };
+      xhr.timeout = UPLOAD_XHR_TIMEOUT;
       xhr.send(file);
     });
   }
