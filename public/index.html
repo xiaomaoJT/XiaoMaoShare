@@ -8038,21 +8038,36 @@
     syncSend();
   }
 
-  /* 大文件分片：8MB 一片。断一片只重发这一片，进度只增不减，不再整包归零 */
-  var UPLOAD_CHUNK = 8 * 1024 * 1024;
+  /* 大文件分片：4MB 一片。断一片只重发这一片，进度只增不减，不再整包归零。
+     片取 4MB 而不是更大：单片的瞬时突发减半，路由器缓冲压力更小。 */
+  var UPLOAD_CHUNK = 4 * 1024 * 1024;
   /* 上传看门狗：网络半开 / Wi-Fi 抖动时 XHR 的 load/error 都可能永远不来，
      进度就卡死、按钮永远「发送中…」。停滞 20s 或整体超时 90s 就主动放弃重试。
      值取宽松些，避免慢网误伤：正常一片 8MB 几秒内必到。 */
   var UPLOAD_STALL_MS = 20 * 1000;
   var UPLOAD_XHR_TIMEOUT = 90 * 1000;
   /* 全局上传并发上限：同时最多 2 条上传连接在飞。
-     原来每个文件一入列就立即开 XHR（拖整夹 = 几十条同时灌 8MB 分片），
-     会把 Wi-Fi 上行瞬间打满：路由器缓冲被填死（bufferbloat），队列延迟
-     暴涨到几十秒 —— ARP/DNS/页面轮询全超时，表现就是「一上传整个
-     Wi-Fi 就崩、系统弹网络不可用、别的设备也掉线」。限并发 + 片间留隙，
-     给路由器留出排空队列的余地；局域网内 2 条连接照样跑满带宽。 */
+     原来每个文件一入列就立即开 XHR（拖整夹 = 几十条同时灌），会把 Wi-Fi
+     上行瞬间打满：路由器缓冲被填死（bufferbloat），队列延迟暴涨到几十秒
+     —— ARP/DNS/页面轮询全超时，表现就是「一上传整个 Wi-Fi 就崩、系统弹
+     网络不可用、别的设备也掉线」。 */
   var UPLOAD_PARALLEL = 2;
-  var UPLOAD_CHUNK_GAP = 150;   // 每片落定后停一拍，让路由器缓冲排空
+
+  /* 全局限速（治本）：并发闸只管连接数，**持续满速灌上行照样 bufferbloat** ——
+     路由器队列堆积与连接数无关，只取决于在途字节。文件夹上传（一次 500 个
+     文件）让持续满速从「几秒」拉长到「几分钟」，Wi-Fi 必崩。这里用全局令牌桶
+     把所有上传的合计速率压到 UPLOAD_RATE，给路由器留出大量余量：
+     8MB/s（64Mbps）在局域网里依然很快，看视频/网页完全不受影响。
+     令牌桶是共享时钟：每片/每包开传前预扣「它按目标速率该占的时长」，
+     两条并发连接合计速率自然 ≤ 上限；网络比预算慢时自动不等待，不白耗。 */
+  var UPLOAD_RATE = 8 * 1024 * 1024;   // 字节/秒，合计上限
+  var uploadNextAt = 0;                // 全局时间轴上下一个可发时刻
+  function uploadWaitMs(bytes) {
+    var now = Date.now();
+    var start = Math.max(now, uploadNextAt);
+    uploadNextAt = start + Math.round(bytes / UPLOAD_RATE * 1000);
+    return start - now;
+  }
 
   /* 上传调度器：FIFO 队列 + 全局并发闸。所有上传（整包/分片/重试）
      都从 uploadSlot 进队，同时最多 UPLOAD_PARALLEL 条 XHR 在飞。
@@ -8134,39 +8149,44 @@
         !!(state.caps && state.caps.chunked);
 
       if (!useChunk) {
-        var xhr = new XMLHttpRequest();
-        xhr.open('POST', '/api/upload?name=' + encodeURIComponent(b.name) +
-          '&type=' + encodeURIComponent((b.file && b.file.type) || '') +
-          '&cid=' + encodeURIComponent(state.cid));
-        // 停滞看门狗：网络半开 / Wi-Fi 抖动时 onload/onerror 都不来，
-        // XHR 会永远挂起、进度卡死、按钮永远「发送中…」。每次收到数据就顺延，
-        // 超过 UPLOAD_STALL_MS 没动静就主动 abort，走 onerror 进失败/重试。
-        var stallTimer = null;
-        function armStall() {
-          if (stallTimer) clearTimeout(stallTimer);
-          stallTimer = setTimeout(function () {
-            try { xhr.abort(); } catch (e) {}
-          }, UPLOAD_STALL_MS);
-        }
-        function disarmStall() { if (stallTimer) { clearTimeout(stallTimer); stallTimer = null; } }
-        xhr.upload.onprogress = function (e) {
-          if (!e.lengthComputable) return;
-          setPct(e.loaded);
+        // 小文件整包也过全局令牌桶：限速是合计口径，包不包含整包都要算
+        (async function () {
+          var wm = uploadWaitMs(total);
+          if (wm > 0) await new Promise(function (r) { setTimeout(r, wm); });
+          var xhr = new XMLHttpRequest();
+          xhr.open('POST', '/api/upload?name=' + encodeURIComponent(b.name) +
+            '&type=' + encodeURIComponent((b.file && b.file.type) || '') +
+            '&cid=' + encodeURIComponent(state.cid));
+          // 停滞看门狗：网络半开 / Wi-Fi 抖动时 onload/onerror 都不来，
+          // XHR 会永远挂起、进度卡死、按钮永远「发送中…」。每次收到数据就顺延，
+          // 超过 UPLOAD_STALL_MS 没动静就主动 abort，走 onerror 进失败/重试。
+          var stallTimer = null;
+          function armStall() {
+            if (stallTimer) clearTimeout(stallTimer);
+            stallTimer = setTimeout(function () {
+              try { xhr.abort(); } catch (e) {}
+            }, UPLOAD_STALL_MS);
+          }
+          function disarmStall() { if (stallTimer) { clearTimeout(stallTimer); stallTimer = null; } }
+          xhr.upload.onprogress = function (e) {
+            if (!e.lengthComputable) return;
+            setPct(e.loaded);
+            armStall();
+          };
+          xhr.onload = function () {
+            disarmStall();
+            var d = {};
+            try { d = JSON.parse(xhr.responseText); } catch (e) {}
+            if (xhr.status === 200 && d.part) finishWith(d.part);
+            else fail(d.error || '上传失败');
+          };
+          xhr.onerror = function () { disarmStall(); fail('网络中断，上传失败'); };
+          xhr.onabort = function () { disarmStall(); fail('上传停滞，请重试'); };
+          xhr.ontimeout = function () { disarmStall(); fail('上传超时，请重试'); };
+          xhr.timeout = UPLOAD_XHR_TIMEOUT;
           armStall();
-        };
-        xhr.onload = function () {
-          disarmStall();
-          var d = {};
-          try { d = JSON.parse(xhr.responseText); } catch (e) {}
-          if (xhr.status === 200 && d.part) finishWith(d.part);
-          else fail(d.error || '上传失败');
-        };
-        xhr.onerror = function () { disarmStall(); fail('网络中断，上传失败'); };
-        xhr.onabort = function () { disarmStall(); fail('上传停滞，请重试'); };
-        xhr.ontimeout = function () { disarmStall(); fail('上传超时，请重试'); };
-        xhr.timeout = UPLOAD_XHR_TIMEOUT;
-        armStall();
-        xhr.send(b.file);
+          xhr.send(b.file);
+        })();
         return;
       }
 
@@ -8224,12 +8244,11 @@
         try {
           var part = null;
           for (var off = 0; off < total; off += UPLOAD_CHUNK) {
-            // 片与片之间停一拍：持续满速灌会把路由器缓冲填死（bufferbloat），
-            // 整个 Wi-Fi 的交互流量都会被拖死；这 150ms 是给队列排空的
-            if (off > 0) {
-              await new Promise(function (r) { setTimeout(r, UPLOAD_CHUNK_GAP); });
-            }
             var end = Math.min(off + UPLOAD_CHUNK, total);
+            // 全局令牌桶限速：每片按字节预算排到全局时间轴上，多条并发上传
+            // 合计速率不超过 UPLOAD_RATE，路由器队列不再被持续灌死
+            var wm = uploadWaitMs(end - off);
+            if (wm > 0) await new Promise(function (r) { setTimeout(r, wm); });
             var d = await postChunk(off, b.file.slice(off, end), end >= total, 3);
             if (d && d.part) part = d.part;
             setPct(end);
