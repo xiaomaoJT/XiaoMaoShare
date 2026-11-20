@@ -8045,9 +8045,48 @@
      值取宽松些，避免慢网误伤：正常一片 8MB 几秒内必到。 */
   var UPLOAD_STALL_MS = 20 * 1000;
   var UPLOAD_XHR_TIMEOUT = 90 * 1000;
+  /* 全局上传并发上限：同时最多 2 条上传连接在飞。
+     原来每个文件一入列就立即开 XHR（拖整夹 = 几十条同时灌 8MB 分片），
+     会把 Wi-Fi 上行瞬间打满：路由器缓冲被填死（bufferbloat），队列延迟
+     暴涨到几十秒 —— ARP/DNS/页面轮询全超时，表现就是「一上传整个
+     Wi-Fi 就崩、系统弹网络不可用、别的设备也掉线」。限并发 + 片间留隙，
+     给路由器留出排空队列的余地；局域网内 2 条连接照样跑满带宽。 */
+  var UPLOAD_PARALLEL = 2;
+  var UPLOAD_CHUNK_GAP = 150;   // 每片落定后停一拍，让路由器缓冲排空
+
+  /* 上传调度器：FIFO 队列 + 全局并发闸。所有上传（整包/分片/重试）
+     都从 uploadSlot 进队，同时最多 UPLOAD_PARALLEL 条 XHR 在飞。
+     task 内部自己兜底（fail 走 resolve 而非 reject），队列永不断流。 */
+  var uploadActive = 0;
+  var uploadQueue = [];
+  function pumpUpload() {
+    while (uploadActive < UPLOAD_PARALLEL && uploadQueue.length) {
+      var task = uploadQueue.shift();
+      uploadActive++;
+      try {
+        task().catch(function () {}).then(function () {
+          uploadActive--;
+          pumpUpload();
+        });
+      } catch (e) {
+        uploadActive--;
+        pumpUpload();
+      }
+    }
+  }
+  function uploadSlot(task) {
+    return new Promise(function (resolve, reject) {
+      // 必须 return：pumpUpload 靠这个 promise 的 settle 时机减计数、放行下一个，
+      // 少了 return 闸门瞬间全开（等于没限流）
+      uploadQueue.push(function () { return task().then(resolve, reject); });
+      pumpUpload();
+    });
+  }
 
   function startUpload(b) {
-    b.done = new Promise(function (resolve) {
+    // 过全局调度器：排队等并发闸放行，同时最多 2 条上传连接在飞
+    b.done = uploadSlot(function () {
+      return new Promise(function (resolve) {
       var total = b.size || (b.file && b.file.size) || 0;
 
       b.upct = 0;
@@ -8185,6 +8224,11 @@
         try {
           var part = null;
           for (var off = 0; off < total; off += UPLOAD_CHUNK) {
+            // 片与片之间停一拍：持续满速灌会把路由器缓冲填死（bufferbloat），
+            // 整个 Wi-Fi 的交互流量都会被拖死；这 150ms 是给队列排空的
+            if (off > 0) {
+              await new Promise(function (r) { setTimeout(r, UPLOAD_CHUNK_GAP); });
+            }
             var end = Math.min(off + UPLOAD_CHUNK, total);
             var d = await postChunk(off, b.file.slice(off, end), end >= total, 3);
             if (d && d.part) part = d.part;
@@ -8196,6 +8240,7 @@
           fail((err && err.message) || '上传失败');
         }
       })();
+      });
     });
   }
 
