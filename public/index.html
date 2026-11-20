@@ -7918,12 +7918,14 @@
   function dropBlock(b) {
     var i = compose.indexOf(b);
     if (i < 0) return;
-    // 文件夹：连带回收每个子项的预览，别留着 objectURL 占内存
+    // 删除即取消：正在传/排队的上传立刻 abort，不能「删了还在传」
     if (b.type === 'folder') {
       b.files.forEach(function (c) {
+        if (c._cancel) c._cancel();
         if (c.preview) { try { URL.revokeObjectURL(c.preview); } catch (e) {} c.preview = null; }
       });
     }
+    if (b._cancel) b._cancel();
     if (b.preview) { try { URL.revokeObjectURL(b.preview); } catch (e) {} }
     compose.splice(i, 1);
     if (b.el && b.el.parentNode) b.el.parentNode.removeChild(b.el);
@@ -8046,27 +8048,79 @@
      值取宽松些，避免慢网误伤：正常一片 8MB 几秒内必到。 */
   var UPLOAD_STALL_MS = 20 * 1000;
   var UPLOAD_XHR_TIMEOUT = 90 * 1000;
-  /* 全局上传并发上限：同时最多 2 条上传连接在飞。
-     原来每个文件一入列就立即开 XHR（拖整夹 = 几十条同时灌），会把 Wi-Fi
-     上行瞬间打满：路由器缓冲被填死（bufferbloat），队列延迟暴涨到几十秒
-     —— ARP/DNS/页面轮询全超时，表现就是「一上传整个 Wi-Fi 就崩、系统弹
-     网络不可用、别的设备也掉线」。 */
-  var UPLOAD_PARALLEL = 2;
+  /* 全局上传并发：默认 1 条连接。
+     实测结论：同一个文件单独传稳定，**两个文件并发传就把 Wi-Fi 打崩**
+     （AP 侧对双流交错的空口占用/内存压力远大于单流，弱路由尤其明显）。
+     并发闸限成 1 后，多文件退化为「串行的一个个单文件上传」—— 正是用户
+     验证过不会崩的形态；合计速率由下面的令牌桶兜住。 */
+  var UPLOAD_PARALLEL = 1;
 
   /* 全局限速（治本）：并发闸只管连接数，**持续满速灌上行照样 bufferbloat** ——
      路由器队列堆积与连接数无关，只取决于在途字节。文件夹上传（一次 500 个
      文件）让持续满速从「几秒」拉长到「几分钟」，Wi-Fi 必崩。这里用全局令牌桶
-     把所有上传的合计速率压到 UPLOAD_RATE，给路由器留出大量余量：
-     8MB/s（64Mbps）在局域网里依然很快，看视频/网页完全不受影响。
-     令牌桶是共享时钟：每片/每包开传前预扣「它按目标速率该占的时长」，
-     两条并发连接合计速率自然 ≤ 上限；网络比预算慢时自动不等待，不白耗。 */
-  var UPLOAD_RATE = 8 * 1024 * 1024;   // 字节/秒，合计上限
+     把所有上传的合计速率压到 UPLOAD_RATE，给链路留足余量。
+     4MB/s（32Mbps）比多数家用 Wi-Fi 的实际上行还低，但换的是「传的时候
+     整个网络照常能用」——比传得快重要。链路更好的环境可自行调高。 */
+  var UPLOAD_RATE = 4 * 1024 * 1024;   // 字节/秒，合计上限
   var uploadNextAt = 0;                // 全局时间轴上下一个可发时刻
   function uploadWaitMs(bytes) {
     var now = Date.now();
     var start = Math.max(now, uploadNextAt);
     uploadNextAt = start + Math.round(bytes / UPLOAD_RATE * 1000);
     return start - now;
+  }
+
+  /* ---------- 上传网速显示 ---------- */
+  /* 全局 400ms 一跳刷新所有在传行：速率用指数平滑防数字乱跳；排队等待时
+     分子不动、分母在走，数字自然回落到「等待中…」，正好能看出没在发数据。 */
+  var speedRows = [];        // 正在上传的 block / 文件夹子项
+  var speedTimer = null;
+  var uploadSpdTotal = 0;    // 合计速率，发送按钮旁展示
+  function fmtSpd(bps) {
+    if (!bps || bps < 1024) return '';
+    if (bps < 1048576) return Math.round(bps / 1024) + ' KB/s';
+    return (bps / 1048576).toFixed(1) + ' MB/s';
+  }
+  function speedJoin(b) {
+    if (speedRows.indexOf(b) < 0) speedRows.push(b);
+    b._spB = b._spB || 0;
+    b._spPrevB = b._spB;
+    b._spT = Date.now();
+    b.spd = 0;
+    if (!speedTimer) speedTimer = setInterval(speedTick, 400);
+  }
+  function speedLeave(b) {
+    var i = speedRows.indexOf(b);
+    if (i >= 0) speedRows.splice(i, 1);
+    b.spd = 0;
+    if (!speedRows.length && speedTimer) { clearInterval(speedTimer); speedTimer = null; uploadSpdTotal = 0; }
+  }
+  function paintSpeed(b) {
+    if (!b.refs || b.error || b.fid) return;   // 失败/完成的最终文案不覆盖
+    var pct = Math.round((b.upct || 0) * 100);
+    var sp = fmtSpd(b.spd);
+    b.refs.sz.textContent = pct + '% · ' + (sp || (b.spd === 0 && pct === 0 ? '等待中…' : '—'));
+  }
+  function speedTick() {
+    var now = Date.now();
+    var sum = 0;
+    var fbs = [];
+    speedRows.forEach(function (b) {
+      var dt = (now - b._spT) / 1000;
+      if (dt > 0) {
+        var inst = Math.max(0, ((b._spB || 0) - b._spPrevB) / dt);
+        b.spd = b.spd ? b.spd * 0.65 + inst * 0.35 : inst;
+        b._spPrevB = b._spB || 0;
+        b._spT = now;
+      }
+      sum += b.spd || 0;
+      paintSpeed(b);
+      // 文件夹聚合行跟着刷新（同一个文件夹只刷一次）
+      if (b._fb && fbs.indexOf(b._fb) < 0) fbs.push(b._fb);
+    });
+    fbs.forEach(function (fb) { paintFolder(fb); });
+    uploadSpdTotal = sum;
+    paintHint();
   }
 
   /* 上传调度器：FIFO 队列 + 全局并发闸。所有上传（整包/分片/重试）
@@ -8099,15 +8153,44 @@
   }
 
   function startUpload(b) {
-    // 过全局调度器：排队等并发闸放行，同时最多 2 条上传连接在飞
+    b.canceled = false;
+
+    /* 删除即取消：dropBlock / 从文件夹摘除时调这里，abort 所有在途请求，
+       并标记 canceled 让重试链不再续命 —— 之前删掉的块会把整份文件传完。
+       必须绑在**入队之前**：还在排队、压根没开始的文件也要能被删掉，
+       否则它轮到时会照传（用户看到「删了还在继续上传」的另一半原因）。 */
+    var liveXhrs = [];
+    b._cancel = function () {
+      b.canceled = true;
+      liveXhrs.slice().forEach(function (x) {
+        try { x.abort(); } catch (e) {}
+      });
+      liveXhrs.length = 0;
+      speedLeave(b);
+      b._cancel = null;
+    };
+    function track(xhr) {
+      liveXhrs.push(xhr);
+      function untrack() {
+        var k = liveXhrs.indexOf(xhr);
+        if (k >= 0) liveXhrs.splice(k, 1);
+      }
+      return untrack;
+    }
+
+    // 过全局调度器：排队等并发闸放行，同时只允许 1 条上传连接在飞
     b.done = uploadSlot(function () {
       return new Promise(function (resolve) {
       var total = b.size || (b.file && b.file.size) || 0;
+
+      // 排队期间被删掉了：直接结束，一个字节都不发
+      if (b.canceled) { resolve(b); return; }
 
       b.upct = 0;
       b.refs.bar.hidden = false;
       b.refs.sz.textContent = '0% · ' + fmtSize(total);
       if (b.onProgress) b.onProgress();
+      speedJoin(b);
 
       // 记下已显示过的最大百分比：重试只可能往回退一点点，绝不许归零
       var shownPct = 0;
@@ -8116,14 +8199,18 @@
         if (pct < shownPct) pct = shownPct;
         shownPct = pct;
         b.upct = pct / 100;   // 文件夹聚合行据此显示进行中项的部分进度
+        b._spB = doneBytes;   // 网速 tick 取这里的增量算速率
         b.refs.fill.style.width = pct + '%';
-        b.refs.sz.textContent = pct + '% · ' + fmtSize(total);
+        var sp = fmtSpd(b.spd);
+        b.refs.sz.textContent = pct + '% · ' + (sp || '—');
         if (b.onProgress) b.onProgress();
       }
 
       function fail(msg) {
+        if (b.canceled) { resolve(b); return; }   // 已删掉的块不报错、不弹重试
         b.error = msg;
         b.upct = 0;
+        speedLeave(b);
         b.refs.row.classList.add('bad');
         b.refs.bar.hidden = true;
         b.refs.sz.textContent = msg;
@@ -8136,6 +8223,7 @@
       function finishWith(part) {
         b.fid = part.fid;
         b.upct = 1;
+        speedLeave(b);
         b.refs.bar.hidden = true;
         b.refs.sz.textContent = fmtSize(b.size);
         syncSend();
@@ -8153,7 +8241,9 @@
         (async function () {
           var wm = uploadWaitMs(total);
           if (wm > 0) await new Promise(function (r) { setTimeout(r, wm); });
+          if (b.canceled) { resolve(b); return; }   // 等桶期间被删
           var xhr = new XMLHttpRequest();
+          var untrack = track(xhr);
           xhr.open('POST', '/api/upload?name=' + encodeURIComponent(b.name) +
             '&type=' + encodeURIComponent((b.file && b.file.type) || '') +
             '&cid=' + encodeURIComponent(state.cid));
@@ -8167,7 +8257,7 @@
               try { xhr.abort(); } catch (e) {}
             }, UPLOAD_STALL_MS);
           }
-          function disarmStall() { if (stallTimer) { clearTimeout(stallTimer); stallTimer = null; } }
+          function disarmStall() { if (stallTimer) { clearTimeout(stallTimer); stallTimer = null; } untrack(); }
           xhr.upload.onprogress = function (e) {
             if (!e.lengthComputable) return;
             setPct(e.loaded);
@@ -8196,6 +8286,7 @@
       function postChunk(offset, blob, isLast, left) {
         return new Promise(function (res, rej) {
           var xhr = new XMLHttpRequest();
+          var untrack = track(xhr);
           xhr.open('POST', '/api/upload?name=' + encodeURIComponent(b.name) +
             '&type=' + encodeURIComponent((b.file && b.file.type) || '') +
             '&cid=' + encodeURIComponent(state.cid) +
@@ -8211,7 +8302,7 @@
               try { xhr.abort(); } catch (e) {}
             }, UPLOAD_STALL_MS);
           }
-          function disarmStall() { settled = true; if (stallTimer) { clearTimeout(stallTimer); stallTimer = null; } }
+          function disarmStall() { settled = true; if (stallTimer) { clearTimeout(stallTimer); stallTimer = null; } untrack(); }
           xhr.upload.onprogress = function (e) {
             if (!e.lengthComputable) return;
             setPct(offset + e.loaded);   // 全局进度 = 已完成字节 + 本片已发字节
@@ -8231,12 +8322,16 @@
           armStall();
           xhr.send(blob);
         }).catch(function (err) {
+          if (b.canceled) throw err;   // 已删掉的块：不重试、不续命
           if (left <= 0) throw err;
           // 等一会儿再发同一片：进度停在 offset，不归零。停滞类错误多给一次机会
           var tries = (err && err.message === '上传停滞') ? 5 : 3;
           if (left > tries) left = tries;
           return new Promise(function (r) { setTimeout(r, 350 * (4 - left)); })
-            .then(function () { return postChunk(offset, blob, isLast, left - 1); });
+            .then(function () {
+              if (b.canceled) throw err;
+              return postChunk(offset, blob, isLast, left - 1);
+            });
         });
       }
 
@@ -8244,11 +8339,13 @@
         try {
           var part = null;
           for (var off = 0; off < total; off += UPLOAD_CHUNK) {
+            if (b.canceled) { resolve(b); return; }   // 等桶期间被删：立刻收手
             var end = Math.min(off + UPLOAD_CHUNK, total);
-            // 全局令牌桶限速：每片按字节预算排到全局时间轴上，多条并发上传
-            // 合计速率不超过 UPLOAD_RATE，路由器队列不再被持续灌死
+            // 全局令牌桶限速：每片按字节预算排到全局时间轴上，所有上传
+            // 合计速率不超过 UPLOAD_RATE，链路不会被持续灌死
             var wm = uploadWaitMs(end - off);
             if (wm > 0) await new Promise(function (r) { setTimeout(r, wm); });
+            if (b.canceled) { resolve(b); return; }
             var d = await postChunk(off, b.file.slice(off, end), end >= total, 3);
             if (d && d.part) part = d.part;
             setPct(end);
@@ -8393,6 +8490,7 @@
   function childRow(c, fb) {
     var row = buildMediaBlock(c);
     c.onProgress = function () { paintFolder(fb); };
+    c._fb = fb;                       // 网速 tick 据此刷新文件夹聚合行
     var cr = row.querySelector('.blk-retry');
     if (cr) cr.onclick = function (e) { e.stopPropagation(); retryUpload(c, fb); };
     var cx = row.querySelector('.blk-x');
@@ -8400,6 +8498,7 @@
       cx.title = '从文件夹移除这一项';
       cx.onclick = function (e) {
         e.stopPropagation();
+        if (c._cancel) c._cancel();    // 摘掉就取消：别让它在后台继续传
         var i = fb.files.indexOf(c);
         if (i >= 0) fb.files.splice(i, 1);
         if (row.parentNode) row.parentNode.removeChild(row);
@@ -8428,7 +8527,11 @@
     b.refs.fill.style.width = pct + '%';
     // 没有还在传的项就收起进度条：55/55 已上传后不该再挂着一根杆
     b.refs.bar.hidden = !pending;
+    // 合计上传速率：所有还在传的子项之和（串行上传时只有一项有速度）
+    var spd = 0;
+    if (pending) b.files.forEach(function (c) { if (!c.fid && !c.error) spd += c.spd || 0; });
     b.refs.sz.textContent = ok + '/' + total + ' 已上传 · ' + fmtSize(bytes) +
+      (pending ? ' · ' + (fmtSpd(spd) || '等待中…') : '') +
       (bad ? ' · ' + bad + ' 项失败' : '');
     b.refs.row.classList.toggle('bad', !!bad);
     if (b.refs.retry) {
@@ -8749,19 +8852,27 @@
     sendBtn.disabled = !allowed || !hasContent() || textOverLimit;
     if (mdBtn) mdBtn.disabled = mdBusy || !canSend('file') || !hasContent();
 
-    var n = allUploads().length;
-    if (n) {
-      hintEl.hidden = false;
-      hintEl.textContent = '将合并成 1 条消息 · ' + n + ' 个附件';
-    } else if (lockedEl.hidden) {
-      hintEl.hidden = false;
-      hintEl.textContent = '拖拽文件到页面 · 可直接粘贴截图';
-    }
+    paintHint();
 
     var clearBtn = $('clearAll');
     if (clearBtn) clearBtn.hidden = !hasContent();
     scheduleSnapshot();
     paintUndoRedo();
+  }
+
+  /* 发送按钮旁的提示行：附件数 + 实时合计上传速率（网速 tick 也会刷这里） */
+  function paintHint() {
+    var n = allUploads().length;
+    if (n) {
+      var sp = fmtSpd(uploadSpdTotal);
+      hintEl.hidden = false;
+      hintEl.textContent = '将合并成 1 条消息 · ' + n + ' 个附件' + (sp ? ' · ↑ ' + sp : '');
+      return;
+    }
+    if (lockedEl.hidden) {
+      hintEl.hidden = false;
+      hintEl.textContent = '拖拽文件到页面 · 可直接粘贴截图';
+    }
   }
 
   function resetCompose() {
