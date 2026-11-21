@@ -262,12 +262,29 @@ const SETTING_KEYS = ['allowSend', 'allowText', 'allowImage', 'allowFile'];
 // keepDays：内容保留天数，0 = 永不自动清理
 const clampDays = (v) => Math.max(0, Math.min(3650, Math.floor(Number(v) || 0)));
 
+// 上传参数（全局）：0/0/0 = 用前端内建的 2.6.0 稳定默认（不限速/并发4/8MB）。
+// 管理员在设置里改一次，存这里，随 /api/list 同步到所有设备，主控端也跟着变。
+const DEFAULT_UP = { uprate: 0, upparallel: 0, upchunk: 0 };
+const clampUp = (v, min, max) => {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return 0;
+  return n === 0 ? 0 : Math.max(min, Math.min(max, Math.floor(n)));
+};
+
 // 主设备（跑服务这台机器）可以改；其他设备只能按这里的规则来
-let settings = { allowSend: true, allowText: true, allowImage: true, allowFile: true, keepDays: 0 };
+let settings = {
+  allowSend: true, allowText: true, allowImage: true, allowFile: true, keepDays: 0,
+  uprate: DEFAULT_UP.uprate, upparallel: DEFAULT_UP.upparallel, upchunk: DEFAULT_UP.upchunk
+};
 try {
   const saved = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
   for (const k of SETTING_KEYS) if (typeof saved[k] === 'boolean') settings[k] = saved[k];
   if (saved && Number.isFinite(Number(saved.keepDays))) settings.keepDays = clampDays(saved.keepDays);
+  if (saved) {
+    settings.uprate = clampUp(saved.uprate, 1024 * 1024, 128 * 1024 * 1024);
+    settings.upparallel = clampUp(saved.upparallel, 1, 16);
+    settings.upchunk = clampUp(saved.upchunk, 256 * 1024, 64 * 1024 * 1024);
+  }
 } catch {
   /* 首次运行用默认值 */
 }
@@ -2646,6 +2663,28 @@ const onRequest = (req, res) => {
         try { body = JSON.parse(raw || '{}'); } catch {}
         for (const k of SETTING_KEYS) if (typeof body[k] === 'boolean') settings[k] = body[k];
         if ('keepDays' in body) settings.keepDays = clampDays(body.keepDays);
+        if ('uprate' in body) settings.uprate = clampUp(body.uprate, 1024 * 1024, 128 * 1024 * 1024);
+        if ('upparallel' in body) settings.upparallel = clampUp(body.upparallel, 1, 16);
+        if ('upchunk' in body) settings.upchunk = clampUp(body.upchunk, 256 * 1024, 64 * 1024 * 1024);
+        saveSettings();
+        json(res, 200, { settings });
+      })
+      .catch(() => json(res, 400, { error: 'bad request' }));
+    return;
+  }
+
+  // 上传参数（限速/并发/分片）：管理员或主控可改，存全局 settings。
+  // 与 /api/settings 分开是为了让「管理员」也能调传输参数（那是运维参数，
+  // 不是内容权限），而普通设备无权改。改完随 /api/list 同步到所有设备。
+  if (method === 'POST' && pathname === '/api/upload-settings') {
+    if (!canManage(req, cid)) return json(res, 403, { error: '只有管理员或主控能改传输参数' });
+    readBody(req, 4096)
+      .then((raw) => {
+        let body = {};
+        try { body = JSON.parse(raw || '{}'); } catch {}
+        if ('uprate' in body) settings.uprate = clampUp(body.uprate, 1024 * 1024, 128 * 1024 * 1024);
+        if ('upparallel' in body) settings.upparallel = clampUp(body.upparallel, 1, 16);
+        if ('upchunk' in body) settings.upchunk = clampUp(body.upchunk, 256 * 1024, 64 * 1024 * 1024);
         saveSettings();
         json(res, 200, { settings });
       })

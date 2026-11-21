@@ -8058,29 +8058,43 @@
      把路由器队列瞬间填满；停滞重试在网络已不稳时自动补灌，越救越堵。
      所以默认放开，把控制权交给用户：网络弱再在设置里自行调低。
      改完立即作用于后续分片和排队任务，不用刷新页面。 */
-  var UPRATE_KEY = 'xm.uprate';        // 字节/秒，0 = 不限速
-  var UPPAR_KEY = 'xm.upparallel';     // 同时上传的文件数
-  var UPCHUNK_KEY = 'xm.upchunk';      // 分片大小，字节
+  var UPRATE_KEY = 'xm.uprate';        // 旧值（已弃用，见下方迁移）
+  var UPPAR_KEY = 'xm.upparallel';
+  var UPCHUNK_KEY = 'xm.upchunk';
+  var UP_MIGRATED_KEY = 'xm.upcfg.global.v1';   // 一次性迁移标记
   var UPLOAD_DEFAULT_RATE = 0;                  // 不限速（2.6.0 行为）
   var UPLOAD_DEFAULT_PARALLEL = 4;              // 允许 3+ 大文件并发（用户已验证稳定）
   var UPLOAD_DEFAULT_CHUNK = 8 * 1024 * 1024;   // 2.6.0 的片大小
 
-  function readCfg(key, def, min, max) {
-    var raw;
-    try { raw = localStorage.getItem(key); } catch (e) { return def; }
-    if (raw === null || raw === '') return def;
-    var v = Number(raw);
-    if (!isFinite(v) || v < min || v > max) return def;
+  /* 一次性迁移：旧版本把这三个参数存在本机 localStorage（每台各调各的），
+     现改为服务端全局设置。清掉旧 key，免得残留值盖住新的全局默认。
+     服务端值为 0 表示「用内建默认」，非 0 才是管理员设的全局值。 */
+  (function migrateUpCfg() {
+    try {
+      if (localStorage.getItem(UP_MIGRATED_KEY)) return;
+      [UPRATE_KEY, UPPAR_KEY, UPCHUNK_KEY].forEach(function (k) {
+        try { localStorage.removeItem(k); } catch (e) {}
+      });
+      localStorage.setItem(UP_MIGRATED_KEY, '1');
+    } catch (e) {}
+  })();
+
+  /* 从服务端全局设置读（随 /api/list 的 settings 同步到所有设备）；
+     没设过 / 0 就回落到内建的 2.6.0 稳定默认。 */
+  function upSetting(key, def, min, max) {
+    var v = state.settings && state.settings[key];
+    v = Number(v);
+    if (!isFinite(v) || v <= 0 || v < min || v > max) return def;
     return v;
   }
   function uploadRate() {
-    return readCfg(UPRATE_KEY, UPLOAD_DEFAULT_RATE, 0, 128 * 1024 * 1024);
+    return upSetting('uprate', UPLOAD_DEFAULT_RATE, 1024 * 1024, 128 * 1024 * 1024);
   }
   function uploadParallel() {
-    return Math.max(1, Math.round(readCfg(UPPAR_KEY, UPLOAD_DEFAULT_PARALLEL, 1, 16)));
+    return Math.max(1, Math.round(upSetting('upparallel', UPLOAD_DEFAULT_PARALLEL, 1, 16)));
   }
   function uploadChunk() {
-    return readCfg(UPCHUNK_KEY, UPLOAD_DEFAULT_CHUNK, 256 * 1024, 64 * 1024 * 1024);
+    return upSetting('upchunk', UPLOAD_DEFAULT_CHUNK, 256 * 1024, 64 * 1024 * 1024);
   }
 
   /* 上传看门狗：网络半开 / Wi-Fi 抖动时 XHR 的 load/error 都可能永远不来，
@@ -10233,18 +10247,31 @@
 
   /* ============================================================ 传输设置（本机） */
   /**
-   * 限速 / 并发 / 分片都是「这台设备」的参数：每台机器的 Wi-Fi 环境不同，
-   * 所以不进服务端设置，也不要求主控权限。改完立刻生效、不用刷新页面：
-   * 限速按新速率给后续分片排桶；并发在下一轮 pump 生效；分片只对之后
-   * 开始的文件生效（已在传的文件锁定原片大小，避免 offset 累加错乱）。
+   * 限速 / 并发 / 分片是「全局」参数：管理员/主控改一次，存服务端 settings，
+   * 随 /api/list 同步到所有设备（含主控端），统一把上行流量调温柔保护 AP。
+   * 改完立即生效：限速清桶预算、并发下一轮 pump、分片对之后的文件生效
+   * （已在传的文件锁定原片大小，避免 offset 累加错乱）。
    */
   function buildTransferPane() {
     var wrap = document.createElement('div');
     wrap.className = 'dev-sec';
 
+    var SET_KEY = {};
+    SET_KEY[UPRATE_KEY] = 'uprate';
+    SET_KEY[UPPAR_KEY] = 'upparallel';
+    SET_KEY[UPCHUNK_KEY] = 'upchunk';
     function writeCfg(key, val) {
-      try { localStorage.setItem(key, String(val)); } catch (e) {}
       uploadNextAt = 0;   // 清掉旧速率预扣的预算，调高后立刻跑新档
+      var payload = {};
+      payload[SET_KEY[key]] = val;
+      // 立即存服务端；成功后同步 settings 给本机（poll 会把同样值带给所有设备）
+      return api('/api/upload-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }).then(function (d) {
+        if (d && d.settings) state.settings = d.settings;
+      }).catch(function (e) { toast('保存失败：' + (e.message || '网络错误')); });
     }
 
     function addRow(cfg) {
@@ -10348,7 +10375,7 @@
 
     var tip = document.createElement('div');
     tip.className = 'dev-hint';
-    tip.textContent = '以上只记在这台设备上，不影响别人；改完立即生效，不用刷新。';
+    tip.textContent = '以上对所有设备生效：管理员/主控改一次，其他设备（含主控端）会自动跟着变，不用刷新。';
     wrap.appendChild(tip);
     return wrap;
   }
@@ -10821,7 +10848,7 @@
     var canCfg = !!state.canConfig;
     var gen = canCfg ? buildGeneralPane() : null;
     if (gen) addTab('general', ISLIDERS, '通用', gen);
-    // 传输是本机参数，管理员/普通设备都能在头像菜单单独打开；主控设置里也放一份
+    // 传输是全局参数，管理员/主控都能改；改完存服务端同步到所有设备
     addTab('transfer', IUP, '传输', buildTransferPane());
     addTab('device', IDEV, '设备与权限', buildDeviceSection());
     if (canCfg) addTab('account', IUSERS, '账户', buildAccountSection());
@@ -11213,19 +11240,21 @@
     whoPop.appendChild(head);
 
     whoPop.appendChild(whoMenuItem(IEDIT, '编辑头像与昵称', openIdentity));
-    // 限速/并发/分片是本机的，任何设备都能调，不要求主控权限
-    whoPop.appendChild(whoMenuItem(IUP, '传输设置', function () {
-      var body = buildTransferPane();
-      body.style.marginTop = '0';
-      body.style.paddingTop = '0';
-      body.style.borderTop = '0';
-      Dialog.open({
-        title: '传输设置',
-        desc: '限速 / 并发 / 分片只记在这台设备上，改完立即生效，不用刷新页面。',
-        body: body,
-        actions: [{ label: '完成', value: true, kind: 'primary' }]
-      });
-    }));
+    // 传输参数是全局的，只有管理员/主控能改；普通设备不显示入口
+    if (state.admin) {
+      whoPop.appendChild(whoMenuItem(IUP, '传输设置', function () {
+        var body = buildTransferPane();
+        body.style.marginTop = '0';
+        body.style.paddingTop = '0';
+        body.style.borderTop = '0';
+        Dialog.open({
+          title: '传输设置',
+          desc: '限速 / 并发 / 分片对所有设备生效，改完自动同步，不用刷新页面。',
+          body: body,
+          actions: [{ label: '完成', value: true, kind: 'primary' }]
+        });
+      }));
+    }
     if (state.canConfig) {
       whoPop.appendChild(whoMenuItem(IUSERS, '账户管理', function () { openSettings('account'); }));
     }
