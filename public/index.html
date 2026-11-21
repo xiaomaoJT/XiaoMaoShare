@@ -3251,6 +3251,7 @@
   var ILINK = svgIcon('<rect x="2.6" y="3.6" width="7.2" height="7.2" rx="1.9"/><rect x="14.2" y="13.2" width="7.2" height="7.2" rx="1.9"/><path d="M9.8 7.2h3.4a2 2 0 0 1 2 2v4"/><path d="M4.6 13.2v4.2a2 2 0 0 0 2 2h4.4"/>', 1.9);
   var IDEL = svgIcon('<path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/>');
   var IDL = svgIcon('<path d="M12 3v12m0 0l4-4m-4 4l-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>');
+  var IUP = svgIcon('<path d="M12 20V8m0 0l4 4m-4-4l-4 4"/><path d="M4 4h16"/>');
   var ILOCK = svgIcon('<rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>', 2);
   var IGEAR = svgIcon('<circle cx="12" cy="12" r="3.2"/><path d="M19.2 14.6a1.5 1.5 0 0 0 .3 1.7l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.5 1.5 0 0 0-1.7-.3 1.5 1.5 0 0 0-.9 1.4v.2a2 2 0 1 1-4 0v-.1a1.5 1.5 0 0 0-1-1.4 1.5 1.5 0 0 0-1.7.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.5 1.5 0 0 0 .3-1.7 1.5 1.5 0 0 0-1.4-.9H3a2 2 0 1 1 0-4h.1a1.5 1.5 0 0 0 1.4-1 1.5 1.5 0 0 0-.3-1.7l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.5 1.5 0 0 0 1.7.3H9a1.5 1.5 0 0 0 .9-1.4V3a2 2 0 1 1 4 0v.1a1.5 1.5 0 0 0 .9 1.4 1.5 1.5 0 0 0 1.7-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.5 1.5 0 0 0-.3 1.7V9a1.5 1.5 0 0 0 1.4.9H21a2 2 0 1 1 0 4h-.1a1.5 1.5 0 0 0-1.4.9z"/>', 1.7);
   var ICONTRAST = svgIcon('<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18" fill="currentColor" stroke="none"/>', 1.8);
@@ -8040,33 +8041,50 @@
     syncSend();
   }
 
-  /* 大文件分片：4MB 一片。断一片只重发这一片，进度只增不减，不再整包归零。
-     片取 4MB 而不是更大：单片的瞬时突发减半，路由器缓冲压力更小。 */
-  var UPLOAD_CHUNK = 4 * 1024 * 1024;
+  /* ---------- 上传参数（本机设置，设置 → 传输 里可随时调） ----------
+     三项都存 localStorage，只影响这台设备；没设过 / 值非法就回落到经过
+     真机验证的安全默认：4MB/s 合计限速、1 并发、4MB 分片。
+     改完立即作用于后续分片和排队任务，不用刷新页面。 */
+  var UPRATE_KEY = 'xm.uprate';        // 字节/秒，0 = 不限速
+  var UPPAR_KEY = 'xm.upparallel';     // 同时上传的文件数
+  var UPCHUNK_KEY = 'xm.upchunk';      // 分片大小，字节
+  var UPLOAD_DEFAULT_RATE = 4 * 1024 * 1024;
+  var UPLOAD_DEFAULT_PARALLEL = 1;
+  var UPLOAD_DEFAULT_CHUNK = 4 * 1024 * 1024;
+
+  function readCfg(key, def, min, max) {
+    var raw;
+    try { raw = localStorage.getItem(key); } catch (e) { return def; }
+    if (raw === null || raw === '') return def;
+    var v = Number(raw);
+    if (!isFinite(v) || v < min || v > max) return def;
+    return v;
+  }
+  function uploadRate() {
+    return readCfg(UPRATE_KEY, UPLOAD_DEFAULT_RATE, 0, 128 * 1024 * 1024);
+  }
+  function uploadParallel() {
+    return Math.max(1, Math.round(readCfg(UPPAR_KEY, UPLOAD_DEFAULT_PARALLEL, 1, 16)));
+  }
+  function uploadChunk() {
+    return readCfg(UPCHUNK_KEY, UPLOAD_DEFAULT_CHUNK, 256 * 1024, 64 * 1024 * 1024);
+  }
+
   /* 上传看门狗：网络半开 / Wi-Fi 抖动时 XHR 的 load/error 都可能永远不来，
-     进度就卡死、按钮永远「发送中…」。停滞 20s 或整体超时 90s 就主动放弃重试。
-     值取宽松些，避免慢网误伤：正常一片 8MB 几秒内必到。 */
+     进度就卡死、按钮永远「发送中…」。停滞 20s 或整体超时 90s 就主动放弃重试。 */
   var UPLOAD_STALL_MS = 20 * 1000;
   var UPLOAD_XHR_TIMEOUT = 90 * 1000;
-  /* 全局上传并发：默认 1 条连接。
-     实测结论：同一个文件单独传稳定，**两个文件并发传就把 Wi-Fi 打崩**
-     （AP 侧对双流交错的空口占用/内存压力远大于单流，弱路由尤其明显）。
-     并发闸限成 1 后，多文件退化为「串行的一个个单文件上传」—— 正是用户
-     验证过不会崩的形态；合计速率由下面的令牌桶兜住。 */
-  var UPLOAD_PARALLEL = 1;
 
-  /* 全局限速（治本）：并发闸只管连接数，**持续满速灌上行照样 bufferbloat** ——
-     路由器队列堆积与连接数无关，只取决于在途字节。文件夹上传（一次 500 个
-     文件）让持续满速从「几秒」拉长到「几分钟」，Wi-Fi 必崩。这里用全局令牌桶
-     把所有上传的合计速率压到 UPLOAD_RATE，给链路留足余量。
-     4MB/s（32Mbps）比多数家用 Wi-Fi 的实际上行还低，但换的是「传的时候
-     整个网络照常能用」——比传得快重要。链路更好的环境可自行调高。 */
-  var UPLOAD_RATE = 4 * 1024 * 1024;   // 字节/秒，合计上限
+  /* 全局限速令牌桶（治本）：并发闸只管连接数，持续满速灌上行照样 bufferbloat ——
+     路由器队列堆积只取决于在途字节。所有上传按字节预算排到同一条时间轴上，
+     合计速率不超过 uploadRate()；设为 0 则完全放开。 */
   var uploadNextAt = 0;                // 全局时间轴上下一个可发时刻
   function uploadWaitMs(bytes) {
+    var rate = uploadRate();
+    if (!rate) { uploadNextAt = 0; return 0; }
     var now = Date.now();
     var start = Math.max(now, uploadNextAt);
-    uploadNextAt = start + Math.round(bytes / UPLOAD_RATE * 1000);
+    uploadNextAt = start + Math.round(bytes / rate * 1000);
     return start - now;
   }
 
@@ -8124,12 +8142,14 @@
   }
 
   /* 上传调度器：FIFO 队列 + 全局并发闸。所有上传（整包/分片/重试）
-     都从 uploadSlot 进队，同时最多 UPLOAD_PARALLEL 条 XHR 在飞。
+     都从 uploadSlot 进队，同时最多 uploadParallel() 条 XHR 在飞。
+     并发数每次 pump 都读一遍：设置里调大后，排队任务下次放行立即见效；
+     调小则在当前这批完成后收敛，不打断在途请求。
      task 内部自己兜底（fail 走 resolve 而非 reject），队列永不断流。 */
   var uploadActive = 0;
   var uploadQueue = [];
   function pumpUpload() {
-    while (uploadActive < UPLOAD_PARALLEL && uploadQueue.length) {
+    while (uploadActive < uploadParallel() && uploadQueue.length) {
       var task = uploadQueue.shift();
       uploadActive++;
       try {
@@ -8232,7 +8252,7 @@
       }
 
       // 只有「大文件 + 服务端支持分片」才切片；否则一律整包（与旧版完全一致，兼容老主机）
-      var useChunk = total > UPLOAD_CHUNK &&
+      var useChunk = total > uploadChunk() &&
         b.file && typeof b.file.slice === 'function' &&
         !!(state.caps && state.caps.chunked);
 
@@ -8335,14 +8355,16 @@
         });
       }
 
+      // 本文件锁定一个片大小：中途改设置不破坏 offset 累加与 final 判定
+      var chunk = uploadChunk();
       (async function () {
         try {
           var part = null;
-          for (var off = 0; off < total; off += UPLOAD_CHUNK) {
+          for (var off = 0; off < total; off += chunk) {
             if (b.canceled) { resolve(b); return; }   // 等桶期间被删：立刻收手
-            var end = Math.min(off + UPLOAD_CHUNK, total);
+            var end = Math.min(off + chunk, total);
             // 全局令牌桶限速：每片按字节预算排到全局时间轴上，所有上传
-            // 合计速率不超过 UPLOAD_RATE，链路不会被持续灌死
+            // 合计速率不超过 uploadRate()，链路不会被持续灌死
             var wm = uploadWaitMs(end - off);
             if (wm > 0) await new Promise(function (r) { setTimeout(r, wm); });
             if (b.canceled) { resolve(b); return; }
@@ -10175,6 +10197,128 @@
     return wrap;
   }
 
+  /* ============================================================ 传输设置（本机） */
+  /**
+   * 限速 / 并发 / 分片都是「这台设备」的参数：每台机器的 Wi-Fi 环境不同，
+   * 所以不进服务端设置，也不要求主控权限。改完立刻生效、不用刷新页面：
+   * 限速按新速率给后续分片排桶；并发在下一轮 pump 生效；分片只对之后
+   * 开始的文件生效（已在传的文件锁定原片大小，避免 offset 累加错乱）。
+   */
+  function buildTransferPane() {
+    var wrap = document.createElement('div');
+    wrap.className = 'dev-sec';
+
+    function writeCfg(key, val) {
+      try { localStorage.setItem(key, String(val)); } catch (e) {}
+      uploadNextAt = 0;   // 清掉旧速率预扣的预算，调高后立刻跑新档
+    }
+
+    function addRow(cfg) {
+      var head = document.createElement('div');
+      head.className = 'dev-head';
+      head.innerHTML = '<span>' + cfg.title + '</span>';
+      wrap.appendChild(head);
+
+      var seg = document.createElement('div');
+      seg.className = 'keep-seg';
+      wrap.appendChild(seg);
+
+      var chips = [];
+      var inp;
+      function sync() {
+        var cur = cfg.read();
+        chips.forEach(function (c) { c.classList.toggle('on', c._v === cur); });
+        inp.value = cfg.toInput(cur);
+      }
+      cfg.opts.forEach(function (o) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'fchip';
+        b.textContent = o[1];
+        b._v = o[0];
+        b.onclick = function () {
+          writeCfg(cfg.key, o[0]);
+          sync();
+          toast(cfg.title + '已设为 ' + o[1]);
+        };
+        chips.push(b);
+        seg.appendChild(b);
+      });
+
+      var cf = document.createElement('div');
+      cf.className = 'tg-field';
+      cf.style.marginTop = '10px';
+      var lb = document.createElement('label');
+      lb.textContent = '自定义（' + cfg.unit + '）';
+      inp = document.createElement('input');
+      inp.type = 'number';
+      inp.min = String(cfg.min);
+      inp.max = String(cfg.max);
+      inp.step = String(cfg.step);
+      if (cfg.placeholder) inp.placeholder = cfg.placeholder;
+      var sm = document.createElement('small');
+      sm.textContent = cfg.hint;
+      inp.onchange = function () {
+        var raw = (inp.value || '').trim();
+        var v = Number(raw);
+        if (!raw && cfg.emptyVal !== undefined) {
+          writeCfg(cfg.key, cfg.emptyVal);
+          sync();
+          toast(cfg.title + '已设为不限速');
+          return;
+        }
+        if (!raw || !isFinite(v) || v < cfg.min || v > cfg.max) {
+          sync();
+          toast('请输入 ' + cfg.min + ' – ' + cfg.max + ' 之间的数值');
+          return;
+        }
+        var bytes = cfg.fromInput(v);
+        writeCfg(cfg.key, bytes);
+        sync();
+        toast(cfg.title + '已设为 ' + raw + ' ' + cfg.unit);
+      };
+      cf.appendChild(lb); cf.appendChild(inp); cf.appendChild(sm);
+      wrap.appendChild(cf);
+      sync();
+    }
+
+    addRow({
+      key: UPRATE_KEY, title: '上传限速', unit: 'MB/s',
+      read: uploadRate, min: 0.1, max: 128, step: 0.5,
+      toInput: function (v) { return v ? String(+(v / 1048576).toFixed(2)) : ''; },
+      fromInput: function (v) { return Math.round(v * 1048576); },
+      opts: [[0, '不限速'], [1048576, '1 MB/s'], [2097152, '2 MB/s'],
+             [4194304, '4 MB/s（默认）'], [8388608, '8 MB/s'], [16777216, '16 MB/s']],
+      hint: '合计上传速度上限。家里 Wi-Fi 一上传就卡/掉线就调低到 1–2；网络好、急着传就调高。选「不限速」按链路全速传，可能把老路由器打崩。',
+      placeholder: '留空 = 不限速', emptyVal: 0
+    });
+
+    addRow({
+      key: UPPAR_KEY, title: '上传并发', unit: '个文件',
+      read: uploadParallel, min: 1, max: 16, step: 1,
+      toInput: function (v) { return String(v); },
+      fromInput: function (v) { return Math.round(v); },
+      opts: [[1, '1 个（默认·最稳）'], [2, '2 个'], [3, '3 个'], [4, '4 个']],
+      hint: '同时传几个文件。实测单文件稳、两个就打崩 Wi-Fi 的请保持 1；链路强可自行调大。调大后排队的文件立即放行，调小等当前这批传完生效。'
+    });
+
+    addRow({
+      key: UPCHUNK_KEY, title: '分片大小', unit: 'MB',
+      read: uploadChunk, min: 0.25, max: 64, step: 0.5,
+      toInput: function (v) { return String(+(v / 1048576).toFixed(2)); },
+      fromInput: function (v) { return Math.round(v * 1048576); },
+      opts: [[1048576, '1 MB'], [2097152, '2 MB'], [4194304, '4 MB（默认）'],
+             [8388608, '8 MB'], [16777216, '16 MB']],
+      hint: '大文件切成多片传，某片失败只重发那片。片越小重发代价越低、瞬时突发越小，但请求数更多。改完对之后开始上传的文件生效。'
+    });
+
+    var tip = document.createElement('div');
+    tip.className = 'dev-hint';
+    tip.textContent = '以上只记在这台设备上，不影响别人；改完立即生效，不用刷新。';
+    wrap.appendChild(tip);
+    return wrap;
+  }
+
   /** 通用：约束「其他设备」的整体默认值；单台设备的收紧在「设备与权限」里 */
   function buildGeneralPane() {
     var rows = [
@@ -10643,6 +10787,8 @@
     var canCfg = !!state.canConfig;
     var gen = canCfg ? buildGeneralPane() : null;
     if (gen) addTab('general', ISLIDERS, '通用', gen);
+    // 传输是本机参数，管理员/普通设备都能在头像菜单单独打开；主控设置里也放一份
+    addTab('transfer', IUP, '传输', buildTransferPane());
     addTab('device', IDEV, '设备与权限', buildDeviceSection());
     if (canCfg) addTab('account', IUSERS, '账户', buildAccountSection());
     if (canCfg) addTab('tg', ITG, 'Telegram', buildTgSection());
@@ -11033,6 +11179,19 @@
     whoPop.appendChild(head);
 
     whoPop.appendChild(whoMenuItem(IEDIT, '编辑头像与昵称', openIdentity));
+    // 限速/并发/分片是本机的，任何设备都能调，不要求主控权限
+    whoPop.appendChild(whoMenuItem(IUP, '传输设置', function () {
+      var body = buildTransferPane();
+      body.style.marginTop = '0';
+      body.style.paddingTop = '0';
+      body.style.borderTop = '0';
+      Dialog.open({
+        title: '传输设置',
+        desc: '限速 / 并发 / 分片只记在这台设备上，改完立即生效，不用刷新页面。',
+        body: body,
+        actions: [{ label: '完成', value: true, kind: 'primary' }]
+      });
+    }));
     if (state.canConfig) {
       whoPop.appendChild(whoMenuItem(IUSERS, '账户管理', function () { openSettings('account'); }));
     }
