@@ -3038,6 +3038,19 @@ const onRequest = (req, res) => {
     return;
   }
 
+  // 发送端删除/取消上传：立刻撤掉「收」列表里的进度并删掉半成品，
+  // 否则中止的文件会一直挂在对方界面上（原来只靠 60s/10min 超时兜底）
+  if (pathname === '/api/upload/cancel') {
+    const uid = (url.searchParams.get('uid') || '').slice(0, 120);
+    const u = uid && uploads.get(uid);
+    if (u) {
+      uploads.delete(uid);
+      if (u.file) fs.unlink(path.join(FILES_DIR, u.file), () => {});
+    }
+    json(res, 200, { ok: true });
+    return;
+  }
+
   // 上传到暂存区：只落盘，不产生消息；稍后由 /api/send 一次性组成一条消息
   if (method === 'POST' && (pathname === '/api/upload' || pathname === '/api/file')) {
     const name = (url.searchParams.get('name') || 'file').slice(-180);
@@ -3090,7 +3103,9 @@ const onRequest = (req, res) => {
       done = true;
       uploads.delete(id);
       try { if (ws) ws.destroy(); } catch {}
-      if (!chunked) fs.unlink(filePath, () => {});   // 分片保留已写字节，等续传
+      // 一旦从 uploads 表里摘掉，60s 兜底清理就再也看不到这条了 —— 立刻删，
+      // 否则失败/取消的半成品文件会永久留在 data/files 里占空间
+      try { fs.unlink(filePath, () => {}); } catch {}
       json(res, code, { error: msg });
     };
 

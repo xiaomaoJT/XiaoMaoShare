@@ -8033,6 +8033,15 @@
   /** 失败重传：清掉错误态后走一遍完整上传；文件夹子项重传完要重绘整夹那一行 */
   function retryUpload(b, fb) {
     if (!b || !b.file || !b.refs) return;
+    // 重试会换新的 uid：先把上一次失败留下的半成品从「收」里撤掉，
+    // 否则同一个文件重传几次，对方就挂着几条 30%~50% 的僵尸进度
+    if (b._uid) {
+      try {
+        fetch('/api/upload/cancel?uid=' + encodeURIComponent(b._uid), { keepalive: true })
+          .catch(function () {});
+      } catch (e) {}
+      b._uid = '';
+    }
     b.error = null;
     b.refs.row.classList.remove('bad');
     if (b.refs.retry) b.refs.retry.hidden = true;
@@ -8043,14 +8052,18 @@
 
   /* ---------- 上传参数（本机设置，设置 → 传输 里可随时调） ----------
      三项都存 localStorage，只影响这台设备；没设过 / 值非法就回落到经过
-     真机验证的安全默认：4MB/s 合计限速、1 并发、4MB 分片。
+     默认回到 2.6.0 已验证稳定的形态：不限速、允许多文件并发、8MB 分片。
+     A/B 实测：2.6.0 三个大文件全速并发能正常很久，而限速(令牌桶突发)+停滞自动
+     重试反而更容易把 Wi-Fi 打崩 —— 限速是「发一整片再等一拍」的突发，周期性
+     把路由器队列瞬间填满；停滞重试在网络已不稳时自动补灌，越救越堵。
+     所以默认放开，把控制权交给用户：网络弱再在设置里自行调低。
      改完立即作用于后续分片和排队任务，不用刷新页面。 */
   var UPRATE_KEY = 'xm.uprate';        // 字节/秒，0 = 不限速
   var UPPAR_KEY = 'xm.upparallel';     // 同时上传的文件数
   var UPCHUNK_KEY = 'xm.upchunk';      // 分片大小，字节
-  var UPLOAD_DEFAULT_RATE = 4 * 1024 * 1024;
-  var UPLOAD_DEFAULT_PARALLEL = 1;
-  var UPLOAD_DEFAULT_CHUNK = 4 * 1024 * 1024;
+  var UPLOAD_DEFAULT_RATE = 0;                  // 不限速（2.6.0 行为）
+  var UPLOAD_DEFAULT_PARALLEL = 4;              // 允许 3+ 大文件并发（用户已验证稳定）
+  var UPLOAD_DEFAULT_CHUNK = 8 * 1024 * 1024;   // 2.6.0 的片大小
 
   function readCfg(key, def, min, max) {
     var raw;
@@ -8071,7 +8084,8 @@
   }
 
   /* 上传看门狗：网络半开 / Wi-Fi 抖动时 XHR 的 load/error 都可能永远不来，
-     进度就卡死、按钮永远「发送中…」。停滞 20s 或整体超时 90s 就主动放弃重试。 */
+     进度就卡死、按钮永远「发送中…」。停滞 20s 或整体超时 90s 就 abort 成明确
+     失败提示（交回给用户重试），绝不自动重灌——拥堵时自动补灌会把 Wi-Fi 打崩。 */
   var UPLOAD_STALL_MS = 20 * 1000;
   var UPLOAD_XHR_TIMEOUT = 90 * 1000;
 
@@ -8180,15 +8194,30 @@
        必须绑在**入队之前**：还在排队、压根没开始的文件也要能被删掉，
        否则它轮到时会照传（用户看到「删了还在继续上传」的另一半原因）。 */
     var liveXhrs = [];
+    b._uid = '';   // 分片上传的服务端 id，取消时用它撤掉「收」里的半成品
     b._cancel = function () {
       b.canceled = true;
       liveXhrs.slice().forEach(function (x) {
         try { x.abort(); } catch (e) {}
       });
       liveXhrs.length = 0;
+      // 通知主机立即撤掉接收进度、删除半成品文件；keepalive 保证页面关掉也能发出
+      if (b._uid) {
+        try {
+          fetch('/api/upload/cancel?uid=' + encodeURIComponent(b._uid), { keepalive: true })
+            .catch(function () {});
+        } catch (e) {}
+        b._uid = '';
+      }
       speedLeave(b);
       b._cancel = null;
     };
+
+    // 排队中也要有明确状态：并发=1 时后面的文件会等很久，不能只显示一个裸大小
+    b._queued = true;
+    b.refs.bar.hidden = true;
+    b.refs.sz.textContent = '排队中 · ' + fmtSize(b.size || (b.file && b.file.size) || 0);
+    if (b.onProgress) b.onProgress();
     function track(xhr) {
       liveXhrs.push(xhr);
       function untrack() {
@@ -8207,6 +8236,7 @@
       if (b.canceled) { resolve(b); return; }
 
       b.upct = 0;
+      b._queued = false;
       b.refs.bar.hidden = false;
       b.refs.sz.textContent = '0% · ' + fmtSize(total);
       if (b.onProgress) b.onProgress();
@@ -8302,6 +8332,7 @@
 
       // 大文件：同一个 uid 逐片发，最后一片带 final=1；断片只重发这一片
       var uid = 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+      b._uid = uid;   // 记下来，删除时可让主机立刻撤掉「收」里的半成品
 
       function postChunk(offset, blob, isLast, left) {
         return new Promise(function (res, rej) {
@@ -8343,10 +8374,13 @@
           xhr.send(blob);
         }).catch(function (err) {
           if (b.canceled) throw err;   // 已删掉的块：不重试、不续命
+          /* 停滞/超时 = 链路正在拥塞或半开，此时自动重灌同一片只会火上浇油：
+             2.6.0 从不停滞重试（它压根没有看门狗），全速并发反而稳。看门狗只
+             负责把「卡死」变成明确的失败提示，交回给用户决定何时重试，绝不
+             在网络已不稳时自动补灌。仅「网络中断」（连接被断、非拥塞）保留
+             有限的 3 次重试。 */
+          if (err && (err.message === '上传停滞' || err.message === '上传超时')) throw err;
           if (left <= 0) throw err;
-          // 等一会儿再发同一片：进度停在 offset，不归零。停滞类错误多给一次机会
-          var tries = (err && err.message === '上传停滞') ? 5 : 3;
-          if (left > tries) left = tries;
           return new Promise(function (r) { setTimeout(r, 350 * (4 - left)); })
             .then(function () {
               if (b.canceled) throw err;
@@ -10287,9 +10321,9 @@
       read: uploadRate, min: 0.1, max: 128, step: 0.5,
       toInput: function (v) { return v ? String(+(v / 1048576).toFixed(2)) : ''; },
       fromInput: function (v) { return Math.round(v * 1048576); },
-      opts: [[0, '不限速'], [1048576, '1 MB/s'], [2097152, '2 MB/s'],
-             [4194304, '4 MB/s（默认）'], [8388608, '8 MB/s'], [16777216, '16 MB/s']],
-      hint: '合计上传速度上限。家里 Wi-Fi 一上传就卡/掉线就调低到 1–2；网络好、急着传就调高。选「不限速」按链路全速传，可能把老路由器打崩。',
+      opts: [[0, '不限速（默认）'], [2097152, '2 MB/s'],
+             [4194304, '4 MB/s'], [8388608, '8 MB/s'], [16777216, '16 MB/s']],
+      hint: '0 = 按链路全速。传的时候网络卡才调低。',
       placeholder: '留空 = 不限速', emptyVal: 0
     });
 
@@ -10298,8 +10332,8 @@
       read: uploadParallel, min: 1, max: 16, step: 1,
       toInput: function (v) { return String(v); },
       fromInput: function (v) { return Math.round(v); },
-      opts: [[1, '1 个（默认·最稳）'], [2, '2 个'], [3, '3 个'], [4, '4 个']],
-      hint: '同时传几个文件。实测单文件稳、两个就打崩 Wi-Fi 的请保持 1；链路强可自行调大。调大后排队的文件立即放行，调小等当前这批传完生效。'
+      opts: [[1, '1 个'], [2, '2 个'], [3, '3 个'], [4, '4 个（默认）']],
+      hint: '同时传几个文件；网络卡就调小，排队逐个传。'
     });
 
     addRow({
@@ -10307,9 +10341,9 @@
       read: uploadChunk, min: 0.25, max: 64, step: 0.5,
       toInput: function (v) { return String(+(v / 1048576).toFixed(2)); },
       fromInput: function (v) { return Math.round(v * 1048576); },
-      opts: [[1048576, '1 MB'], [2097152, '2 MB'], [4194304, '4 MB（默认）'],
-             [8388608, '8 MB'], [16777216, '16 MB']],
-      hint: '大文件切成多片传，某片失败只重发那片。片越小重发代价越低、瞬时突发越小，但请求数更多。改完对之后开始上传的文件生效。'
+      opts: [[1048576, '1 MB'], [2097152, '2 MB'], [4194304, '4 MB'],
+             [8388608, '8 MB（默认）'], [16777216, '16 MB']],
+      hint: '大文件切片传，某片失败只重发该片。改完对之后的文件生效。'
     });
 
     var tip = document.createElement('div');
