@@ -10271,7 +10271,8 @@
         body: JSON.stringify(payload)
       }).then(function (d) {
         if (d && d.settings) state.settings = d.settings;
-      }).catch(function (e) { toast('保存失败：' + (e.message || '网络错误')); });
+        return true;
+      }).catch(function (e) { toast('保存失败：' + (e.message || '网络错误')); return false; });
     }
 
     function addRow(cfg) {
@@ -10298,9 +10299,11 @@
         b.textContent = o[1];
         b._v = o[0];
         b.onclick = function () {
-          writeCfg(cfg.key, o[0]);
-          sync();
-          toast(cfg.title + '已设为 ' + o[1]);
+          // 等服务端回包拿到新 settings 再重绘高亮，否则读到旧值→按钮「点了不变」；
+          // 保存失败时不假装成功（writeCfg 内部已报错）。
+          writeCfg(cfg.key, o[0]).then(function (ok) {
+            if (ok) { sync(); toast(cfg.title + '已设为 ' + o[1]); }
+          });
         };
         chips.push(b);
         seg.appendChild(b);
@@ -10323,9 +10326,9 @@
         var raw = (inp.value || '').trim();
         var v = Number(raw);
         if (!raw && cfg.emptyVal !== undefined) {
-          writeCfg(cfg.key, cfg.emptyVal);
-          sync();
-          toast(cfg.title + '已设为不限速');
+          writeCfg(cfg.key, cfg.emptyVal).then(function (ok) {
+            if (ok) { sync(); toast(cfg.title + '已设为不限速'); }
+          });
           return;
         }
         if (!raw || !isFinite(v) || v < cfg.min || v > cfg.max) {
@@ -10334,9 +10337,9 @@
           return;
         }
         var bytes = cfg.fromInput(v);
-        writeCfg(cfg.key, bytes);
-        sync();
-        toast(cfg.title + '已设为 ' + raw + ' ' + cfg.unit);
+        writeCfg(cfg.key, bytes).then(function (ok) {
+          if (ok) { sync(); toast(cfg.title + '已设为 ' + raw + ' ' + cfg.unit); }
+        });
       };
       cf.appendChild(lb); cf.appendChild(inp); cf.appendChild(sm);
       wrap.appendChild(cf);
