@@ -6000,7 +6000,9 @@
     wrap.appendChild(bar);
 
     Array.prototype.slice.call(el.querySelectorAll('.bnode, .more')).forEach(function (n) { n.remove(); });
-    el.appendChild(wrap);
+    // 编辑框属于正文区，必须落在展开胶囊/补充区之前（和 buildBody 同一锚点）。
+    // 之前用 appendChild 会被加到末尾，编辑框跑到「补充说明 / 继续补充」下面。
+    appendBodyNode(el, wrap);
     var meta = el.querySelector('.meta');
     if (meta) meta.style.opacity = '.45';
     if (tareas[0]) { tareas[0].focus(); tareas[0].setSelectionRange(tareas[0].value.length, tareas[0].value.length); }
