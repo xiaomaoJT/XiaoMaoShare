@@ -5757,6 +5757,18 @@
   /* ---------------- 消息编辑 ---------------- */
   // 内容区（文字 / 图片 / 文件 / 收起说明）抽成 buildBody，便于编辑后增量重建。
   // 顶层内容节点统一打 .bnode，maybeClamp 生成的「展开全文」按钮打 .more，重建时一并清除。
+  // 正文节点统一插到「正文区末尾」：即展开胶囊 .expand-tip 之前、补充区 ._notes 之前。
+  // 初次建卡时这两个锚点都还没建，等价于 append 到末尾；
+  // 编辑后重建时它们已存在，必须插到前面，否则正文会被 append 到
+  // 「补充 / 继续补充 / 展开胶囊」下面，造成内容错位。
+  // 锚点优先级与初次建卡顺序一致（buildBody → buildNotes → 胶囊），
+  // 这样重建后仍是「正文 → 胶囊 → 补充区」，不会把正文排到胶囊之后。
+  function appendBodyNode(el, node) {
+    var anchor = el.querySelector('.expand-tip') || el._notes;
+    if (anchor && anchor.parentNode === el) el.insertBefore(node, anchor);
+    else el.appendChild(node);
+  }
+
   function buildBody(el, it) {
     Array.prototype.slice.call(el.querySelectorAll('.bnode, .more')).forEach(function (n) { n.remove(); });
 
@@ -5810,7 +5822,7 @@
         grid.appendChild(morePic);
       }
       grid.classList.add('bnode');
-      el.appendChild(grid);
+      appendBodyNode(el, grid);
       run = [];
     }
     /* 文件夹消息：连续的同目录附件在信息流里也收成一行，点开才摊平。
@@ -5880,7 +5892,7 @@
         var body = document.createElement('div');
         body.className = 'text-body bnode';
         body.innerHTML = mdToHtml(p.text);
-        el.appendChild(body);
+        appendBodyNode(el, body);
         pi++; continue;
       }
       if (p.kind === 'image') { run.push(p); pi++; continue; }
@@ -5893,14 +5905,14 @@
         }
         if (grp.length > 1) {
           flushImages();
-          el.appendChild(buildFolderGroup(dir, grp));
+          appendBodyNode(el, buildFolderGroup(dir, grp));
           pi = k; continue;
         }
       }
       flushImages();
       var fr = fileRow(it, p);
       fr.classList.add('bnode');
-      el.appendChild(fr);
+      appendBodyNode(el, fr);
       pi++;
     }
     flushImages();
@@ -5917,6 +5929,7 @@
     note.type = 'button';
     note.className = 'collapsed-note bnode';
     note.title = '展开这条消息';
+    // collapsed-note 是正文的一部分（收起说明），同样要落在补充区之前
     note.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>'
       + '<span>已收起' + (bits.length ? '（' + bits.join('、') + '）' : '') + ' · 点击展开</span>';
     note.addEventListener('click', function (e) {
@@ -5925,7 +5938,7 @@
       el.classList.remove('collapsed');
       updateExpandHints();
     });
-    el.appendChild(note);
+    appendBodyNode(el, note);
   }
 
   // 在 meta 里补「已编辑 · 时间」标记；点它打开修订历史弹窗
