@@ -7,6 +7,9 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="互传">
+<!-- 页面自身版本：服务端 serve 时注入 pkg.version，供版本探针比对（区分真实升级与 localStorage 残留误报）。
+     占位符未被替换（直接开文件 / 老服务端）时版本探针会跳过判断，宁可不提示也不误报。 -->
+<meta name="xm-ver" content="__APP_VERSION__">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" type="image/png" href="/icon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -7579,7 +7582,8 @@
      ① 把最近一次 /api/list 的完整响应存进 localStorage，刷新后能立刻还原上次的列表与界面；
      ② 还原成功后若主机仍连不上，现有断线提示（markOffline）会接管顶部提示条。 */
   var LIST_CACHE_KEY = 'xm.cache';
-  var VER_CACHE_KEY = 'xm.sv';
+  var VER_CACHE_KEY = 'xm.sv';   // 旧版本探针的遗留键，下面一次性清掉，不再用于判断
+  var versionWarned = false;     // 本次会话是否已提示过升级：旧缓存页面每次轮询都会版本不符，只提示一次
   function saveListCache(d) {
     if (!d) return;
     try {
@@ -7599,19 +7603,28 @@
       return true;
     } catch (e) { return false; }
   }
-  /* 版本探针：主机在线时比对服务端版本，发现升级就提示用户硬刷新。
-     因为主页是强缓存，普通刷新不会拉新页面，只能靠这个提示兜底（300s 后也会自动更新）。 */
+  /* 版本探针：比对「页面自身版本」与「服务端版本」，页面落后才提示硬刷新。
+     页面版本由服务端吐出 HTML 时注入 <meta name="xm-ver">（见 server.js 首页路由）。
+     旧实现拿 localStorage 里上次记的版本当基准，那个值跨安装残留 —— 用户刚装好新版、
+     本地却留着旧版本号，于是误报「发现新版本，请硬刷新」。改用页面版本后：
+       · 装了最新版 → 页面版本 == 服务端版本 → 不提示；
+       · 真拿到旧缓存页 → 页面版本 < 服务端版本 → 提示（强缓存普通刷新拉不到新页，只能靠这个兜底）。
+     顺手清掉遗留的 xm.sv。占位符没被替换（纯静态打开）时无从比对，直接跳过。 */
   function checkVersion() {
+    try { localStorage.removeItem(VER_CACHE_KEY); } catch (e) {}
+    if (versionWarned) return;
+    var meta = document.querySelector('meta[name="xm-ver"]');
+    var pageVer = meta && meta.getAttribute('content');
+    if (!pageVer || pageVer === '__APP_VERSION__') return;
     try {
       fetch('/api/version', { cache: 'no-store' }).then(function (r) {
         return r.ok ? r.json() : null;
       }).then(function (v) {
         if (!v || !v.version) return;
-        var prev = localStorage.getItem(VER_CACHE_KEY);
-        if (prev && prev !== v.version) {
+        if (pageVer !== v.version) {
+          versionWarned = true;   // 只提示一次，别每 1.5s 轮询都弹
           toast('发现新版本（' + v.version + '），请硬刷新页面（Ctrl+Shift+R）更新');
         }
-        try { localStorage.setItem(VER_CACHE_KEY, v.version); } catch (e) {}
       }).catch(function () {});
     } catch (e) {}
   }

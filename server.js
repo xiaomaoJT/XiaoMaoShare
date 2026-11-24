@@ -1851,19 +1851,23 @@ const onRequest = (req, res) => {
 
   // 首页
   if (method === 'GET' && (pathname === '/' || pathname === '/index.html')) {
-    fs.readFile(path.join(PUBLIC_DIR, 'index.html'), (err, buf) => {
+    fs.readFile(path.join(PUBLIC_DIR, 'index.html'), 'utf8', (err, html) => {
       if (err) {
         res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
         res.end('页面缺失：public/index.html');
         return;
       }
+      // 把页面自身版本注入 meta，前端版本探针据此比对「页面版本 vs 服务端版本」。
+      // 精确匹配 content="__APP_VERSION__"，只命中 meta 标签：JS 里还有同名字面量
+      // 作兜底判断（纯静态打开时跳过比对），绝不能被替换掉，否则兜底失效会误报。
+      html = html.replace('content="__APP_VERSION__"', 'content="' + pkg.version + '"');
       res.writeHead(200, {
         'Content-Type': 'text/html; charset=utf-8',
         // 主机停止后刷新：允许浏览器用磁盘缓存的壳页面直接渲染（不再回源验证），
         // 配合前端 localStorage 快照 + 断线提示，刷新不再白屏。300s 后自动重新验证。
         'Cache-Control': 'public, max-age=300',
       });
-      res.end(buf);
+      res.end(html);
     });
     return;
   }
