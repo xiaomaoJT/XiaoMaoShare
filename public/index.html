@@ -759,6 +759,19 @@
   .text-body a{color:var(--accent);text-decoration:none;border-bottom:1px solid rgba(76,110,245,.35)}
   .text-body a:hover{border-bottom-color:var(--accent)}
 
+  /* 链接悬停卡：显示真实域名 + 完整 URL，防短链/伪装链接钓鱼 */
+  .link-peek{
+    position:fixed;z-index:1200;max-width:min(420px,calc(100vw - 24px));
+    padding:9px 11px;border-radius:10px;background:var(--card);border:1px solid var(--line);
+    box-shadow:0 8px 28px rgba(0,0,0,.22);pointer-events:none;opacity:0;visibility:hidden;
+    transition:opacity .12s ease,transform .12s ease;transform:translateY(4px);
+    font-size:12.5px;line-height:1.5;
+  }
+  .link-peek.on{opacity:1;visibility:visible;transform:translateY(0)}
+  .link-peek .lp-host{font-weight:700;font-size:13px;margin-bottom:3px;word-break:break-all}
+  .link-peek .lp-url{color:var(--sub);word-break:break-all;overflow-wrap:anywhere;font-size:11.5px}
+  .link-peek .lp-warn{color:#e0524a;font-weight:700;margin-left:6px}
+
   /* ---- Markdown 渲染（消息卡片 / 输入预览共用） ---- */
   .md{white-space:normal;font-size:calc(14.5px * var(--tfs));line-height:1.66;word-break:break-word;overflow-wrap:anywhere}
   .md>*:first-child{margin-top:0}
@@ -2867,6 +2880,7 @@
 
 <div class="drop" id="drop"><div class="drop-in">松开即可发送</div></div>
 <div class="read-pop" id="readPop" hidden></div>
+<div class="link-peek" id="linkPeek" aria-hidden="true"><div class="lp-host"></div><div class="lp-url"></div></div>
 <div class="lightbox" id="lb">
   <button class="lb-close" id="lbClose" title="关闭 (Esc)" aria-label="关闭">✕</button>
   <button class="lb-nav lb-prev" id="lbPrev" title="上一张 (←)" aria-label="上一张">
@@ -3004,6 +3018,41 @@
     return s.replace(/</g, '%3C').replace(/>/g, '%3E').replace(/"/g, '%22').replace(/'/g, '%27');
   }
 
+  /* ---------------- 内容链接：真实域名提示 + 站内预览 / 图片灯箱 ----------------
+     链接一律带 data-xm-u（原始 URL，已 esc 过，读属性时浏览器自动还原）和
+     data-xm-k（file=站内 /f/、img=图片直链、web=其它）。点击与 hover 走 document
+     事件委托，内容卡片是 innerHTML 动态生成的，逐个绑定会漏。 */
+  var LINK_IMG_RE = /\.(png|jpe?g|gif|webp|bmp|avif|svg)$/i;
+  function linkInfo(href, label) {
+    var raw = String(href || '').trim();
+    var path = raw;
+    if (/^https?:\/\//i.test(raw)) {
+      try { var u = new URL(raw); path = u.pathname; } catch (e) {}
+    }
+    var localFile = /^\/f\/[A-Za-z0-9_-]+/i.test(path);
+    var name = String(label || '').replace(/&amp;/g, '&').split(/[?#]/)[0];
+    var isImg = LINK_IMG_RE.test(name) || LINK_IMG_RE.test(path.replace(/\?.*$/, ''));
+    return {
+      raw: raw,
+      kind: localFile ? (isImg ? 'img' : 'file') : (isImg && /^https?:/i.test(raw) ? 'img' : 'web')
+    };
+  }
+  function linkHref(info) {
+    // 站内 /f/ 保留为相对路径（点击被委托拦截，不会真的导航）
+    var m = info.raw.match(/^\/f\/[A-Za-z0-9_-]+(?:\?[^\s"'<]*)?/i) ||
+            info.raw.match(/^https?:\/\/[^\/]+\/f\/[A-Za-z0-9_-]+(?:\?[^\s"'<]*)?/i);
+    if (m && (info.kind === 'file' || info.kind === 'img')) {
+      var i = m[0].indexOf('/f/');
+      return m[0].slice(i);
+    }
+    return safeUrl(info.raw);
+  }
+  function linkTag(href, label) {
+    var info = linkInfo(href, label);
+    return '<a href="' + linkHref(info) + '" target="_blank" rel="noopener"' +
+      ' data-xm-u="' + info.raw + '" data-xm-k="' + info.kind + '">' + label + '</a>';
+  }
+
   /** 行内语法：代码、链接、粗体、斜体、删除线 */
   function mdInline(raw) {
     var slots = [];
@@ -3015,14 +3064,14 @@
     });
     // 图片语法退化成链接（不加载第三方资源）
     s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, function (m, alt, url) {
-      return '<a href="' + safeUrl(url) + '" target="_blank" rel="noopener">' + (alt || url) + '</a>';
+      return linkTag(url, alt || url);
     });
     s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, function (m, t, url) {
-      return '<a href="' + safeUrl(url) + '" target="_blank" rel="noopener">' + t + '</a>';
+      return linkTag(url, t);
     });
     s = s.replace(/(^|[\s(（])(https?:\/\/[^\s<]+)/g, function (m, pre, url) {
       var t = url.replace(/[.,;:!?)]+$/, '');
-      return pre + '<a href="' + safeUrl(t) + '" target="_blank" rel="noopener">' + t + '</a>' + url.slice(t.length);
+      return pre + linkTag(t, t) + url.slice(t.length);
     });
     s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
     s = s.replace(/(^|[^\w])__([^_]+)__(?![\w])/g, '$1<strong>$2</strong>');
@@ -3405,6 +3454,34 @@
     return { measure: measure };
   })();
 
+  /* ============================================================ 弹层栈（统一 Esc / 释放） */
+  /**
+   * 模态弹层（Dialog / 文件预览 / 图片灯箱）统一在这里登记：
+   * - 同一时刻只有最上层响应 Esc。以前三者各自挂 document keydown，嵌套时会一起关，
+   *   经常「关掉下面的弹窗」；点遮罩 / 关闭按钮仍沿用各自 DOM，不动。
+   * - capture 阶段截住 Esc，处理完就 stopPropagation，下面的旧 handler 不重复跑
+   *   （旧 handler 保留做兜底，正常路径收不到 Esc）。
+   * - onRelease 集中做资源回收（iframe 空页化、灯箱清图），close 路径统一走 release。
+   */
+  var Overlays = (function () {
+    var stack = [];
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'Escape' || e.isComposing || !stack.length) return;
+      var top = stack[stack.length - 1];
+      if (!top || typeof top.esc !== 'function') return;
+      if (top.esc() !== false) { e.preventDefault(); e.stopPropagation(); }
+    }, true);
+    return {
+      add: function (o) { o = o || {}; stack.push(o); return o; },
+      remove: function (o) { var i = stack.indexOf(o); if (i >= 0) stack.splice(i, 1); },
+      release: function (o) {
+        if (o && typeof o.onRelease === 'function') { try { o.onRelease(); } catch (err) {} }
+        this.remove(o);
+      },
+      has: function (o) { return stack.indexOf(o) >= 0; }
+    };
+  })();
+
   /* ============================================================ 弹窗组件 */
   var Dialog = (function () {
     function build(opt) {
@@ -3460,16 +3537,20 @@
         setTimeout(syncFade, 60);
 
         var closed = false;
+        // 交给弹层栈管 Esc：多个弹层嵌套时只关最上层；Enter 仍在这里处理
+        var ovEntry = Overlays.add({ esc: function () { finish(null); } });
         function finish(val) {
           if (closed) return;
           closed = true;
+          Overlays.remove(ovEntry);
           mask.classList.add('out');
           setTimeout(function () { mask.remove(); }, 170);
           document.removeEventListener('keydown', onKey);
           resolve(val);
         }
         function onKey(e) {
-          if (e.key === 'Escape') { e.preventDefault(); finish(null); return; }
+          // Esc 由 Overlays 统一处理（capture 拦截）；这里的分支作兜底，正常收不到
+          if (e.key === 'Escape' && !Overlays.has(ovEntry)) { e.preventDefault(); finish(null); return; }
           if (e.key === 'Enter' && e.target && e.target.tagName !== 'TEXTAREA') {
             var primary = bar.querySelector('.primary, .danger');
             if (primary) { e.preventDefault(); primary.click(); }
@@ -4667,6 +4748,7 @@
 
   var fpvEl = null, fpvCur = null;
   var fpvState = null;   // 当前预览的文本 / 高亮 span / 查找命中，供查找条复用
+  var fpvOvEntry = null; // 弹层栈登记项（打开时登记、关闭时移除）
 
   function fpvBuild() {
     var el = document.createElement('div');
@@ -4695,14 +4777,10 @@
         '<div class="fpv-body"></div>' +
       '</div>';
     el.addEventListener('click', function (e) { if (e.target === el) fpvClose(); });
+    // Esc 交给弹层栈统一分发（onRelease 里做 iframe 空页化）；Ctrl/Cmd+F 仍在这里
     document.addEventListener('keydown', function (e) {
       if (!el.classList.contains('on')) return;
-      if (e.key === 'Escape') {
-        // 查找条开着时，Esc 先关查找；否则关预览
-        var fb = el.querySelector('.fpv-findbar');
-        if (fb.classList.contains('on')) { fpvFindClose(); return; }
-        fpvClose();
-      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
         // 代码视图里接管 Ctrl/Cmd+F，做面板内查找
         if (fpvState && fpvState.searchable) { e.preventDefault(); fpvFindOpen(); }
       }
@@ -4817,7 +4895,12 @@
     fpvHoverClear();
     fpvCur = null;
     fpvState = null;
-    fpvClearBody();
+    if (fpvOvEntry) {
+      // 统一走栈的 release：内部 onRelease 做 iframe 空页化，再移除登记项
+      Overlays.release(fpvOvEntry); fpvOvEntry = null;
+    } else {
+      fpvClearBody();   // 没有登记项时也要清，保证幂等
+    }
   }
 
   /* ---------------- 代码语法高亮 ----------------
@@ -5180,6 +5263,16 @@
     el.classList.add('on');
     document.documentElement.classList.add('fpv-open');
     fpvCur = p.fid;
+    // 登记到弹层栈：Esc 先关查找条再关预览，关闭时统一释放 iframe
+    if (fpvOvEntry) Overlays.remove(fpvOvEntry);
+    fpvOvEntry = Overlays.add({
+      esc: function () {
+        var fb = el.querySelector('.fpv-findbar');
+        if (fb && fb.classList.contains('on')) { fpvFindClose(); return; }
+        fpvClose();
+      },
+      onRelease: fpvClearBody
+    });
 
     api('/api/file/text?id=' + encodeURIComponent(p.fid) + '&cid=' + encodeURIComponent(state.cid))
       .then(function (d) {
@@ -11632,6 +11725,7 @@
 
   // 灯箱 / 画廊查看器
   var lb = $('lb');
+  var lbOvEntry = null;   // 弹层栈登记项
   var lbList = [];        // [{ src, name }]
   var lbIndex = 0, lbMax = 1;
   var scale = 1, tx = 0, ty = 0;
@@ -11677,6 +11771,10 @@
     resetZoom();
     updateLbUI();
     lb.classList.add('on');
+    if (!lbOvEntry) lbOvEntry = Overlays.add({
+      esc: closeLb,
+      onRelease: function () { lbImg().removeAttribute('src'); }
+    });
   }
   function openLbParts(parts, index) {
     lbList = (parts || []).filter(function (p) { return p.kind === 'image'; }).map(function (p) {
@@ -11691,6 +11789,7 @@
   }
   function closeLb() {
     lb.classList.remove('on', 'grab', 'grabbing');
+    if (lbOvEntry) { Overlays.release(lbOvEntry); lbOvEntry = null; }
     lbList = []; lbMax = 1; lbIndex = 0;
     pointers.clear(); lastPt = null; pinch = null; lbMoved = false;
   }
@@ -11763,12 +11862,107 @@
 
   document.addEventListener('keydown', function (e) {
     if (!lb.classList.contains('on')) return;
-    if (e.key === 'Escape') closeLb();
-    else if (e.key === 'ArrowLeft') navLb(-1);
+    // Esc 由 Overlays 统一分发（只有它是栈顶才关）；方向键 / 缩放仍在这里
+    if (e.key === 'ArrowLeft') navLb(-1);
     else if (e.key === 'ArrowRight') navLb(1);
     else if (e.key === '+' || e.key === '=') { var c = lbCenter(); zoomAt(scale * 1.4, c[0], c[1]); }
     else if (e.key === '-' || e.key === '_') { var c2 = lbCenter(); zoomAt(scale / 1.4, c2[0], c2[1]); }
   });
+
+  /* ---------------- 内容里的链接：hover 显示真实域名 + 点击站内预览 / 图片灯箱 ----------------
+     链接由 mdInline 生成、随卡片动态插入，所以全部走 document 事件委托。 */
+  (function initLinkInteractions() {
+    var peek = $('linkPeek');
+    var peekHost = peek.querySelector('.lp-host');
+    var peekUrl = peek.querySelector('.lp-url');
+    var peekTimer = null, peekA = null;
+
+    function realHost(raw) {
+      try { return new URL(raw, location.href).hostname; } catch (e) { return ''; }
+    }
+    // 显示文字里若伪装成另一个域名（比如写成「银行官网」指向假域），标红提醒
+    function mismatch(raw, text) {
+      if (!/^https?:\/\//i.test(raw)) return false;   // 站内链接不比对域名
+      var host = realHost(raw);
+      // 只比对显示文字里「看起来像完整网址」的那部分，文件名里的点不算
+      var m = String(text || '').match(/(?:https?:\/\/)?([a-z0-9-]+(?:\.[a-z0-9-]+)+\.[a-z]{2,})/i);
+      if (!(m && host)) return false;
+      var shown = m[1].toLowerCase().replace(/^www\./, '');
+      var real = host.toLowerCase().replace(/^www\./, '');
+      return shown !== real && shown.indexOf(real) !== 0;
+    }
+    function hidePeek() {
+      if (peekTimer) { clearTimeout(peekTimer); peekTimer = null; }
+      peekA = null;
+      peek.classList.remove('on');
+    }
+    function showPeek(a) {
+      if (peekTimer) clearTimeout(peekTimer);
+      peekA = a;
+      var raw = a.getAttribute('data-xm-u') || a.href;
+      var host = realHost(raw);
+      peekHost.textContent = host || raw;
+      peekUrl.textContent = raw;
+      var warn = mismatch(raw, a.textContent);
+      var old = peek.querySelector('.lp-warn');
+      if (old) old.remove();
+      if (warn) {
+        var w = document.createElement('span');
+        w.className = 'lp-warn';
+        w.textContent = '⚠ 显示文字与真实域名不符';
+        peekHost.appendChild(w);
+      }
+      var r = a.getBoundingClientRect();
+      peek.classList.add('on');
+      var pw = peek.offsetWidth, ph = peek.offsetHeight;
+      var x = Math.min(Math.max(8, r.left), window.innerWidth - pw - 8);
+      var y = r.bottom + 8;
+      if (y + ph > window.innerHeight - 8) y = Math.max(8, r.top - ph - 8);
+      peek.style.left = x + 'px';
+      peek.style.top = y + 'px';
+    }
+    document.addEventListener('mouseover', function (e) {
+      var a = e.target.closest && e.target.closest('a[data-xm-u]');
+      if (a) { if (a !== peekA) showPeek(a); return; }
+      if (peekA) hidePeek();
+    });
+    document.addEventListener('mouseout', function (e) {
+      var a = e.target.closest && e.target.closest('a[data-xm-u]');
+      if (a && a === peekA) {
+        var to = e.relatedTarget;
+        if (!to || !to.closest || to.closest('a[data-xm-u]') !== a) {
+          peekTimer = setTimeout(hidePeek, 100);
+        }
+      }
+    });
+    window.addEventListener('scroll', hidePeek, { passive: true });
+    window.addEventListener('blur', hidePeek);
+
+    // 点击拦截：站内文件 -> fpv 预览；图片直链 -> 灯箱；其余照常新标签打开
+    document.addEventListener('click', function (e) {
+      var a = e.target.closest && e.target.closest('a[data-xm-u]');
+      if (!a || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+      var kind = a.getAttribute('data-xm-k');
+      var raw = a.getAttribute('data-xm-u') || a.href;
+      hidePeek();
+      if (kind === 'file') {
+        // /f/<fid>?cid=... —— 复用文件预览面板
+        var m = raw.match(/\/f\/([A-Za-z0-9_-]+)/);
+        if (!m) return;
+        e.preventDefault();
+        var nm = a.textContent.trim() || m[1];
+        openFilePreview({ fid: m[1], name: nm, size: 0 });
+        return;
+      }
+      if (kind === 'img') {
+        e.preventDefault();
+        var abs = /^https?:\/\//i.test(raw) ? raw : new URL(raw, location.href).href;
+        lbList = [{ src: abs, name: a.textContent.trim() || '图片' }];
+        lbMax = 1; lbIndex = 0;
+        showLb(0);
+      }
+    });
+  })();
 
   /* ============================================================ 启动 */
   /**
