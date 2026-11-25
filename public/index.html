@@ -5878,7 +5878,24 @@
       }
       head.onclick = function (e) { e.stopPropagation(); toggle(); };
       foot.onclick = function (e) { e.stopPropagation(); toggle(); };
-      grp.forEach(function (p) { kids.appendChild(fileRow(it, p)); });
+      grp.forEach(function (p) {
+        var row = fileRow(it, p);
+        // 组里的图片保留图片墙的灯箱体验：点缩略图放大，左右键在整条消息的图片间翻页
+        if (p.kind === 'image' && p.fid) {
+          var th = row.querySelector('.fico img');
+          if (th) {
+            th.style.cursor = 'zoom-in';
+            th.title = '点击大图预览';
+            th.onclick = function (e) {
+              e.stopPropagation();
+              markRead(it);
+              var idx = imgParts.indexOf(p);
+              if (idx >= 0) openLb(it, idx);
+            };
+          }
+        }
+        kids.appendChild(row);
+      });
       kids.appendChild(foot);
       paint();
       wrap.appendChild(bar);
@@ -5895,12 +5912,14 @@
         appendBodyNode(el, body);
         pi++; continue;
       }
-      if (p.kind === 'image') { run.push(p); pi++; continue; }
-      // 同目录的连续文件合成一组；只有 1 个就别套文件夹壳了
+      // 同目录的连续附件合成一组，图片也算：文件夹整夹发送时子项名字带
+      // 「目录/...」前缀，必须在这里就收住，否则图片会被下面的 flushImages
+      // 单独拎成图片墙，文件夹被拆成一堆散图 + 零散文件（整夹等于白传）。
+      // 只有 1 个就别套文件夹壳。
       var dir = folderOf(p);
       if (dir) {
         var grp = [], k = pi;
-        while (k < parts.length && parts[k].kind === 'file' && folderOf(parts[k]) === dir) {
+        while (k < parts.length && parts[k].kind !== 'text' && folderOf(parts[k]) === dir) {
           grp.push(parts[k]); k++;
         }
         if (grp.length > 1) {
@@ -5909,6 +5928,7 @@
           pi = k; continue;
         }
       }
+      if (p.kind === 'image') { run.push(p); pi++; continue; }
       flushImages();
       var fr = fileRow(it, p);
       fr.classList.add('bnode');
