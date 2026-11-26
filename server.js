@@ -3543,15 +3543,32 @@ const onRequest = (req, res) => {
     }
     let buf;
     try { buf = fs.readFileSync(filePath); } catch { return json(res, 500, { error: '读取失败' }); }
-    // 前 8KB 里出现 NUL 就按二进制处理，免得把乱码塞进界面
-    if (buf.subarray(0, 8192).includes(0)) return json(res, 415, { error: '这不是文本文件' });
+    // 解码策略：先认 BOM（UTF-16 文本每隔一个字节就是 NUL，旧版「见 NUL 就拒」
+    // 会把 Windows 记事本存的 UTF-16 .md 误判成二进制）。没 BOM 时才看 NUL 密度：
+    // 大片 NUL 才是真二进制，零星 NUL 剔掉即可，别让整个文件预览不了。
+    let text;
+    const b0 = buf[0], b1 = buf[1], b2 = buf[2];
+    if (b0 === 0xFF && b1 === 0xFE && b2 !== 0x00) {
+      text = buf.toString('utf16le');
+    } else if (b0 === 0xFE && b1 === 0xFF) {
+      const be = Buffer.from(buf);
+      for (let i = 0; i + 1 < be.length; i += 2) { const t = be[i]; be[i] = be[i + 1]; be[i + 1] = t; }
+      text = be.toString('utf16le');
+    } else {
+      const sample = buf.subarray(0, 8192);
+      let nuls = 0;
+      for (let i = 0; i < sample.length; i++) if (sample[i] === 0) nuls++;
+      if (sample.length && nuls / sample.length > 0.05) return json(res, 415, { error: '这不是文本文件' });
+      text = buf.toString('utf8').replace(/\u0000/g, '');
+    }
+    text = text.replace(/^\uFEFF/, '');   // 去掉 BOM 解码后残留的字符
     json(res, 200, {
       ok: true,
       name: nm,
       size: stat.size,
       mime,
       ext,
-      text: buf.toString('utf8'),
+      text,
     });
     return;
   }

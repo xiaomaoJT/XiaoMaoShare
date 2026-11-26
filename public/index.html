@@ -5287,14 +5287,17 @@
         if (fpvCur !== p.fid) return;
         el.querySelector('.fpv-sub').textContent = fmtSize(p.size);
         body.innerHTML = '';
+        var wrap = document.createElement('div');
+        wrap.className = 'fpv-scroll';   // 跟正常内容用同一套内边距，别让提示贴着弹窗边
         var box = document.createElement('div');
         box.className = 'fpv-err';
         box.textContent = (e && e.message) || '预览失败';
         var tip = document.createElement('div');
         tip.className = 'fpv-errtip';
         tip.textContent = '这条文件没法在页面里展开，点右上角「下载」用本地应用打开。';
-        body.appendChild(box);
-        body.appendChild(tip);
+        wrap.appendChild(box);
+        wrap.appendChild(tip);
+        body.appendChild(wrap);
       });
   }
 
